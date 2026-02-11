@@ -1,0 +1,43 @@
+{
+  "name": "@cs5224/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build --no-lint",
+    "start": "next start -p 3000",
+    "lint": "eslint app src --ext .ts,.tsx",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@cs5224/types": "workspace:*",
+    "@radix-ui/react-slot": "^1.1.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.38.3",
+    "lucide-react": "^0.469.0",
+    "next": "15.1.7",
+    "postgres": "^3.4.5",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@next/eslint-plugin-next": "15.1.7",
+    "@cs5224/eslint-config": "workspace:*",
+    "@cs5224/tsconfig": "workspace:*",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.30.1",
+    "eslint-config-next": "15.1.7",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vitest": "^2.1.8"
+  }
+}

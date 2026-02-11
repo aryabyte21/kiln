@@ -1,0 +1,31 @@
+{
+  "name": "cs5224-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "dev": "NX_DAEMON=false nx run-many -t dev --projects=web,py-api,go-api --parallel=3",
+    "dev:web": "pnpm --filter @cs5224/web dev",
+    "build": "NX_DAEMON=false nx run-many -t build --projects=types,web --parallel=2",
+    "build:all": "NX_DAEMON=false nx run-many -t build --projects=types,web,py-api,go-api --parallel=4",
+    "lint": "NX_DAEMON=false nx run-many -t lint --projects=types,web --parallel=2",
+    "lint:all": "NX_DAEMON=false nx run-many -t lint --projects=types,web,py-api,go-api --parallel=4",
+    "typecheck": "NX_DAEMON=false nx run-many -t typecheck --projects=types,web --parallel=2",
+    "test": "NX_DAEMON=false nx run-many -t test --projects=web --parallel=1",
+    "test:all": "NX_DAEMON=false nx run-many -t test --projects=web,py-api,go-api --parallel=3",
+    "format": "prettier --write .",
+    "check:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm lint:all && pnpm test:all && pnpm build:all",
+    "db:generate": "NX_DAEMON=false nx run web:db:generate",
+    "db:migrate": "NX_DAEMON=false nx run web:db:migrate",
+    "db:studio": "NX_DAEMON=false nx run web:db:studio",
+    "dev:py": ".venv/bin/python -m uvicorn app.main:app --app-dir apps/py-api --reload --port 8000 --host 0.0.0.0",
+    "dev:go": "go run ./apps/go-api/cmd/server"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "eslint": "^9.20.1",
+    "nx": "^21.5.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  }
+}

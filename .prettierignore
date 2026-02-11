@@ -1,0 +1,6 @@
+.next
+.nx
+node_modules
+apps/py-api/.venv
+apps/web/drizzle
+infra/terraform/**/.terraform

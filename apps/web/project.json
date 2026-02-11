@@ -1,0 +1,34 @@
+{
+  "name": "web",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/web",
+  "projectType": "application",
+  "targets": {
+    "dev": {
+      "command": "pnpm --filter @cs5224/web dev"
+    },
+    "build": {
+      "command": "pnpm --filter @cs5224/web build",
+      "outputs": ["{projectRoot}/.next"]
+    },
+    "lint": {
+      "command": "pnpm --filter @cs5224/web lint"
+    },
+    "typecheck": {
+      "command": "pnpm --filter @cs5224/web typecheck"
+    },
+    "test": {
+      "command": "pnpm --filter @cs5224/web test"
+    },
+    "db:generate": {
+      "command": "pnpm --filter @cs5224/web db:generate"
+    },
+    "db:migrate": {
+      "command": "pnpm --filter @cs5224/web db:migrate"
+    },
+    "db:studio": {
+      "command": "pnpm --filter @cs5224/web db:studio"
+    }
+  },
+  "tags": ["scope:web", "type:app"]
+}

@@ -1,0 +1,8 @@
+[tools]
+node = '22.13.1'
+pnpm = '10.6.2'
+python = '3.12'
+go = '1.23'
+
+[env]
+_.file = '.env'

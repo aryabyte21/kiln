@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: cs5224-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cs5224
+      POSTGRES_PASSWORD: cs5224
+      POSTGRES_DB: cs5224
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

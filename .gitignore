@@ -1,0 +1,32 @@
+# Node
+node_modules/
+.pnpm-store/
+.nx/
+.turbo/
+
+# Next.js
+.next/
+out/
+
+# Build
+coverage/
+dist/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Go
+bin/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+*.log

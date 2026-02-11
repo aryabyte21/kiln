@@ -1,0 +1,33 @@
+{
+  "name": "go-api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/go-api",
+  "projectType": "application",
+  "targets": {
+    "dev": {
+      "command": "go run ./cmd/server",
+      "options": {
+        "cwd": "apps/go-api"
+      }
+    },
+    "build": {
+      "command": "go build ./...",
+      "options": {
+        "cwd": "apps/go-api"
+      }
+    },
+    "lint": {
+      "command": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi; go vet ./...'",
+      "options": {
+        "cwd": "apps/go-api"
+      }
+    },
+    "test": {
+      "command": "go test ./...",
+      "options": {
+        "cwd": "apps/go-api"
+      }
+    }
+  },
+  "tags": ["scope:backend", "lang:go", "type:app"]
+}

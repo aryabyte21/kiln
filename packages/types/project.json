@@ -1,0 +1,19 @@
+{
+  "name": "types",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/types/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "command": "pnpm --filter @cs5224/types build",
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "lint": {
+      "command": "pnpm --filter @cs5224/types lint"
+    },
+    "typecheck": {
+      "command": "pnpm --filter @cs5224/types typecheck"
+    }
+  },
+  "tags": ["scope:shared", "type:lib"]
+}
