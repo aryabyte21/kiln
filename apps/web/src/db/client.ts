@@ -1,7 +1,19 @@
+import 'server-only';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
+import postgres, { type Sql } from 'postgres';
+import { DATABASE_URL } from './config';
+import * as schema from './schema';
 
-const connectionString = process.env.DATABASE_URL ?? 'postgres://cs5224:cs5224@localhost:5432/cs5224';
-const queryClient = postgres(connectionString, { max: 1 });
+const globalForDb = globalThis as typeof globalThis & {
+  __cs5224PostgresClient?: Sql;
+};
 
-export const db = drizzle(queryClient);
+const queryClient =
+  globalForDb.__cs5224PostgresClient ??
+  postgres(DATABASE_URL, { max: process.env.NODE_ENV === 'production' ? 10 : 1 });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForDb.__cs5224PostgresClient = queryClient;
+}
+
+export const db = drizzle(queryClient, { schema });

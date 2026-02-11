@@ -34,21 +34,26 @@ Create a new PR for the current branch with a well-crafted title and description
    - `chore(<scope>): <description>` - maintenance
 
    **Description template**:
+
    ```markdown
    ## Summary
+
    - [Key change 1]
    - [Key change 2]
 
    ## Notes for Reviewers
+
    [What to focus on, tradeoffs made, follow-up work]
 
    ## Testing & Confidence
+
    - **Risk Level**: [Low/Medium/High]
    - **Tested**: [What was tested]
    - **Known Gaps**: [What wasn't tested]
    ```
 
 6. **Create the PR**:
+
    ```bash
    gh pr create --base $BASE_BRANCH --title "<title>" --body "$(cat <<'EOF'
    <description>

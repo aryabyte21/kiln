@@ -2,11 +2,11 @@
 
 ## Read Order
 
-1. `/Users/pinetortoise/Desktop/CS5224/AGENTS.md`
+1. `CS5224/AGENTS.md`
 2. App-specific AGENTS:
-   - `/Users/pinetortoise/Desktop/CS5224/apps/web/AGENTS.md`
-   - `/Users/pinetortoise/Desktop/CS5224/apps/py-api/AGENTS.md`
-   - `/Users/pinetortoise/Desktop/CS5224/apps/go-api/AGENTS.md`
+   - `CS5224/apps/web/AGENTS.md`
+   - `CS5224/apps/py-api/AGENTS.md`
+   - `CS5224/apps/go-api/AGENTS.md`
 
 ## Directory Map
 

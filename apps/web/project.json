@@ -26,6 +26,9 @@
     "db:migrate": {
       "command": "pnpm --filter @cs5224/web db:migrate"
     },
+    "db:push": {
+      "command": "pnpm --filter @cs5224/web db:push"
+    },
     "db:studio": {
       "command": "pnpm --filter @cs5224/web db:studio"
     }

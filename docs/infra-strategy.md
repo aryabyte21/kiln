@@ -30,14 +30,14 @@ For current phase, Tanka adds cognitive load and slows iteration without strong 
 
 ## Decision Matrix: Argo CD + Kustomize/Helm vs Argo CD + Tanka
 
-| Dimension | Kustomize/Helm | Tanka (Jsonnet) |
-| --- | --- | --- |
-| Team onboarding speed | High | Medium/Low |
-| Config abstraction power | Medium | High |
-| Day-1 maintainability | High | Medium |
-| Multi-env DRY capability | Medium | High |
-| Cognitive load | Low/Medium | High |
-| Fit for this project phase | Strong | Premature |
+| Dimension                  | Kustomize/Helm | Tanka (Jsonnet) |
+| -------------------------- | -------------- | --------------- |
+| Team onboarding speed      | High           | Medium/Low      |
+| Config abstraction power   | Medium         | High            |
+| Day-1 maintainability      | High           | Medium          |
+| Multi-env DRY capability   | Medium         | High            |
+| Cognitive load             | Low/Medium     | High            |
+| Fit for this project phase | Strong         | Premature       |
 
 Recommendation: start with Kustomize/Helm and re-evaluate Tanka only if config duplication becomes a measurable bottleneck.
 

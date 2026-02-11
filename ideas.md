@@ -21,6 +21,7 @@ Users:
 Office workers, students, mall operators.
 
 Why it is good for CS5224:
+
 - Simple but meaningful machine-learning or rules-based backend.
 - Clear metrics: prediction MAE, user-reported usefulness, response latency.
 - Straightforward cost comparison: cloud managed DB + serverless vs on-prem VM + self-managed DB.
@@ -37,6 +38,7 @@ Users:
 Residents, town councils, facilities teams.
 
 Evaluation:
+
 - Incident detection delay
 - Alert precision/recall
 - Uptime and dashboard latency
@@ -53,6 +55,7 @@ Users:
 NUS students and campus planning teams.
 
 Evaluation:
+
 - Occupancy prediction error
 - Conversion from forecast view to booking/check-in action
 
@@ -68,6 +71,7 @@ Users:
 SME owners and operations managers.
 
 Evaluation:
+
 - Estimated savings quality
 - Action adoption rate
 - Time saved vs manual analysis
@@ -84,6 +88,7 @@ Users:
 Courier SMEs.
 
 Evaluation:
+
 - Delay reduction
 - Route recomputation latency
 - Cost per optimization run
@@ -91,6 +96,7 @@ Evaluation:
 ## Suggested Next Step
 
 Pick one idea this week and lock:
+
 - target users
 - top 3 features
 - evaluation metrics

@@ -26,15 +26,19 @@ Update the PR title and description for the current branch based on the actual c
    - `chore(<scope>): <description>` - maintenance
 
    **Description template**:
+
    ```markdown
    ## Summary
+
    - [Key change 1]
    - [Key change 2]
 
    ## Notes for Reviewers
+
    [What to focus on, tradeoffs made, follow-up work]
 
    ## Testing & Confidence
+
    - **Risk Level**: [Low/Medium/High]
    - **Tested**: [What was tested]
    - **Known Gaps**: [What wasn't tested]

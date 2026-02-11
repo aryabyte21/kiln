@@ -4,28 +4,61 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.6.2",
   "scripts": {
+    "// Development": "--- Start development servers ---",
     "dev": "NX_DAEMON=false nx run-many -t dev --projects=web,py-api,go-api --parallel=3",
     "dev:web": "pnpm --filter @cs5224/web dev",
+    "dev:py": ".venv/bin/python -m uvicorn app.main:app --app-dir apps/py-api --reload --port 8000 --host 0.0.0.0",
+    "dev:go": "go run ./apps/go-api/cmd/server",
+    "// Build": "--- Build for production ---",
     "build": "NX_DAEMON=false nx run-many -t build --projects=types,web --parallel=2",
     "build:all": "NX_DAEMON=false nx run-many -t build --projects=types,web,py-api,go-api --parallel=4",
+    "// Quality": "--- Code quality checks ---",
     "lint": "NX_DAEMON=false nx run-many -t lint --projects=types,web --parallel=2",
     "lint:all": "NX_DAEMON=false nx run-many -t lint --projects=types,web,py-api,go-api --parallel=4",
+    "lint:fix": "pnpm --filter @cs5224/types lint -- --fix && pnpm --filter @cs5224/web lint -- --fix && pnpm format",
     "typecheck": "NX_DAEMON=false nx run-many -t typecheck --projects=types,web --parallel=2",
     "test": "NX_DAEMON=false nx run-many -t test --projects=web --parallel=1",
     "test:all": "NX_DAEMON=false nx run-many -t test --projects=web,py-api,go-api --parallel=3",
+    "test:watch": "NX_DAEMON=false nx run-many -t test --projects=web --parallel=1 -- --watch",
     "format": "prettier --write .",
-    "check:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm lint:all && pnpm test:all && pnpm build:all",
+    "format:check": "prettier --check .",
+    "// Validation": "--- Run all checks ---",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:all": "pnpm lint:all && pnpm typecheck && pnpm test:all && pnpm build:all",
+    "ci:local": "pnpm install --frozen-lockfile && pnpm check:all",
+    "// Database": "--- Database operations ---",
     "db:generate": "NX_DAEMON=false nx run web:db:generate",
     "db:migrate": "NX_DAEMON=false nx run web:db:migrate",
     "db:studio": "NX_DAEMON=false nx run web:db:studio",
-    "dev:py": ".venv/bin/python -m uvicorn app.main:app --app-dir apps/py-api --reload --port 8000 --host 0.0.0.0",
-    "dev:go": "go run ./apps/go-api/cmd/server"
+    "db:push": "pnpm --filter @cs5224/web db:push",
+    "// Utilities": "--- Helper scripts ---",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules .nx/cache",
+    "clean:all": "pnpm clean && rm -rf .venv apps/py-api/__pycache__ apps/py-api/.pytest_cache",
+    "setup": "./scripts/quickstart.sh",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.8",
     "@types/node": "^22.13.1",
     "eslint": "^9.20.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "nx": "^21.5.2",
     "prettier": "^3.4.2",
     "typescript": "^5.7.3"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.py": [
+      ".venv/bin/ruff check --fix"
+    ]
   }
 }
