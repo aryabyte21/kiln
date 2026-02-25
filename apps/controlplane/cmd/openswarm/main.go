@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -31,12 +32,11 @@ func main() {
 	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(agentsCmd())
 	rootCmd.AddCommand(tasksCmd())
-	rootCmd.AddCommand(logsCmd())
-	rootCmd.AddCommand(scaleCmd())
-	rootCmd.AddCommand(budgetCmd())
-	rootCmd.AddCommand(genomeCmd())
+	rootCmd.AddCommand(psCmd())
 	rootCmd.AddCommand(policyCmd())
 	rootCmd.AddCommand(downCmd())
+	rootCmd.AddCommand(chatCmd())
+	rootCmd.AddCommand(sendCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -285,77 +285,40 @@ func tasksCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
-// remaining commands — stubs with real HTTP intent
+// ps — quick status
 // ---------------------------------------------------------------------------
 
-func logsCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "logs <swarm>",
-		Short: "Tail audit events",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("Tailing logs for swarm %s... (not yet implemented)\n", args[0])
-			return nil
-		},
-	}
-	cmd.Flags().String("agent", "", "Filter by agent role")
-	return cmd
-}
-
-func scaleCmd() *cobra.Command {
+func psCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "scale <swarm> <role>=<count>",
-		Short: "Scale agent replicas",
-		Args:  cobra.ExactArgs(2),
+		Use:   "ps",
+		Short: "Quick status — one line per swarm",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("Scaling in swarm %s: %s (not yet implemented)\n", args[0], args[1])
+			var swarms []domain.Swarm
+			if err := getJSON("/api/v1/swarms", &swarms); err != nil {
+				return err
+			}
+			if len(swarms) == 0 {
+				fmt.Println("No swarms running.")
+				return nil
+			}
+
+			tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(tw, "SWARM\tSTATUS\tAGENTS\tBUDGET\tAGE")
+			for _, s := range swarms {
+				age := time.Since(s.CreatedAt).Truncate(time.Second)
+				fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n",
+					s.Name, s.Status, len(s.Spec.Agents),
+					s.Spec.Budget.Total, age)
+			}
+			tw.Flush()
 			return nil
 		},
 	}
 }
 
-func budgetCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "budget <swarm>",
-		Short: "Show budget status and burn rate",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("Budget for swarm %s... (not yet implemented)\n", args[0])
-			return nil
-		},
-	}
-}
-
-func genomeCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "genome",
-		Short: "Manage agent genomes",
-	}
-
-	cmd.AddCommand(
-		&cobra.Command{Use: "list <swarm>", Short: "List genomes", Args: cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				fmt.Printf("Listing genomes for %s... (not yet implemented)\n", args[0])
-				return nil
-			}},
-		&cobra.Command{Use: "evolve <swarm> <role>", Short: "Trigger evolution", Args: cobra.ExactArgs(2),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				fmt.Printf("Evolving %s in %s... (not yet implemented)\n", args[1], args[0])
-				return nil
-			}},
-		&cobra.Command{Use: "diff <id1> <id2>", Short: "Compare genomes", Args: cobra.ExactArgs(2),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				fmt.Printf("Comparing %s and %s... (not yet implemented)\n", args[0], args[1])
-				return nil
-			}},
-		&cobra.Command{Use: "inspect <id>", Short: "Genome details", Args: cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				fmt.Printf("Genome %s... (not yet implemented)\n", args[0])
-				return nil
-			}},
-	)
-	return cmd
-}
+// ---------------------------------------------------------------------------
+// policy
+// ---------------------------------------------------------------------------
 
 func policyCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -410,8 +373,168 @@ func downCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
+// chat — interactive REPL
+// ---------------------------------------------------------------------------
+
+func chatCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "chat <swarm>/<role>",
+		Short: "Interactive chat session with an agent",
+		Long:  "Opens an interactive REPL that sends messages to an agent via the control plane chat proxy.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			parts := strings.SplitN(args[0], "/", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("usage: openswarm chat <swarm>/<role>")
+			}
+			swarmName, role := parts[0], parts[1]
+
+			containerID, err := findContainerForRole(swarmName, role)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Connected to %s/%s (container %s). Type 'exit' to quit.\n\n", swarmName, role, containerID)
+
+			scanner := bufio.NewScanner(os.Stdin)
+			for {
+				fmt.Print("> ")
+				if !scanner.Scan() {
+					break
+				}
+				input := strings.TrimSpace(scanner.Text())
+				if input == "" {
+					continue
+				}
+				if input == "exit" || input == "quit" {
+					break
+				}
+
+				chatReq := map[string]any{
+					"messages": []map[string]string{
+						{"role": "user", "content": input},
+					},
+				}
+				respBody, err := postJSONRaw(fmt.Sprintf("/api/v1/containers/%s/chat", containerID), chatReq)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					continue
+				}
+
+				var chatResp map[string]any
+				if err := json.Unmarshal(respBody, &chatResp); err != nil {
+					fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+					continue
+				}
+
+				if choices, ok := chatResp["choices"].([]any); ok && len(choices) > 0 {
+					if choice, ok := choices[0].(map[string]any); ok {
+						if msg, ok := choice["message"].(map[string]any); ok {
+							if content, ok := msg["content"].(string); ok {
+								fmt.Printf("\n%s\n\n", content)
+							}
+						}
+					}
+				}
+			}
+
+			fmt.Println("Session ended.")
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// send — one-shot message
+// ---------------------------------------------------------------------------
+
+func sendCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "send <swarm>/<role> <message>",
+		Short: "Send a one-shot message to an agent",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			parts := strings.SplitN(args[0], "/", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("usage: openswarm send <swarm>/<role> <message>")
+			}
+			swarmName, role := parts[0], parts[1]
+			message := strings.Join(args[1:], " ")
+
+			containerID, err := findContainerForRole(swarmName, role)
+			if err != nil {
+				return err
+			}
+
+			chatReq := map[string]any{
+				"messages": []map[string]string{
+					{"role": "user", "content": message},
+				},
+			}
+			respBody, err := postJSONRaw(fmt.Sprintf("/api/v1/containers/%s/chat", containerID), chatReq)
+			if err != nil {
+				return err
+			}
+
+			var chatResp map[string]any
+			if err := json.Unmarshal(respBody, &chatResp); err != nil {
+				return fmt.Errorf("parse response: %w", err)
+			}
+
+			if choices, ok := chatResp["choices"].([]any); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]any); ok {
+					if msg, ok := choice["message"].(map[string]any); ok {
+						if content, ok := msg["content"].(string); ok {
+							fmt.Println(content)
+						}
+					}
+				}
+			}
+
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
+
+func findContainerForRole(swarmName, role string) (string, error) {
+	type containerInfo struct {
+		ID   string `json:"id"`
+		Role string `json:"role"`
+	}
+	var containers []containerInfo
+	if err := getJSON(fmt.Sprintf("/api/v1/swarms/%s/containers", swarmName), &containers); err != nil {
+		return "", fmt.Errorf("list containers: %w", err)
+	}
+	for _, c := range containers {
+		if c.Role == role {
+			return c.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no container found for %s/%s", swarmName, role)
+}
+
+func postJSONRaw(path string, v any) ([]byte, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+
+	resp, err := http.Post(controlPlaneAddr+path, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to control plane at %s: %w", controlPlaneAddr, err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return body, nil
+}
 
 func postJSON(path string, v any) error {
 	data, err := json.Marshal(v)

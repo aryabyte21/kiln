@@ -42,15 +42,18 @@ type AgentHealth struct {
 
 // AgentSpec defines an agent role within a swarm manifest.
 type AgentSpec struct {
-	Name      string        `json:"name" yaml:"name"`
-	Replicas  ReplicaSpec   `json:"replicas" yaml:"replicas"`
-	Model     string        `json:"model" yaml:"model"`
-	Soul      string        `json:"soul,omitempty" yaml:"soul,omitempty"` // Inline SOUL.md content for the agent
-	Skills    []string      `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Policy    string        `json:"policy,omitempty" yaml:"policy,omitempty"`
-	DependsOn []string      `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Genome    *GenomeConfig `json:"genome,omitempty" yaml:"genome,omitempty"`
-	Resources *ResourceSpec `json:"resources,omitempty" yaml:"resources,omitempty"`
+	Name      string         `json:"name" yaml:"name"`
+	Replicas  ReplicaSpec    `json:"replicas" yaml:"replicas"`
+	Model     string         `json:"model,omitempty" yaml:"model,omitempty"`
+	Soul      string         `json:"soul,omitempty" yaml:"soul,omitempty"`
+	Skills    []string       `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Tools     []string       `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Cron      []CronJob      `json:"cron,omitempty" yaml:"cron,omitempty"`
+	Config    map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
+	Policy    string         `json:"policy,omitempty" yaml:"policy,omitempty"`
+	DependsOn []string       `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Genome    *GenomeConfig  `json:"genome,omitempty" yaml:"genome,omitempty"`
+	Resources *ResourceSpec  `json:"resources,omitempty" yaml:"resources,omitempty"`
 }
 
 // ReplicaSpec controls scaling for an agent role.

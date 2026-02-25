@@ -99,7 +99,16 @@ func (m *Manager) Reconcile(ctx context.Context, swarmName string, spec domain.S
 
 		// Scale up: spawn more instances
 		for actual < desired {
-			inst, err := m.pool.Spawn(ctx, swarmName, agentSpec.Name, agentSpec.Soul)
+			spawnCfg := pool.SpawnConfig{
+				SwarmName: swarmName,
+				Role:      agentSpec.Name,
+				SoulMD:    agentSpec.Soul,
+				Config:    agentSpec.Config,
+				Tools:     agentSpec.Tools,
+				Skills:    agentSpec.Skills,
+				Cron:      agentSpec.Cron,
+			}
+			inst, err := m.pool.Spawn(ctx, spawnCfg)
 			if err != nil {
 				slog.Error("lifecycle: spawn failed", "role", agentSpec.Name, "error", err)
 				break

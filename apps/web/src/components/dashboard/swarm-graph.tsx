@@ -15,7 +15,7 @@ import '@xyflow/react/dist/style.css';
 
 import { AgentNode, type AgentNodeData } from './agent-node';
 import { DataFlowEdge } from './data-flow-edge';
-import type { SwarmSpec } from '@/lib/api-client';
+import type { SwarmSpec, AgentSpec as ApiAgentSpec } from '@/lib/api-client';
 import type { AgentExecutionState } from '@/hooks/use-sse';
 
 const nodeTypes = { agent: AgentNode };
@@ -129,6 +129,10 @@ function buildGraph(spec: SwarmSpec): { initialNodes: Node[]; initialEdges: Edge
         status: 'pending',
         replicas: { min: agent.replicas.min, max: agent.replicas.max, current: agent.replicas.min },
         skills: agent.skills,
+        tools: agent.tools,
+        hasSoul: Boolean(agent.soul),
+        hasCron: Boolean(agent.cron && agent.cron.length > 0),
+        dependsOn: agent.dependsOn,
         executionState: 'idle',
       } satisfies AgentNodeData,
     };
@@ -147,7 +151,7 @@ function buildGraph(spec: SwarmSpec): { initialNodes: Node[]; initialEdges: Edge
 }
 
 function computeLevels(
-  agents: { name: string; dependsOn?: string[] }[],
+  agents: Pick<ApiAgentSpec, 'name' | 'dependsOn'>[],
   topology: { from: string; to: string }[]
 ): Record<string, number> {
   const deps: Record<string, string[]> = {};

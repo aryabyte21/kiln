@@ -24,21 +24,46 @@ export interface Swarm {
   updatedAt: string;
 }
 
+export interface DefaultsSpec {
+  model?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface CronJob {
+  name: string;
+  schedule: string;
+  task: string;
+}
+
 export interface SwarmSpec {
+  defaults?: DefaultsSpec;
   budget: { total: string; perTask?: string; alertAt: number; hardStop: number };
   agents: AgentSpec[];
   topology: TopologyEdge[];
   memory?: { l2?: { backend: string; ttl: number }; l3?: { backend: string; collection: string } };
+  checkpoints?: {
+    before: string;
+    tool: string;
+    requireApproval: boolean;
+    timeout?: string;
+    onTimeout?: string;
+  }[];
   audit?: { enabled: boolean; hashChaining: boolean; retentionDays: number };
 }
 
 export interface AgentSpec {
   name: string;
   replicas: { min: number; max: number; scaleOn?: string };
-  model: string;
+  model?: string;
+  soul?: string;
   skills?: string[];
+  tools?: string[];
+  cron?: CronJob[];
+  config?: Record<string, unknown>;
   policy?: string;
   dependsOn?: string[];
+  genome?: { evolution: boolean; populationSize?: number; selectionStrategy?: string };
+  resources?: { maxContextTokens?: number; maxConcurrentTasks?: number };
 }
 
 export interface TopologyEdge {
@@ -149,5 +174,33 @@ export async function chatWithContainer(
   return apiFetch<ChatResponse>(`/api/v1/containers/${containerId}/chat`, {
     method: 'POST',
     body: JSON.stringify({ messages }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Deploy (YAML validation + deployment)
+// ---------------------------------------------------------------------------
+
+export interface ValidationResult {
+  valid: string;
+  error?: string;
+}
+
+export async function validateSwarmYAML(yaml: string): Promise<ValidationResult> {
+  const controlplaneUrl = process.env.NEXT_PUBLIC_CONTROLPLANE_URL || 'http://localhost:9090';
+  const res = await fetch(`${controlplaneUrl}/api/v1/swarms/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: yaml,
+  });
+  return res.json();
+}
+
+export async function deploySwarmFromYAML(yamlBody: string): Promise<Response> {
+  const controlplaneUrl = process.env.NEXT_PUBLIC_CONTROLPLANE_URL || 'http://localhost:9090';
+  return fetch(`${controlplaneUrl}/api/v1/swarms/deploy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: yamlBody,
   });
 }

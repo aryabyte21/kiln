@@ -22,8 +22,23 @@ type Swarm struct {
 	UpdatedAt time.Time   `json:"updatedAt"`
 }
 
+// DefaultsSpec provides default configuration for all agents in the swarm.
+// Per-agent config overrides these values (deep merge, agent wins on conflict).
+type DefaultsSpec struct {
+	Model  string         `json:"model,omitempty" yaml:"model,omitempty"`
+	Config map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
+}
+
+// CronJob defines a scheduled task for an agent.
+type CronJob struct {
+	Name     string `json:"name" yaml:"name"`
+	Schedule string `json:"schedule" yaml:"schedule"` // cron expression
+	Task     string `json:"task" yaml:"task"`         // instruction for the agent
+}
+
 // SwarmSpec is the declarative specification from swarm.yaml.
 type SwarmSpec struct {
+	Defaults    *DefaultsSpec  `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Budget      BudgetSpec     `json:"budget" yaml:"budget"`
 	Agents      []AgentSpec    `json:"agents" yaml:"agents"`
 	Topology    []TopologyEdge `json:"topology,omitempty" yaml:"topology,omitempty"`

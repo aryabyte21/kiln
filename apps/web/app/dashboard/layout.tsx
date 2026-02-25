@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Zap, LayoutDashboard, Settings, Activity } from 'lucide-react';
+import { Zap, LayoutDashboard, Rocket, Settings, Activity } from 'lucide-react';
 import { UserButton } from '@/components/clerk-components';
 
 function DashboardHeader() {
@@ -10,6 +10,7 @@ function DashboardHeader() {
 
   const navItems = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/dashboard/deploy', label: 'Deploy', icon: Rocket },
     { href: '/dashboard/settings', label: 'Settings', icon: Settings },
   ];
 

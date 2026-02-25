@@ -15,6 +15,7 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/openswarm/openswarm/internal/domain"
 )
 
 // Instance represents a running OpenClaw Gateway container.
@@ -133,8 +134,19 @@ func (p *Pool) ensureNetwork(ctx context.Context) error {
 	return nil
 }
 
+// SpawnConfig holds all resolved configuration for spawning an agent.
+type SpawnConfig struct {
+	SwarmName string
+	Role      string
+	SoulMD    string
+	Config    map[string]any   // merged config (temperature, maxTokens, contextWindow)
+	Tools     []string         // tool allowlist
+	Skills    []string         // skills to install
+	Cron      []domain.CronJob // cron jobs
+}
+
 // Spawn creates a new OpenClaw Gateway container for the given role.
-func (p *Pool) Spawn(ctx context.Context, swarmName, role, soulMD string) (*Instance, error) {
+func (p *Pool) Spawn(ctx context.Context, cfg SpawnConfig) (*Instance, error) {
 	p.mu.Lock()
 	hostPort := p.nextPort
 	p.nextPort++
@@ -156,7 +168,7 @@ func (p *Pool) Spawn(ctx context.Context, swarmName, role, soulMD string) (*Inst
 	}
 
 	// Create workspace with openclaw.json config + SOUL.md
-	workDir, err := p.createWorkspace(swarmName, role, hostPort, soulMD, llmCfg)
+	workDir, err := p.createWorkspace(cfg, hostPort, llmCfg)
 	if err != nil {
 		return nil, fmt.Errorf("pool: create workspace: %w", err)
 	}
@@ -181,8 +193,8 @@ func (p *Pool) Spawn(ctx context.Context, swarmName, role, soulMD string) (*Inst
 			nat.Port(containerPort): struct{}{},
 		},
 		Labels: map[string]string{
-			"openswarm.swarm": swarmName,
-			"openswarm.role":  role,
+			"openswarm.swarm": cfg.SwarmName,
+			"openswarm.role":  cfg.Role,
 			"managed-by":      "openswarm",
 		},
 		Cmd: []string{
@@ -213,7 +225,7 @@ func (p *Pool) Spawn(ctx context.Context, swarmName, role, soulMD string) (*Inst
 		},
 	}
 
-	containerName := fmt.Sprintf("osw-%s-%s-%d", swarmName, role, hostPort)
+	containerName := fmt.Sprintf("osw-%s-%s-%d", cfg.SwarmName, cfg.Role, hostPort)
 
 	resp, err := p.docker.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, containerName)
 	if err != nil {
@@ -227,8 +239,8 @@ func (p *Pool) Spawn(ctx context.Context, swarmName, role, soulMD string) (*Inst
 
 	inst := &Instance{
 		ID:          resp.ID[:12],
-		Role:        role,
-		SwarmName:   swarmName,
+		Role:        cfg.Role,
+		SwarmName:   cfg.SwarmName,
 		Addr:        fmt.Sprintf("localhost:%d", hostPort),
 		Port:        hostPort,
 		ContainerID: resp.ID,
@@ -239,7 +251,7 @@ func (p *Pool) Spawn(ctx context.Context, swarmName, role, soulMD string) (*Inst
 	p.instances[inst.ID] = inst
 	p.mu.Unlock()
 
-	slog.Info("pool: spawned instance", "id", inst.ID, "role", role, "addr", inst.Addr)
+	slog.Info("pool: spawned instance", "id", inst.ID, "role", cfg.Role, "addr", inst.Addr)
 	return inst, nil
 }
 
@@ -447,8 +459,8 @@ func (p *Pool) Close() error {
 
 // createWorkspace generates the OpenClaw config directory with openclaw.json and SOUL.md.
 // This directory is mounted into the container as OPENCLAW_STATE_DIR.
-func (p *Pool) createWorkspace(swarmName, role string, port int, soulMD string, llm *LLMConfig) (string, error) {
-	instanceDir := filepath.Join(p.cfg.WorkspaceDir, fmt.Sprintf("%s-%s-%d", swarmName, role, port))
+func (p *Pool) createWorkspace(cfg SpawnConfig, port int, llm *LLMConfig) (string, error) {
+	instanceDir := filepath.Join(p.cfg.WorkspaceDir, fmt.Sprintf("%s-%s-%d", cfg.SwarmName, cfg.Role, port))
 	if err := os.MkdirAll(instanceDir, 0o755); err != nil {
 		return "", fmt.Errorf("create workspace dir: %w", err)
 	}
@@ -460,11 +472,41 @@ func (p *Pool) createWorkspace(swarmName, role string, port int, soulMD string, 
 	}
 
 	// Write SOUL.md into the workspace
+	soulMD := cfg.SoulMD
 	if soulMD == "" {
-		soulMD = fmt.Sprintf("You are a %s agent in the %s swarm. Complete tasks assigned to you thoroughly and accurately.", role, swarmName)
+		soulMD = fmt.Sprintf("You are a %s agent in the %s swarm. Complete tasks assigned to you thoroughly and accurately.", cfg.Role, cfg.SwarmName)
 	}
 	if err := os.WriteFile(filepath.Join(workspaceDir, "SOUL.md"), []byte(soulMD), 0o644); err != nil {
 		return "", fmt.Errorf("write SOUL.md: %w", err)
+	}
+
+	// Write cron/jobs.json if cron jobs are specified
+	if len(cfg.Cron) > 0 {
+		cronDir := filepath.Join(workspaceDir, "cron")
+		if err := os.MkdirAll(cronDir, 0o755); err != nil {
+			return "", fmt.Errorf("create cron dir: %w", err)
+		}
+		cronJSON, err := json.MarshalIndent(cfg.Cron, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("marshal cron jobs: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(cronDir, "jobs.json"), cronJSON, 0o644); err != nil {
+			return "", fmt.Errorf("write cron jobs: %w", err)
+		}
+	}
+
+	// Read contextWindow and maxTokens from merged config, with defaults
+	contextWindow := 131072
+	maxTokens := 8192
+	if v, ok := cfg.Config["contextWindow"]; ok {
+		if n, ok := toInt(v); ok {
+			contextWindow = n
+		}
+	}
+	if v, ok := cfg.Config["maxTokens"]; ok {
+		if n, ok := toInt(v); ok {
+			maxTokens = n
+		}
 	}
 
 	// Write openclaw.json — the OpenClaw config file.
@@ -475,7 +517,7 @@ func (p *Pool) createWorkspace(swarmName, role string, port int, soulMD string, 
 		apiType = "openai-completions"
 	}
 	modelRef := fmt.Sprintf("%s/%s", llm.Provider, llm.Model)
-	config := map[string]interface{}{
+	ocConfig := map[string]interface{}{
 		"gateway": map[string]interface{}{
 			"controlUi": map[string]interface{}{
 				// Required for non-loopback bind (--bind lan)
@@ -514,8 +556,8 @@ func (p *Pool) createWorkspace(swarmName, role string, port int, soulMD string, 
 							"reasoning":     false,
 							"input":         []string{"text"},
 							"cost":          map[string]interface{}{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-							"contextWindow": 131072,
-							"maxTokens":     8192,
+							"contextWindow": contextWindow,
+							"maxTokens":     maxTokens,
 						},
 					},
 				},
@@ -523,7 +565,7 @@ func (p *Pool) createWorkspace(swarmName, role string, port int, soulMD string, 
 		},
 	}
 
-	configJSON, err := json.MarshalIndent(config, "", "  ")
+	configJSON, err := json.MarshalIndent(ocConfig, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal openclaw.json: %w", err)
 	}
@@ -532,4 +574,18 @@ func (p *Pool) createWorkspace(swarmName, role string, port int, soulMD string, 
 	}
 
 	return instanceDir, nil
+}
+
+// toInt converts a value from map[string]any to int, supporting int, int64, and float64.
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	default:
+		return 0, false
+	}
 }

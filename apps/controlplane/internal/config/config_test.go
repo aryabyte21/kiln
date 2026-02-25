@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -208,6 +210,53 @@ spec:
 	}
 	if m.Spec.Failure.MaxRetries != 2 {
 		t.Errorf("failure.maxRetries = %d, want 2", m.Spec.Failure.MaxRetries)
+	}
+}
+
+func TestExampleYAMLs(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "examples")
+	examples := []struct {
+		dir       string
+		name      string
+		agentCnt  int
+		hasDefaults bool
+	}{
+		{"hello-swarm", "hello-swarm", 2, true},
+		{"customer-support", "customer-support", 3, true},
+	}
+
+	for _, ex := range examples {
+		t.Run(ex.dir, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(root, ex.dir, "swarm.yaml"))
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			m, err := ParseSwarmManifest(data)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if m.Metadata.Name != ex.name {
+				t.Errorf("name = %q, want %q", m.Metadata.Name, ex.name)
+			}
+			if len(m.Spec.Agents) != ex.agentCnt {
+				t.Errorf("agents = %d, want %d", len(m.Spec.Agents), ex.agentCnt)
+			}
+			if ex.hasDefaults && m.Spec.Defaults == nil {
+				t.Error("expected defaults, got nil")
+			}
+
+			// Verify resolve works without panic
+			resolved := ResolveAllAgents(m.Spec)
+			if len(resolved) != ex.agentCnt {
+				t.Errorf("resolved agents = %d, want %d", len(resolved), ex.agentCnt)
+			}
+			// All resolved agents must have a model
+			for _, a := range resolved {
+				if a.Model == "" {
+					t.Errorf("agent %q has empty model after resolve", a.Name)
+				}
+			}
+		})
 	}
 }
 

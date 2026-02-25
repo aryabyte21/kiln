@@ -6,6 +6,13 @@ metadata:
     env: demo
 
 spec:
+  defaults:
+    model: groq/meta-llama/llama-4-scout-17b-16e-instruct
+    config:
+      temperature: 0.7
+      maxTokens: 4096
+      contextWindow: 131072
+
   budget:
     total: '$1.00'
     alertAt: 80
@@ -14,7 +21,6 @@ spec:
   agents:
     - name: greeter
       replicas: { min: 1, max: 1 }
-      model: groq/meta-llama/llama-4-scout-17b-16e-instruct
       soul: |
         You are a friendly greeter agent. When given a topic or name,
         craft a warm, creative greeting or introduction about it.
@@ -22,11 +28,12 @@ spec:
 
     - name: formatter
       replicas: { min: 1, max: 1 }
-      model: groq/meta-llama/llama-4-scout-17b-16e-instruct
       soul: |
         You are a formatter agent. Take the greeting you receive and
         format it beautifully with markdown headers, bullet points,
         and emoji. Make it visually appealing.
+      config:
+        temperature: 0.5
       dependsOn: [greeter]
 
   topology:

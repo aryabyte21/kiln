@@ -27,6 +27,7 @@ import {
   type Swarm,
   type Agent,
   type Task,
+  type AgentSpec,
 } from '@/lib/api-client';
 
 export default function DashboardPage() {
@@ -95,6 +96,11 @@ export default function DashboardPage() {
     }
   }
 
+  /** Resolve the effective model for an agent (per-agent overrides swarm defaults). */
+  function resolveModel(agent: AgentSpec): string {
+    return agent.model || selectedSwarm?.spec.defaults?.model || 'default';
+  }
+
   if (loading) {
     return <DashboardSkeleton />;
   }
@@ -116,6 +122,8 @@ export default function DashboardPage() {
 
   const totalAgentSpecs = selectedSwarm?.spec.agents.length ?? 0;
   const totalBudget = selectedSwarm?.spec.budget.total ?? '$0.00';
+  const defaultModel = selectedSwarm?.spec.defaults?.model;
+  const topologyCount = selectedSwarm?.spec.topology?.length ?? 0;
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -123,7 +131,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">OpenSwarm Dashboard</h1>
-          <p className="text-zinc-500">Orchestrate and monitor your AI agent fleet</p>
+          <p className="text-zinc-500">Orchestrate and monitor your OpenClaw agent fleet</p>
         </div>
         <div className="flex items-center gap-3">
           {lastEvent && <span className="text-xs text-zinc-600">Last: {lastEvent.type}</span>}
@@ -137,7 +145,11 @@ export default function DashboardPage() {
           <CardContent className="py-10 text-center">
             <p className="text-zinc-500">No swarms deployed yet.</p>
             <p className="text-sm text-zinc-600 mt-2">
-              Apply a swarm manifest:{' '}
+              Deploy a swarm from the{' '}
+              <a href="/dashboard/deploy" className="text-emerald-400 underline">
+                Deploy
+              </a>{' '}
+              page or via CLI:{' '}
               <code className="bg-zinc-800 px-2 py-1 rounded">
                 openswarm apply examples/hello-swarm/swarm.yaml
               </code>
@@ -146,8 +158,32 @@ export default function DashboardPage() {
         </Card>
       ) : (
         <>
+          {/* Swarm selector (when multiple swarms) */}
+          {swarms.length > 1 && (
+            <div className="flex items-center gap-3">
+              <label htmlFor="swarm-select" className="text-sm text-zinc-400 font-medium">
+                Active Swarm
+              </label>
+              <select
+                id="swarm-select"
+                value={selectedSwarm?.name ?? ''}
+                onChange={(e) => {
+                  const swarm = swarms.find((s) => s.name === e.target.value);
+                  if (swarm) setSelectedSwarm(swarm);
+                }}
+                className="flex h-9 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+              >
+                {swarms.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name} ({s.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Stats row */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <StatsCard
               title="Swarm"
               value={selectedSwarm?.name ?? '\u2014'}
@@ -156,12 +192,21 @@ export default function DashboardPage() {
             <StatsCard
               title="Agent Roles"
               value={totalAgentSpecs.toString()}
-              description="Defined in spec"
+              description={
+                defaultModel ? `Default: ${shortenModel(defaultModel)}` : 'Defined in spec'
+              }
             />
             <StatsCard
               title="Live Agents"
               value={agents.length.toString()}
               description="Registered in cluster"
+            />
+            <StatsCard
+              title="Topology"
+              value={topologyCount.toString()}
+              description={
+                topologyCount === 1 ? '1 data flow edge' : `${topologyCount} data flow edges`
+              }
             />
             <StatsCard
               title="Budget"
@@ -173,6 +218,33 @@ export default function DashboardPage() {
               }
             />
           </div>
+
+          {/* Defaults banner */}
+          {selectedSwarm?.spec.defaults && (
+            <Card className="border-zinc-800/60 bg-zinc-900/50">
+              <CardContent className="py-3 px-4 flex items-center gap-4 text-xs text-zinc-400">
+                <span className="font-medium text-zinc-300">Swarm Defaults:</span>
+                {defaultModel && (
+                  <span>
+                    Model:{' '}
+                    <Badge variant="outline" className="text-xs ml-1">
+                      {shortenModel(defaultModel)}
+                    </Badge>
+                  </span>
+                )}
+                {selectedSwarm.spec.defaults.config && (
+                  <>
+                    {typeof selectedSwarm.spec.defaults.config.temperature === 'number' && (
+                      <span>Temp: {selectedSwarm.spec.defaults.config.temperature}</span>
+                    )}
+                    {typeof selectedSwarm.spec.defaults.config.maxTokens === 'number' && (
+                      <span>Max tokens: {selectedSwarm.spec.defaults.config.maxTokens}</span>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Sidebar panel: Task Form + Cost Gauge */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -201,7 +273,14 @@ export default function DashboardPage() {
                   <Card>
                     <CardHeader>
                       <CardTitle>Agent Specifications</CardTitle>
-                      <CardDescription>Agent roles defined in the swarm manifest</CardDescription>
+                      <CardDescription>
+                        Agent roles defined in the swarm manifest
+                        {defaultModel && (
+                          <span className="ml-2 text-zinc-500">
+                            (default model: {shortenModel(defaultModel)})
+                          </span>
+                        )}
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <Table>
@@ -210,31 +289,115 @@ export default function DashboardPage() {
                             <TableHead>Role</TableHead>
                             <TableHead>Model</TableHead>
                             <TableHead>Replicas</TableHead>
-                            <TableHead>Scale On</TableHead>
-                            <TableHead>Policy</TableHead>
-                            <TableHead>Skills</TableHead>
+                            <TableHead>Tools</TableHead>
+                            <TableHead>Features</TableHead>
+                            <TableHead>Dependencies</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {selectedSwarm?.spec.agents.map((agent) => (
                             <TableRow key={agent.name}>
-                              <TableCell className="font-medium">{agent.name}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline">{shortenModel(agent.model)}</Badge>
+                              <TableCell className="font-medium">
+                                <div className="flex items-center gap-2">
+                                  {agent.name}
+                                  {agent.soul && (
+                                    <span
+                                      className="text-violet-400 text-xs"
+                                      title="Has custom persona (soul)"
+                                    >
+                                      &#9733;
+                                    </span>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell>
-                                {agent.replicas.min}\u2013{agent.replicas.max}
+                                <Badge
+                                  variant="outline"
+                                  className={agent.model ? '' : 'text-zinc-500 border-zinc-700'}
+                                >
+                                  {shortenModel(resolveModel(agent))}
+                                  {!agent.model && defaultModel && (
+                                    <span className="ml-1 text-[10px] text-zinc-500">
+                                      (inherited)
+                                    </span>
+                                  )}
+                                </Badge>
                               </TableCell>
-                              <TableCell>{agent.replicas.scaleOn || '\u2014'}</TableCell>
-                              <TableCell>{agent.policy || 'default'}</TableCell>
+                              <TableCell>
+                                <span className="font-mono text-xs">
+                                  {agent.replicas.min}\u2013{agent.replicas.max}
+                                </span>
+                                {agent.replicas.scaleOn && (
+                                  <span className="ml-1 text-[10px] text-zinc-500">
+                                    ({agent.replicas.scaleOn})
+                                  </span>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <div className="flex gap-1 flex-wrap">
+                                  {(agent.tools || []).map((t) => (
+                                    <Badge
+                                      key={t}
+                                      variant="secondary"
+                                      className="text-xs bg-cyan-950/50 text-cyan-400 border-cyan-900/50"
+                                    >
+                                      {t}
+                                    </Badge>
+                                  ))}
                                   {(agent.skills || []).map((s) => (
                                     <Badge key={s} variant="secondary" className="text-xs">
                                       {s}
                                     </Badge>
                                   ))}
+                                  {!agent.tools?.length && !agent.skills?.length && (
+                                    <span className="text-xs text-zinc-600">\u2014</span>
+                                  )}
                                 </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex gap-1 flex-wrap">
+                                  {agent.cron && agent.cron.length > 0 && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs text-amber-400 border-amber-900/50"
+                                      title={agent.cron
+                                        .map((c) => `${c.name}: ${c.schedule}`)
+                                        .join('\n')}
+                                    >
+                                      &#8986; {agent.cron.length} cron
+                                    </Badge>
+                                  )}
+                                  {agent.policy && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {agent.policy}
+                                    </Badge>
+                                  )}
+                                  {agent.genome?.evolution && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs text-emerald-400 border-emerald-900/50"
+                                    >
+                                      &#9734; genetics
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {agent.dependsOn && agent.dependsOn.length > 0 ? (
+                                  <div className="flex gap-1 flex-wrap">
+                                    {agent.dependsOn.map((dep) => (
+                                      <Badge
+                                        key={dep}
+                                        variant="outline"
+                                        className="text-xs text-zinc-400"
+                                      >
+                                        \u2190 {dep}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-zinc-600">\u2014</span>
+                                )}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -345,24 +508,28 @@ export default function DashboardPage() {
                       <CardDescription>Data flow between agents via NATS subjects</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>From</TableHead>
-                            <TableHead>To</TableHead>
-                            <TableHead>NATS Subject</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(selectedSwarm?.spec.topology || []).map((edge, i) => (
-                            <TableRow key={i}>
-                              <TableCell className="font-medium">{edge.from}</TableCell>
-                              <TableCell className="font-medium">{edge.to}</TableCell>
-                              <TableCell className="font-mono text-xs">{edge.subject}</TableCell>
+                      {(selectedSwarm?.spec.topology?.length ?? 0) === 0 ? (
+                        <p className="text-zinc-500 text-center py-6">No topology edges defined.</p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>From</TableHead>
+                              <TableHead>To</TableHead>
+                              <TableHead>NATS Subject</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {(selectedSwarm?.spec.topology || []).map((edge, i) => (
+                              <TableRow key={i}>
+                                <TableCell className="font-medium">{edge.from}</TableCell>
+                                <TableCell className="font-medium">{edge.to}</TableCell>
+                                <TableCell className="font-mono text-xs">{edge.subject}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -380,6 +547,59 @@ export default function DashboardPage() {
                 <>
                   <TaskForm swarmName={selectedSwarm.name} agentRoles={agentRoles} />
                   <CostGauge budget={budget} specBudget={selectedSwarm.spec.budget} />
+
+                  {/* Swarm config summary */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg">Swarm Config</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-xs text-zinc-400">
+                      {selectedSwarm.spec.audit?.enabled && (
+                        <div className="flex items-center justify-between">
+                          <span>Audit</span>
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-emerald-400 border-emerald-900/50"
+                          >
+                            {selectedSwarm.spec.audit.hashChaining ? 'Hash-chained' : 'Enabled'}
+                          </Badge>
+                        </div>
+                      )}
+                      {selectedSwarm.spec.memory?.l2 && (
+                        <div className="flex items-center justify-between">
+                          <span>L2 Memory</span>
+                          <span className="text-zinc-300">
+                            {selectedSwarm.spec.memory.l2.backend} (TTL:{' '}
+                            {selectedSwarm.spec.memory.l2.ttl}s)
+                          </span>
+                        </div>
+                      )}
+                      {selectedSwarm.spec.memory?.l3 && (
+                        <div className="flex items-center justify-between">
+                          <span>L3 Memory</span>
+                          <span className="text-zinc-300">
+                            {selectedSwarm.spec.memory.l3.backend}:{' '}
+                            {selectedSwarm.spec.memory.l3.collection}
+                          </span>
+                        </div>
+                      )}
+                      {selectedSwarm.spec.checkpoints &&
+                        selectedSwarm.spec.checkpoints.length > 0 && (
+                          <div className="flex items-center justify-between">
+                            <span>Checkpoints</span>
+                            <span className="text-zinc-300">
+                              {selectedSwarm.spec.checkpoints.length} human-in-the-loop
+                            </span>
+                          </div>
+                        )}
+                      <div className="flex items-center justify-between">
+                        <span>Created</span>
+                        <span className="text-zinc-300">
+                          {new Date(selectedSwarm.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </>
               )}
             </div>
@@ -457,8 +677,8 @@ function DashboardSkeleton() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <Skeleton className="h-10 w-64" />
-      <div className="grid grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
+      <div className="grid grid-cols-5 gap-4">
+        {[...Array(5)].map((_, i) => (
           <Skeleton key={i} className="h-24" />
         ))}
       </div>
@@ -467,9 +687,13 @@ function DashboardSkeleton() {
   );
 }
 
-function shortenModel(model: string): string {
+function shortenModel(model: string | undefined): string {
+  if (!model) return 'default';
   if (model.includes('haiku')) return 'Haiku';
   if (model.includes('sonnet')) return 'Sonnet';
   if (model.includes('opus')) return 'Opus';
+  if (model.includes('llama')) return model.split('/').pop() || 'Llama';
+  if (model.includes('groq')) return model.split('/').pop() || model;
+  if (model.includes('/')) return model.split('/').pop() || model;
   return model;
 }

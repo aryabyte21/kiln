@@ -109,8 +109,8 @@ func validateSwarmManifest(m *domain.SwarmManifest) error {
 		}
 		agentNames[a.Name] = true
 
-		if a.Model == "" {
-			return fmt.Errorf("spec.agents[%d].model is required", i)
+		if a.Model == "" && (m.Spec.Defaults == nil || m.Spec.Defaults.Model == "") {
+			return fmt.Errorf("spec.agents[%d].model is required (no spec.defaults.model set)", i)
 		}
 		if a.Replicas.Min < 0 {
 			return fmt.Errorf("spec.agents[%d].replicas.min must be >= 0", i)

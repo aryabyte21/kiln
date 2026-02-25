@@ -7,10 +7,14 @@ import type { AgentExecutionState } from '@/hooks/use-sse';
 export interface AgentNodeData {
   label: string;
   role: string;
-  model: string;
+  model?: string;
   status: 'pending' | 'online' | 'busy' | 'draining' | 'offline' | 'error';
   replicas: { min: number; max: number; current: number };
   skills?: string[];
+  tools?: string[];
+  hasSoul?: boolean;
+  hasCron?: boolean;
+  dependsOn?: string[];
   executionState?: AgentExecutionState;
   tokenCount?: number;
   [key: string]: unknown;
@@ -112,6 +116,45 @@ function AgentNodeComponent({ data }: NodeProps) {
               <span className="font-mono">{nodeData.tokenCount.toLocaleString()}</span>
             </div>
           )}
+        {/* Indicators row: soul, cron, dependencies */}
+        {(nodeData.hasSoul ||
+          nodeData.hasCron ||
+          (nodeData.dependsOn && nodeData.dependsOn.length > 0)) && (
+          <div className="flex items-center gap-1.5 pt-1">
+            {nodeData.hasSoul && (
+              <span className="text-[10px] text-violet-400" title="Has SOUL.md persona">
+                &#9733; soul
+              </span>
+            )}
+            {nodeData.hasCron && (
+              <span className="text-[10px] text-amber-400" title="Has scheduled cron jobs">
+                &#8986; cron
+              </span>
+            )}
+            {nodeData.dependsOn && nodeData.dependsOn.length > 0 && (
+              <span
+                className="text-[10px] text-zinc-500"
+                title={`Depends on: ${nodeData.dependsOn.join(', ')}`}
+              >
+                &#8592; {nodeData.dependsOn.join(', ')}
+              </span>
+            )}
+          </div>
+        )}
+        {/* Tools badges */}
+        {nodeData.tools && nodeData.tools.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {nodeData.tools.map((t: string) => (
+              <span
+                key={t}
+                className="bg-cyan-950 text-cyan-400 text-[10px] px-1.5 py-0.5 rounded border border-cyan-900/50"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Skills badges */}
         {nodeData.skills && nodeData.skills.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {nodeData.skills.map((s: string) => (
@@ -132,10 +175,13 @@ function AgentNodeComponent({ data }: NodeProps) {
   );
 }
 
-function shortenModel(model: string): string {
+function shortenModel(model: string | undefined): string {
+  if (!model) return 'default';
   if (model.includes('haiku')) return 'Haiku';
   if (model.includes('sonnet')) return 'Sonnet';
   if (model.includes('opus')) return 'Opus';
+  if (model.includes('llama')) return 'Llama';
+  if (model.includes('/')) return model.split('/').pop() || model;
   return model.split('-').slice(0, 2).join('-');
 }
 
