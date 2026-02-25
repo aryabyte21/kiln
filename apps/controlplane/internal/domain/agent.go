@@ -30,23 +30,23 @@ type Agent struct {
 
 // AgentHealth holds real-time health metrics reported by heartbeats.
 type AgentHealth struct {
-	AgentID      string  `json:"agentId"`
-	ContextUsed  int     `json:"contextUsed"`  // tokens currently in context window
-	QueueDepth   int     `json:"queueDepth"`   // tasks waiting
-	HealthScore  float64 `json:"healthScore"`  // 0.0-1.0
-	CostSession  float64 `json:"costSession"`  // USD spent this session
-	CurrentTask  string  `json:"currentTask,omitempty"`
+	AgentID      string    `json:"agentId"`
+	ContextUsed  int       `json:"contextUsed"` // tokens currently in context window
+	QueueDepth   int       `json:"queueDepth"`  // tasks waiting
+	HealthScore  float64   `json:"healthScore"` // 0.0-1.0
+	CostSession  float64   `json:"costSession"` // USD spent this session
+	CurrentTask  string    `json:"currentTask,omitempty"`
 	LastReported time.Time `json:"lastReported"`
 }
 
 // AgentSpec defines an agent role within a swarm manifest.
 type AgentSpec struct {
-	Name      string       `json:"name" yaml:"name"`
-	Replicas  ReplicaSpec  `json:"replicas" yaml:"replicas"`
-	Model     string       `json:"model" yaml:"model"`
-	Skills    []string     `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Policy    string       `json:"policy,omitempty" yaml:"policy,omitempty"`
-	DependsOn []string     `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Name      string        `json:"name" yaml:"name"`
+	Replicas  ReplicaSpec   `json:"replicas" yaml:"replicas"`
+	Model     string        `json:"model" yaml:"model"`
+	Skills    []string      `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Policy    string        `json:"policy,omitempty" yaml:"policy,omitempty"`
+	DependsOn []string      `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 	Genome    *GenomeConfig `json:"genome,omitempty" yaml:"genome,omitempty"`
 	Resources *ResourceSpec `json:"resources,omitempty" yaml:"resources,omitempty"`
 }
@@ -60,6 +60,6 @@ type ReplicaSpec struct {
 
 // ResourceSpec defines resource limits for an agent.
 type ResourceSpec struct {
-	MaxContextTokens  int `json:"maxContextTokens,omitempty" yaml:"maxContextTokens,omitempty"`
+	MaxContextTokens   int `json:"maxContextTokens,omitempty" yaml:"maxContextTokens,omitempty"`
 	MaxConcurrentTasks int `json:"maxConcurrentTasks,omitempty" yaml:"maxConcurrentTasks,omitempty"`
 }

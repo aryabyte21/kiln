@@ -6,10 +6,10 @@ import "time"
 type SwarmStatus string
 
 const (
-	SwarmStatusPending  SwarmStatus = "pending"
-	SwarmStatusRunning  SwarmStatus = "running"
-	SwarmStatusStopped  SwarmStatus = "stopped"
-	SwarmStatusError    SwarmStatus = "error"
+	SwarmStatusPending SwarmStatus = "pending"
+	SwarmStatusRunning SwarmStatus = "running"
+	SwarmStatusStopped SwarmStatus = "stopped"
+	SwarmStatusError   SwarmStatus = "error"
 )
 
 // Swarm is the top-level orchestration unit — a fleet of agents working together.
@@ -24,20 +24,20 @@ type Swarm struct {
 
 // SwarmSpec is the declarative specification from swarm.yaml.
 type SwarmSpec struct {
-	Budget      BudgetSpec      `json:"budget" yaml:"budget"`
-	Agents      []AgentSpec     `json:"agents" yaml:"agents"`
-	Topology    []TopologyEdge  `json:"topology,omitempty" yaml:"topology,omitempty"`
-	Memory      *MemorySpec     `json:"memory,omitempty" yaml:"memory,omitempty"`
-	Checkpoints []Checkpoint    `json:"checkpoints,omitempty" yaml:"checkpoints,omitempty"`
-	Audit       *AuditSpec      `json:"audit,omitempty" yaml:"audit,omitempty"`
+	Budget      BudgetSpec     `json:"budget" yaml:"budget"`
+	Agents      []AgentSpec    `json:"agents" yaml:"agents"`
+	Topology    []TopologyEdge `json:"topology,omitempty" yaml:"topology,omitempty"`
+	Memory      *MemorySpec    `json:"memory,omitempty" yaml:"memory,omitempty"`
+	Checkpoints []Checkpoint   `json:"checkpoints,omitempty" yaml:"checkpoints,omitempty"`
+	Audit       *AuditSpec     `json:"audit,omitempty" yaml:"audit,omitempty"`
 }
 
 // SwarmManifest is the full YAML document structure.
 type SwarmManifest struct {
-	APIVersion string            `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string            `json:"kind" yaml:"kind"`
-	Metadata   ManifestMetadata  `json:"metadata" yaml:"metadata"`
-	Spec       SwarmSpec         `json:"spec" yaml:"spec"`
+	APIVersion string           `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string           `json:"kind" yaml:"kind"`
+	Metadata   ManifestMetadata `json:"metadata" yaml:"metadata"`
+	Spec       SwarmSpec        `json:"spec" yaml:"spec"`
 }
 
 // ManifestMetadata holds identification and labeling.
@@ -48,7 +48,7 @@ type ManifestMetadata struct {
 
 // BudgetSpec controls cost limits for a swarm.
 type BudgetSpec struct {
-	Total    string `json:"total" yaml:"total"`       // e.g. "$2.00"
+	Total    string `json:"total" yaml:"total"` // e.g. "$2.00"
 	PerTask  string `json:"perTask,omitempty" yaml:"perTask,omitempty"`
 	AlertAt  int    `json:"alertAt" yaml:"alertAt"`   // percentage
 	HardStop int    `json:"hardStop" yaml:"hardStop"` // percentage
@@ -73,7 +73,7 @@ type L2MemorySpec struct {
 }
 
 type L3MemorySpec struct {
-	Backend    string `json:"backend" yaml:"backend"`       // pgvector
+	Backend    string `json:"backend" yaml:"backend"` // pgvector
 	Collection string `json:"collection" yaml:"collection"`
 }
 

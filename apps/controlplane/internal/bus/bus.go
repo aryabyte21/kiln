@@ -252,9 +252,9 @@ type coreMsg struct {
 	m *nats.Msg
 }
 
-func (c *coreMsg) Data() []byte      { return c.m.Data }
-func (c *coreMsg) Subject() string   { return c.m.Subject }
-func (c *coreMsg) Reply() string     { return c.m.Reply }
+func (c *coreMsg) Data() []byte         { return c.m.Data }
+func (c *coreMsg) Subject() string      { return c.m.Subject }
+func (c *coreMsg) Reply() string        { return c.m.Reply }
 func (c *coreMsg) Headers() nats.Header { return c.m.Header }
 
 func (c *coreMsg) Metadata() (*jetstream.MsgMetadata, error) {
@@ -262,10 +262,10 @@ func (c *coreMsg) Metadata() (*jetstream.MsgMetadata, error) {
 }
 
 // Ack-family methods are no-ops for core NATS messages.
-func (c *coreMsg) Ack() error                             { return nil }
-func (c *coreMsg) DoubleAck(_ context.Context) error      { return nil }
-func (c *coreMsg) Nak() error                             { return nil }
-func (c *coreMsg) NakWithDelay(_ time.Duration) error     { return nil }
-func (c *coreMsg) InProgress() error                      { return nil }
-func (c *coreMsg) Term() error                            { return nil }
-func (c *coreMsg) TermWithReason(_ string) error          { return nil }
+func (c *coreMsg) Ack() error                         { return nil }
+func (c *coreMsg) DoubleAck(_ context.Context) error  { return nil }
+func (c *coreMsg) Nak() error                         { return nil }
+func (c *coreMsg) NakWithDelay(_ time.Duration) error { return nil }
+func (c *coreMsg) InProgress() error                  { return nil }
+func (c *coreMsg) Term() error                        { return nil }
+func (c *coreMsg) TermWithReason(_ string) error      { return nil }

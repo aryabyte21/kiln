@@ -278,12 +278,24 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 // Budget, Audit, Genetics — stubs
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleGetBudget(w http.ResponseWriter, r *http.Request)     { writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"}) }
-func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request)      { writeJSON(w, http.StatusOK, []any{}) }
-func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request)   { writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"}) }
-func (s *Server) handleListGenomes(w http.ResponseWriter, r *http.Request)   { writeJSON(w, http.StatusOK, []any{}) }
-func (s *Server) handleEvolveGenomes(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"}) }
-func (s *Server) handleGetGenome(w http.ResponseWriter, r *http.Request)     { writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"}) }
+func (s *Server) handleGetBudget(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+}
+func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []any{})
+}
+func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+}
+func (s *Server) handleListGenomes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []any{})
+}
+func (s *Server) handleEvolveGenomes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+}
+func (s *Server) handleGetGenome(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+}
 
 // ---------------------------------------------------------------------------
 // Policies

@@ -23,8 +23,8 @@ type Genome struct {
 
 // GenomeGenes are the evolvable parameters of an agent.
 type GenomeGenes struct {
-	SoulMD       string            `json:"soulMd"`       // SOUL.md content
-	AgentsMD     string            `json:"agentsMd"`     // AGENTS.md content
+	SoulMD       string            `json:"soulMd"`   // SOUL.md content
+	AgentsMD     string            `json:"agentsMd"` // AGENTS.md content
 	Temperature  float64           `json:"temperature"`
 	TopP         float64           `json:"topP"`
 	Model        string            `json:"model"`
