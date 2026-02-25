@@ -5,17 +5,17 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'OpenSwarm Dashboard',
+    default: 'OpenSwarm',
     template: '%s | OpenSwarm',
   },
-  description: 'Kubernetes-like orchestrator for AI agent fleets',
-  keywords: ['OpenSwarm', 'AI Agents', 'Orchestration', 'Cloud Computing', 'CS5224'],
-  authors: [{ name: 'CS5224 Team' }],
+  description: 'Kubernetes-like orchestrator for fleets of OpenClaw AI agent instances',
+  keywords: ['OpenSwarm', 'AI agents', 'orchestrator', 'OpenClaw', 'NATS', 'Cloud Computing'],
+  authors: [{ name: 'OpenSwarm' }],
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    title: 'OpenSwarm Dashboard',
-    description: 'Kubernetes-like orchestrator for AI agent fleets',
+    title: 'OpenSwarm',
+    description: 'Kubernetes-like orchestrator for fleets of OpenClaw AI agent instances',
     siteName: 'OpenSwarm',
   },
 };

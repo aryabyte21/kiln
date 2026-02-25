@@ -1,122 +1,108 @@
 import Link from 'next/link';
-import { ArrowRight, Database, Server, Sparkles } from 'lucide-react';
+import { ArrowRight, Zap, Network, Brain, DollarSign, BarChart3, GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
-import { fetchServiceStatuses } from '@/lib/services';
 
-export default async function HomePage() {
-  const services = await fetchServiceStatuses();
+const features = [
+  {
+    icon: Network,
+    title: 'Swarm Orchestration',
+    description:
+      'Declare agent fleets in YAML. OpenSwarm handles scheduling, scaling, and lifecycle.',
+    color: 'text-blue-500',
+    bg: 'bg-blue-500/10',
+  },
+  {
+    icon: Brain,
+    title: 'Inter-Agent Messaging',
+    description:
+      'NATS JetStream pipelines connect agents in DAGs with persistent, at-least-once delivery.',
+    color: 'text-purple-500',
+    bg: 'bg-purple-500/10',
+  },
+  {
+    icon: DollarSign,
+    title: 'Cost Tracking',
+    description: 'Per-task token and cost tracking with budget limits and bankruptcy protection.',
+    color: 'text-emerald-500',
+    bg: 'bg-emerald-500/10',
+  },
+  {
+    icon: BarChart3,
+    title: 'Live Dashboard',
+    description: 'React Flow DAG visualization with real-time SSE updates for agents and tasks.',
+    color: 'text-orange-500',
+    bg: 'bg-orange-500/10',
+  },
+  {
+    icon: GitBranch,
+    title: 'Agent Genetics',
+    description: 'Evolve agent prompts over generations using fitness metrics and crossover.',
+    color: 'text-pink-500',
+    bg: 'bg-pink-500/10',
+  },
+  {
+    icon: Zap,
+    title: 'Auto-Scaling',
+    description: 'Scale agents based on queue depth, token utilization, or latency triggers.',
+    color: 'text-yellow-500',
+    bg: 'bg-yellow-500/10',
+  },
+];
 
+export default function HomePage() {
   return (
     <main className="mx-auto max-w-7xl p-6 md:p-10">
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="rounded-3xl border-2 bg-gradient-to-br from-background via-background to-muted/20 p-8 md:p-12 shadow-lg">
         <div className="flex items-center gap-2 mb-4">
           <Badge variant="outline" className="text-xs font-semibold">
-            CS5224 Project
+            CS5224
           </Badge>
-          <Badge className="text-xs">Spring 2026</Badge>
+          <Badge className="text-xs">Open Source</Badge>
         </div>
 
         <h1 className="text-5xl font-bold tracking-tight md:text-6xl lg:text-7xl bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-          Cloud SaaS Starter
+          OpenSwarm
         </h1>
 
         <p className="mt-6 max-w-3xl text-lg text-muted-foreground leading-relaxed">
-          A production-ready polyglot monorepo for building and comparing cloud-native SaaS
-          applications. Features Next.js 15 with React 19, FastAPI, Go services, and complete DevOps
-          tooling.
+          Kubernetes-like orchestrator for fleets of AI agent instances. Declare your agent topology
+          in YAML, and OpenSwarm handles scheduling, messaging, cost tracking, and auto-scaling.
         </p>
 
         <div className="mt-8 flex flex-wrap gap-4">
           <Button size="lg" asChild>
-            <Link href="/showcase">
-              <Sparkles className="h-5 w-5" />
-              View Component Showcase
+            <Link href="/dashboard">
+              <Zap className="h-5 w-5" />
+              Open Dashboard
               <ArrowRight className="h-5 w-5" />
             </Link>
           </Button>
           <Button size="lg" variant="outline" asChild>
-            <Link href="https://github.com" target="_blank">
-              Documentation
+            <Link href="https://github.com/aryabyte21/openswarm" target="_blank">
+              GitHub
             </Link>
           </Button>
         </div>
       </section>
 
-      {/* Features Grid */}
+      {/* Features */}
       <section className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <Card className="border-2">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Server className="h-5 w-5 text-primary" />
+        {features.map((f) => (
+          <Card key={f.title} className="border-2">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${f.bg}`}>
+                  <f.icon className={`h-5 w-5 ${f.color}`} />
+                </div>
+                <CardTitle>{f.title}</CardTitle>
               </div>
-              <CardTitle>Service Health</CardTitle>
-            </div>
-            <CardDescription>Real-time monitoring of all backend services</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableBody>
-                {services.map((service) => (
-                  <TableRow key={service.name}>
-                    <TableCell className="font-medium">{service.name}</TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant={service.status === 'up' ? 'default' : 'destructive'}>
-                        {service.status.toUpperCase()}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <Card className="border-2">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                <Database className="h-5 w-5 text-blue-500" />
-              </div>
-              <CardTitle>Database Layer</CardTitle>
-            </div>
-            <CardDescription>Drizzle ORM with PostgreSQL</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-md bg-muted p-3">
-              <p className="text-xs font-mono text-muted-foreground">src/db/schema/index.ts</p>
-            </div>
-            <div className="space-y-2 text-sm text-muted-foreground">
-              <p>✓ Type-safe schema definitions</p>
-              <p>✓ Automatic migration generation</p>
-              <p>✓ Studio UI for data management</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-2">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-                <Sparkles className="h-5 w-5 text-green-500" />
-              </div>
-              <CardTitle>Modern Stack</CardTitle>
-            </div>
-            <CardDescription>Latest tools and best practices</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>• Next.js 15 + React 19</p>
-            <p>• shadcn/ui + Tailwind CSS</p>
-            <p>• FastAPI + Go services</p>
-            <p>• Nx monorepo orchestration</p>
-            <p>• mise for runtime management</p>
-            <p>• Husky + lint-staged pre-commit</p>
-          </CardContent>
-        </Card>
+              <CardDescription>{f.description}</CardDescription>
+            </CardHeader>
+          </Card>
+        ))}
       </section>
 
       {/* Quick Start */}
@@ -124,24 +110,31 @@ export default async function HomePage() {
         <Card className="border-2">
           <CardHeader>
             <CardTitle className="text-2xl">Quick Start</CardTitle>
-            <CardDescription>Get up and running in 2 minutes</CardDescription>
+            <CardDescription>Get a swarm running in under 5 minutes</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="rounded-lg bg-muted p-4 font-mono text-sm">
-                <div className="text-muted-foreground"># Install runtimes and dependencies</div>
-                <div className="text-foreground">mise install && pnpm install</div>
-                <div className="mt-3 text-muted-foreground"># Setup Python environment</div>
-                <div className="text-foreground">
-                  python -m venv .venv && .venv/bin/pip install -r apps/py-api/requirements-dev.txt
+              <div className="rounded-lg bg-muted p-4 font-mono text-sm space-y-3">
+                <div>
+                  <div className="text-muted-foreground"># Start infrastructure</div>
+                  <div className="text-foreground">docker compose up -d</div>
                 </div>
-                <div className="mt-3 text-muted-foreground"># Start all services</div>
-                <div className="text-foreground">docker compose up -d && pnpm dev</div>
+                <div>
+                  <div className="text-muted-foreground"># Start the control plane</div>
+                  <div className="text-foreground">
+                    go run ./apps/controlplane/cmd/openswarm-controller
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground"># Deploy a swarm</div>
+                  <div className="text-foreground">
+                    openswarm apply -f examples/news-pipeline/swarm.yaml
+                  </div>
+                </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Web runs on <span className="font-mono">:3000</span>, FastAPI on{' '}
-                <span className="font-mono">:8000</span>, Go on{' '}
-                <span className="font-mono">:8080</span>
+                Dashboard on <span className="font-mono">:3000</span>, control plane on{' '}
+                <span className="font-mono">:9090</span>
               </p>
             </div>
           </CardContent>

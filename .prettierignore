@@ -2,8 +2,6 @@
 .nx
 node_modules
 pnpm-lock.yaml
-apps/py-api/.venv
 apps/controlplane
 apps/web/drizzle
-infra/terraform/**/.terraform
 dist
