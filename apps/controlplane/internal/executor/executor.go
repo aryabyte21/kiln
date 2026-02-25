@@ -1,12 +1,13 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
-	"math/rand"
-	"strings"
+	"net/http"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -14,22 +15,46 @@ import (
 	"github.com/openswarm/openswarm/internal/budget"
 	"github.com/openswarm/openswarm/internal/bus"
 	"github.com/openswarm/openswarm/internal/domain"
+	"github.com/openswarm/openswarm/internal/pool"
 	"github.com/openswarm/openswarm/internal/registry"
 	"github.com/openswarm/openswarm/internal/sse"
 	"github.com/openswarm/openswarm/internal/store"
 )
 
+// Config holds executor configuration.
+type Config struct {
+	GatewayToken string        // Bearer token for OpenClaw instances
+	HTTPTimeout  time.Duration // Timeout for LLM calls (default 120s)
+}
+
+// Executor sends tasks to real OpenClaw instances via HTTP.
 type Executor struct {
 	store    *store.Store
 	registry *registry.Registry
+	pool     *pool.Pool
 	bus      *bus.Bus
 	budget   *budget.Tracker
 	hub      *sse.Hub
+	cfg      Config
+	client   *http.Client
 	cancel   context.CancelFunc
 }
 
-func New(st *store.Store, reg *registry.Registry, b *bus.Bus, bt *budget.Tracker, hub *sse.Hub) *Executor {
-	return &Executor{store: st, registry: reg, bus: b, budget: bt, hub: hub}
+// New creates an Executor that sends real HTTP requests to OpenClaw.
+func New(st *store.Store, reg *registry.Registry, p *pool.Pool, b *bus.Bus, bt *budget.Tracker, hub *sse.Hub, cfg Config) *Executor {
+	if cfg.HTTPTimeout == 0 {
+		cfg.HTTPTimeout = 120 * time.Second
+	}
+	return &Executor{
+		store:    st,
+		registry: reg,
+		pool:     p,
+		bus:      b,
+		budget:   bt,
+		hub:      hub,
+		cfg:      cfg,
+		client:   &http.Client{Timeout: cfg.HTTPTimeout},
+	}
 }
 
 func (e *Executor) Start(ctx context.Context) error {
@@ -49,7 +74,7 @@ func (e *Executor) Start(ctx context.Context) error {
 		return fmt.Errorf("executor: subscribe pipeline: %w", err)
 	}
 
-	slog.Info("executor: started")
+	slog.Info("executor: started (real OpenClaw mode)")
 	return nil
 }
 
@@ -59,6 +84,7 @@ func (e *Executor) Stop() {
 	}
 }
 
+// handleAssignment receives an assigned task and executes it via a real OpenClaw instance.
 func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 	var task domain.Task
 	if err := json.Unmarshal(msg.Data(), &task); err != nil {
@@ -67,7 +93,7 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	slog.Info("executor: executing task", "id", task.ID, "role", task.AgentRole)
+	slog.Info("executor: executing task", "id", task.ID, "role", task.AgentRole, "agent", task.AssignedAgent)
 
 	// Check budget
 	budgetState, err := e.budget.GetBudget(ctx, task.SwarmName)
@@ -83,27 +109,49 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 
 	_ = e.store.UpdateTaskStatus(ctx, task.ID, domain.TaskStatusRunning, task.AssignedAgent)
 
-	// Broadcast task running event to dashboard
+	// Broadcast task running event
 	e.hub.Broadcast(task.SwarmName, sse.Event{
 		Type: "task_running",
 		Data: map[string]string{"taskId": task.ID, "agentRole": task.AgentRole, "agentId": task.AssignedAgent},
 	})
 
-	// Simulate LLM execution
-	delay := time.Duration(200+rand.Intn(600)) * time.Millisecond
-	time.Sleep(delay)
-
-	output := generateMockOutput(task.AgentRole, task.Input)
-	inputTokens, outputTokens := estimateTokens(task.Input, output)
-	totalTokens := inputTokens + outputTokens
-
-	agent, _ := e.registry.GetAgent(ctx, task.SwarmName, task.AssignedAgent)
-	model := "claude-sonnet-4-6"
-	if agent != nil {
-		model = agent.Model
+	// Find the OpenClaw instance address
+	addr, err := e.resolveAgentAddr(ctx, task)
+	if err != nil {
+		slog.Error("executor: resolve agent addr", "error", err)
+		_ = e.store.UpdateTaskResult(ctx, task.ID, "", 0, 0, 0, err.Error())
+		_ = e.store.UpdateTaskStatus(ctx, task.ID, domain.TaskStatusFailed, task.AssignedAgent)
+		_ = msg.Ack()
+		return
 	}
-	costUSD := calculateCost(model, inputTokens, outputTokens)
-	latencyMs := delay.Milliseconds()
+
+	// Execute REAL LLM call via OpenClaw HTTP API
+	start := time.Now()
+	result, err := e.callOpenClaw(ctx, addr, task.Input)
+	latencyMs := time.Since(start).Milliseconds()
+
+	if err != nil {
+		slog.Error("executor: openclaw call failed", "id", task.ID, "addr", addr, "error", err)
+		_ = e.store.UpdateTaskResult(ctx, task.ID, "", 0, 0, latencyMs, err.Error())
+		_ = e.store.UpdateTaskStatus(ctx, task.ID, domain.TaskStatusFailed, task.AssignedAgent)
+
+		e.hub.Broadcast(task.SwarmName, sse.Event{
+			Type: "task_failed",
+			Data: map[string]interface{}{
+				"taskId":    task.ID,
+				"agentRole": task.AgentRole,
+				"error":     err.Error(),
+				"latencyMs": latencyMs,
+			},
+		})
+		_ = msg.Ack()
+		return
+	}
+
+	// Record real results
+	output := result.Content
+	totalTokens := result.Usage.TotalTokens
+	costUSD := estimateCost(result.Model, result.Usage.PromptTokens, result.Usage.CompletionTokens)
 
 	if err := e.store.UpdateTaskResult(ctx, task.ID, output, totalTokens, costUSD, latencyMs, ""); err != nil {
 		slog.Error("executor: update result", "error", err)
@@ -122,7 +170,7 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 		}
 	}
 
-	// Broadcast task completion to dashboard
+	// Broadcast task completion with REAL data
 	e.hub.Broadcast(task.SwarmName, sse.Event{
 		Type: "task_completed",
 		Data: map[string]interface{}{
@@ -133,10 +181,11 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 			"costUsd":   costUSD,
 			"latencyMs": latencyMs,
 			"output":    output,
+			"model":     result.Model,
 		},
 	})
 
-	// Broadcast updated budget to dashboard
+	// Broadcast updated budget
 	if budgetAfter, err := e.budget.GetBudget(ctx, task.SwarmName); err == nil {
 		e.hub.Broadcast(task.SwarmName, sse.Event{
 			Type: "budget_update",
@@ -146,8 +195,123 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 
 	e.triggerDownstream(ctx, task, output)
 
-	slog.Info("executor: task completed", "id", task.ID, "tokens", totalTokens, "cost", costUSD, "latency_ms", latencyMs)
+	slog.Info("executor: task completed",
+		"id", task.ID, "tokens", totalTokens, "cost", costUSD,
+		"latency_ms", latencyMs, "model", result.Model)
 	_ = msg.Ack()
+}
+
+// OpenClawResponse holds the parsed response from OpenClaw's /v1/chat/completions.
+type OpenClawResponse struct {
+	Content string
+	Model   string
+	Usage   struct {
+		PromptTokens     int
+		CompletionTokens int
+		TotalTokens      int
+	}
+}
+
+// callOpenClaw sends a real HTTP request to an OpenClaw instance's
+// OpenAI-compatible /v1/chat/completions endpoint.
+func (e *Executor) callOpenClaw(ctx context.Context, addr, input string) (*OpenClawResponse, error) {
+	url := fmt.Sprintf("http://%s/v1/chat/completions", addr)
+
+	body := map[string]interface{}{
+		"model": "openclaw",
+		"messages": []map[string]string{
+			{"role": "user", "content": input},
+		},
+		"stream": false,
+	}
+
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if e.cfg.GatewayToken != "" {
+		req.Header.Set("Authorization", "Bearer "+e.cfg.GatewayToken)
+	}
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http call to %s: %w", addr, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("openclaw %s returned %d: %s", addr, resp.StatusCode, string(respBody))
+	}
+
+	// Parse OpenAI-compatible response
+	var chatResp struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Choices []struct {
+			Message struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return nil, fmt.Errorf("parse response: %w (body: %.200s)", err, string(respBody))
+	}
+
+	content := ""
+	if len(chatResp.Choices) > 0 {
+		content = chatResp.Choices[0].Message.Content
+	}
+
+	return &OpenClawResponse{
+		Content: content,
+		Model:   chatResp.Model,
+		Usage: struct {
+			PromptTokens     int
+			CompletionTokens int
+			TotalTokens      int
+		}{
+			PromptTokens:     chatResp.Usage.PromptTokens,
+			CompletionTokens: chatResp.Usage.CompletionTokens,
+			TotalTokens:      chatResp.Usage.TotalTokens,
+		},
+	}, nil
+}
+
+// resolveAgentAddr finds the OpenClaw instance address for the assigned agent.
+func (e *Executor) resolveAgentAddr(ctx context.Context, task domain.Task) (string, error) {
+	// Try the registry first (has OpenClawAddr from when container was spawned)
+	if task.AssignedAgent != "" {
+		agent, err := e.registry.GetAgent(ctx, task.SwarmName, task.AssignedAgent)
+		if err == nil && agent.OpenClawAddr != "" {
+			return agent.OpenClawAddr, nil
+		}
+	}
+
+	// Fallback: pick any available instance for this role from the pool
+	instances := e.pool.ListByRole(task.SwarmName, task.AgentRole)
+	if len(instances) == 0 {
+		return "", fmt.Errorf("no instances available for role %s in swarm %s", task.AgentRole, task.SwarmName)
+	}
+	return instances[0].Addr, nil
 }
 
 func (e *Executor) handlePipeline(ctx context.Context, msg jetstream.Msg) {
@@ -212,44 +376,9 @@ func (e *Executor) triggerDownstream(ctx context.Context, task domain.Task, outp
 	}
 }
 
-func generateMockOutput(role, input string) string {
-	templates := map[string]string{
-		"researcher": "Based on analysis by %s agent: Research on '%s' reveals several key findings. Multiple sources confirm significant developments. Key data points extracted and cross-referenced.",
-		"writer":     "Article drafted by %s agent: Drawing from research, here is a comprehensive summary of '%s'. Findings indicate notable progress with implications for multiple stakeholders.",
-		"summarizer": "Summary by %s agent: Key points regarding '%s': (1) significant recent developments, (2) measurable impact across sectors, (3) ongoing challenges requiring attention.",
-		"classifier": "Classification by %s agent: Content '%s' categorized. Primary: Technology/Science. Sentiment: Positive. Relevance: 0.87.",
-		"fetcher":    "Fetched by %s agent: Retrieved content for '%s'. Sources: 3 articles, 2 papers, 1 dataset. ~4,500 words.",
-		"aggregator": "Aggregated by %s agent: Combined analysis of '%s'. Synthesized from 5 sources into unified report.",
-		"notifier":   "Notification by %s agent: Alert prepared for '%s'. Priority: normal. Delivery: immediate.",
-	}
-	tmpl, ok := templates[role]
-	if !ok {
-		tmpl = "Processed by %s agent: Task '%s' completed successfully."
-	}
-	short := input
-	if len(short) > 80 {
-		short = short[:80] + "..."
-	}
-	return fmt.Sprintf(tmpl, role, short)
-}
-
-func estimateTokens(input, output string) (int, int) {
-	return len(input)/4 + 10, len(output)/4 + 10
-}
-
-func calculateCost(model string, inputTokens, outputTokens int) float64 {
-	type pricing struct{ input, output float64 }
-	prices := map[string]pricing{
-		"sonnet": {3.0, 15.0},
-		"haiku":  {0.25, 1.25},
-		"opus":   {15.0, 75.0},
-	}
-	p := pricing{3.0, 15.0}
-	for key, pr := range prices {
-		if strings.Contains(model, key) {
-			p = pr
-			break
-		}
-	}
-	return (float64(inputTokens) * p.input / 1_000_000) + (float64(outputTokens) * p.output / 1_000_000)
+// estimateCost calculates approximate cost based on model and token usage.
+// For local Ollama models, cost is effectively $0 but we track nominal cost for metrics.
+func estimateCost(model string, inputTokens, outputTokens int) float64 {
+	// Nominal rate: $0.001 per 1K tokens (for tracking purposes with local models)
+	return float64(inputTokens+outputTokens) * 0.001 / 1000.0
 }

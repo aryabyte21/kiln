@@ -1,0 +1,13 @@
+FROM golang:1.23-alpine AS builder
+WORKDIR /build
+COPY apps/agent-worker/go.mod ./
+RUN go mod download
+COPY apps/agent-worker/main.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /agent-worker .
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates curl
+COPY --from=builder /agent-worker /usr/local/bin/agent-worker
+RUN mkdir -p /workspace
+EXPOSE 8080
+CMD ["agent-worker"]

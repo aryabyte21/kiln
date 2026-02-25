@@ -22,6 +22,7 @@ type Agent struct {
 	Status       AgentStatus       `json:"status"`
 	Model        string            `json:"model"`
 	OpenClawAddr string            `json:"openclawAddr"` // host:port of the OpenClaw Gateway
+	ContainerID  string            `json:"containerId,omitempty"` // Docker container ID
 	ConfigHash   string            `json:"configHash"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	RegisteredAt time.Time         `json:"registeredAt"`
@@ -44,6 +45,7 @@ type AgentSpec struct {
 	Name      string        `json:"name" yaml:"name"`
 	Replicas  ReplicaSpec   `json:"replicas" yaml:"replicas"`
 	Model     string        `json:"model" yaml:"model"`
+	Soul      string        `json:"soul,omitempty" yaml:"soul,omitempty"` // Inline SOUL.md content for the agent
 	Skills    []string      `json:"skills,omitempty" yaml:"skills,omitempty"`
 	Policy    string        `json:"policy,omitempty" yaml:"policy,omitempty"`
 	DependsOn []string      `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`

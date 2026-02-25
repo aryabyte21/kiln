@@ -42,17 +42,29 @@ export interface SSEEvent {
   data: unknown;
 }
 
+export type AgentExecutionState = 'idle' | 'running' | 'completed' | 'failed';
+
+export interface EventLogEntry {
+  time: string;
+  type: string;
+  data: Record<string, unknown>;
+}
+
 interface SwarmSSEState {
   agents: Map<string, SSEAgent>;
   tasks: Map<string, SSETask>;
   budget: SSEBudget | null;
   connected: boolean;
   lastEvent: SSEEvent | null;
+  agentStates: Record<string, AgentExecutionState>;
+  events: EventLogEntry[];
 }
 
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
+
+const MAX_EVENTS = 200;
 
 type SSEAction =
   | { type: 'SET_CONNECTED'; connected: boolean }
@@ -62,7 +74,29 @@ type SSEAction =
   | { type: 'TASK_UPDATE'; task: SSETask }
   | { type: 'BUDGET_UPDATE'; budget: SSEBudget }
   | { type: 'SET_LAST_EVENT'; event: SSEEvent }
+  | { type: 'TASK_RUNNING'; agentRole: string; taskId: string; agentId: string }
+  | {
+      type: 'TASK_COMPLETED';
+      agentRole: string;
+      taskId: string;
+      agentId: string;
+      tokens: number;
+      costUsd: number;
+      latencyMs: number;
+      output: string;
+      model: string;
+    }
+  | { type: 'TASK_FAILED'; agentRole: string; taskId: string; error: string; latencyMs: number }
+  | { type: 'APPEND_EVENT'; entry: EventLogEntry }
   | { type: 'RESET' };
+
+function appendEvent(events: EventLogEntry[], entry: EventLogEntry): EventLogEntry[] {
+  const next = [...events, entry];
+  if (next.length > MAX_EVENTS) {
+    return next.slice(next.length - MAX_EVENTS);
+  }
+  return next;
+}
 
 function sseReducer(state: SwarmSSEState, action: SSEAction): SwarmSSEState {
   switch (action.type) {
@@ -89,6 +123,27 @@ function sseReducer(state: SwarmSSEState, action: SSEAction): SwarmSSEState {
     case 'SET_LAST_EVENT':
       return { ...state, lastEvent: action.event };
 
+    case 'TASK_RUNNING':
+      return {
+        ...state,
+        agentStates: { ...state.agentStates, [action.agentRole]: 'running' },
+      };
+
+    case 'TASK_COMPLETED':
+      return {
+        ...state,
+        agentStates: { ...state.agentStates, [action.agentRole]: 'completed' },
+      };
+
+    case 'TASK_FAILED':
+      return {
+        ...state,
+        agentStates: { ...state.agentStates, [action.agentRole]: 'failed' },
+      };
+
+    case 'APPEND_EVENT':
+      return { ...state, events: appendEvent(state.events, action.entry) };
+
     case 'RESET':
       return initialState();
 
@@ -104,6 +159,8 @@ function initialState(): SwarmSSEState {
     budget: null,
     connected: false,
     lastEvent: null,
+    agentStates: {},
+    events: [],
   };
 }
 
@@ -115,6 +172,10 @@ const CONTROL_PLANE_URL = process.env.NEXT_PUBLIC_CONTROLPLANE_URL || 'http://lo
 
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
+
+function nowTimestamp(): string {
+  return new Date().toLocaleTimeString('en-US', { hour12: false });
+}
 
 export function useSwarmSSE(swarmName: string | null) {
   const [state, dispatch] = useReducer(sseReducer, undefined, initialState);
@@ -147,13 +208,21 @@ export function useSwarmSSE(swarmName: string | null) {
       retriesRef.current = 0;
       dispatch({ type: 'SET_CONNECTED', connected: true });
       dispatch({ type: 'SET_LAST_EVENT', event: { type: 'connected', data: null } });
+      dispatch({
+        type: 'APPEND_EVENT',
+        entry: { time: nowTimestamp(), type: 'connected', data: {} },
+      });
     });
 
     // --- swarm_created ---
     es.addEventListener('swarm_created', (e: MessageEvent) => {
       try {
-        const data: unknown = JSON.parse(e.data);
+        const data = JSON.parse(e.data) as Record<string, unknown>;
         dispatch({ type: 'SET_LAST_EVENT', event: { type: 'swarm_created', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: { time: nowTimestamp(), type: 'swarm_created', data },
+        });
       } catch {
         // Ignore malformed events
       }
@@ -165,6 +234,14 @@ export function useSwarmSSE(swarmName: string | null) {
         const agent = JSON.parse(e.data) as SSEAgent;
         dispatch({ type: 'AGENT_REGISTERED', agent });
         dispatch({ type: 'SET_LAST_EVENT', event: { type: 'agent_registered', data: agent } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: {
+            time: nowTimestamp(),
+            type: 'agent_registered',
+            data: { agentId: agent.id, role: agent.role },
+          },
+        });
       } catch {
         // Ignore malformed events
       }
@@ -187,28 +264,180 @@ export function useSwarmSSE(swarmName: string | null) {
         const task = JSON.parse(e.data) as SSETask;
         dispatch({ type: 'TASK_SUBMITTED', task });
         dispatch({ type: 'SET_LAST_EVENT', event: { type: 'task_submitted', data: task } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: {
+            time: nowTimestamp(),
+            type: 'task_submitted',
+            data: { taskId: task.id, agentRole: task.agentRole },
+          },
+        });
       } catch {
         // Ignore malformed events
       }
     });
 
-    // --- task_update ---
+    // --- task_assigned ---
+    es.addEventListener('task_assigned', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as Record<string, unknown>;
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'task_assigned', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: { time: nowTimestamp(), type: 'task_assigned', data },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    // --- task_running ---
+    es.addEventListener('task_running', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { taskId: string; agentRole: string; agentId: string };
+        dispatch({
+          type: 'TASK_RUNNING',
+          agentRole: data.agentRole,
+          taskId: data.taskId,
+          agentId: data.agentId,
+        });
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'task_running', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: { time: nowTimestamp(), type: 'task_running', data },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    // --- task_completed ---
+    es.addEventListener('task_completed', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as {
+          taskId: string;
+          agentRole: string;
+          agentId: string;
+          tokens: number;
+          costUsd: number;
+          latencyMs: number;
+          output: string;
+          model: string;
+        };
+        dispatch({
+          type: 'TASK_COMPLETED',
+          agentRole: data.agentRole,
+          taskId: data.taskId,
+          agentId: data.agentId,
+          tokens: data.tokens,
+          costUsd: data.costUsd,
+          latencyMs: data.latencyMs,
+          output: data.output,
+          model: data.model,
+        });
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'task_completed', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: {
+            time: nowTimestamp(),
+            type: 'task_completed',
+            data: {
+              taskId: data.taskId,
+              agentRole: data.agentRole,
+              tokens: data.tokens,
+              costUsd: data.costUsd,
+              latencyMs: data.latencyMs,
+              model: data.model,
+            },
+          },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    // --- task_failed ---
+    es.addEventListener('task_failed', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as {
+          taskId: string;
+          agentRole: string;
+          error: string;
+          latencyMs: number;
+        };
+        dispatch({
+          type: 'TASK_FAILED',
+          agentRole: data.agentRole,
+          taskId: data.taskId,
+          error: data.error,
+          latencyMs: data.latencyMs,
+        });
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'task_failed', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: {
+            time: nowTimestamp(),
+            type: 'task_failed',
+            data: {
+              taskId: data.taskId,
+              agentRole: data.agentRole,
+              error: data.error,
+              latencyMs: data.latencyMs,
+            },
+          },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    // --- task_update (generic) ---
     es.addEventListener('task_update', (e: MessageEvent) => {
       try {
         const task = JSON.parse(e.data) as SSETask;
         dispatch({ type: 'TASK_UPDATE', task });
         dispatch({ type: 'SET_LAST_EVENT', event: { type: 'task_update', data: task } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: {
+            time: nowTimestamp(),
+            type: 'task_update',
+            data: { taskId: task.id, agentRole: task.agentRole, status: task.status },
+          },
+        });
       } catch {
         // Ignore malformed events
       }
     });
 
-    // --- budget_update (included in some task events) ---
+    // --- budget_update ---
     es.addEventListener('budget_update', (e: MessageEvent) => {
       try {
         const budget = JSON.parse(e.data) as SSEBudget;
         dispatch({ type: 'BUDGET_UPDATE', budget });
         dispatch({ type: 'SET_LAST_EVENT', event: { type: 'budget_update', data: budget } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: {
+            time: nowTimestamp(),
+            type: 'budget_update',
+            data: { spent: budget.spent, percent: budget.percent },
+          },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    // --- pipeline_message ---
+    es.addEventListener('pipeline_message', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as Record<string, unknown>;
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'pipeline_message', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: { time: nowTimestamp(), type: 'pipeline_message', data },
+        });
       } catch {
         // Ignore malformed events
       }
@@ -239,6 +468,8 @@ export function useSwarmSSE(swarmName: string | null) {
     budget: state.budget,
     connected: state.connected,
     lastEvent: state.lastEvent,
+    agentStates: state.agentStates,
+    events: state.events,
   };
 }
 

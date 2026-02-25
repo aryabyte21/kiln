@@ -10,6 +10,8 @@ services:
       POSTGRES_DB: openswarm
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - openswarm
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U openswarm']
       interval: 5s
@@ -24,6 +26,8 @@ services:
     command: redis-server --notify-keyspace-events Ex --appendonly yes
     volumes:
       - redisdata:/data
+    networks:
+      - openswarm
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
@@ -39,6 +43,8 @@ services:
     command: --jetstream --store_dir /data --http_port 8222
     volumes:
       - natsdata:/data
+    networks:
+      - openswarm
     healthcheck:
       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8222/healthz']
       interval: 5s
@@ -53,6 +59,8 @@ services:
       - '9091:9090'
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - openswarm
     profiles:
       - observability
 
@@ -63,6 +71,8 @@ services:
       - '3001:3000'
     environment:
       GF_SECURITY_ADMIN_PASSWORD: openswarm
+    networks:
+      - openswarm
     profiles:
       - observability
 
@@ -70,3 +80,7 @@ volumes:
   pgdata:
   redisdata:
   natsdata:
+
+networks:
+  openswarm:
+    driver: bridge

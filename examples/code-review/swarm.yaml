@@ -1,0 +1,47 @@
+apiVersion: openswarm/v1alpha1
+kind: Swarm
+metadata:
+  name: code-review
+  labels:
+    env: demo
+
+spec:
+  budget:
+    total: '$1.00'
+    alertAt: 80
+    hardStop: 100
+
+  agents:
+    - name: analyzer
+      replicas: { min: 1, max: 2 }
+      model: qwen2.5:7b
+      soul: |
+        You are a code analyzer agent. Given a code description or snippet,
+        identify potential bugs, performance issues, security concerns,
+        and style violations. Be thorough and specific.
+
+    - name: reviewer
+      replicas: { min: 1, max: 1 }
+      model: qwen2.5:7b
+      soul: |
+        You are a code reviewer agent. Given an analysis of code issues,
+        prioritize them by severity (critical/major/minor), add
+        recommendations for fixes, and suggest best practices.
+      dependsOn: [analyzer]
+
+    - name: reporter
+      replicas: { min: 1, max: 1 }
+      model: qwen2.5:7b
+      soul: |
+        You are a report writer agent. Given prioritized code review findings,
+        format them into a clean, professional code review report with
+        sections, severity badges, and actionable next steps.
+      dependsOn: [reviewer]
+
+  topology:
+    - from: analyzer
+      to: reviewer
+      subject: analysis.raw
+    - from: reviewer
+      to: reporter
+      subject: review.complete

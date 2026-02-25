@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { AgentExecutionState } from '@/hooks/use-sse';
 
 export interface AgentNodeData {
   label: string;
@@ -10,6 +11,8 @@ export interface AgentNodeData {
   status: 'pending' | 'online' | 'busy' | 'draining' | 'offline' | 'error';
   replicas: { min: number; max: number; current: number };
   skills?: string[];
+  executionState?: AgentExecutionState;
+  tokenCount?: number;
   [key: string]: unknown;
 }
 
@@ -31,15 +34,29 @@ const statusBorders: Record<string, string> = {
   error: 'border-red-500/50',
 };
 
+function getExecutionClasses(executionState?: AgentExecutionState): string {
+  switch (executionState) {
+    case 'running':
+      return 'ring-2 ring-cyan-400 shadow-lg shadow-cyan-400/20';
+    case 'completed':
+      return 'ring-2 ring-emerald-400 shadow-lg shadow-emerald-400/20';
+    case 'failed':
+      return 'ring-2 ring-red-500 shadow-lg shadow-red-500/20 animate-pulse';
+    default:
+      return '';
+  }
+}
+
 function AgentNodeComponent({ data }: NodeProps) {
   const nodeData = data as unknown as AgentNodeData;
   const status = nodeData.status || 'pending';
   const dotColor = statusColors[status] || 'bg-gray-400';
   const borderColor = statusBorders[status] || 'border-gray-400/50';
+  const executionClasses = getExecutionClasses(nodeData.executionState);
 
   return (
     <div
-      className={`rounded-xl border-2 ${borderColor} bg-zinc-900/90 backdrop-blur-sm px-4 py-3 shadow-lg min-w-[180px]`}
+      className={`rounded-xl border-2 ${borderColor} bg-zinc-900/90 backdrop-blur-sm px-4 py-3 shadow-lg min-w-[180px] transition-all duration-300 ${executionClasses}`}
     >
       <Handle
         type="target"
@@ -50,7 +67,25 @@ function AgentNodeComponent({ data }: NodeProps) {
       <div className="flex items-center gap-2 mb-2">
         <span className={`w-2.5 h-2.5 rounded-full ${dotColor} animate-pulse`} />
         <span className="font-semibold text-white text-sm">{nodeData.label}</span>
+        {/* Execution state indicators */}
+        {nodeData.executionState === 'completed' && (
+          <span className="ml-auto text-emerald-400 text-xs font-bold" title="Completed">
+            &#10003;
+          </span>
+        )}
+        {nodeData.executionState === 'failed' && (
+          <span className="ml-auto text-red-400 text-xs font-bold" title="Failed">
+            &#10007;
+          </span>
+        )}
       </div>
+
+      {/* Execution state label */}
+      {nodeData.executionState === 'running' && (
+        <div className="text-[10px] text-cyan-400 font-medium mb-1 animate-pulse">
+          Processing...
+        </div>
+      )}
 
       <div className="text-xs text-zinc-400 space-y-1">
         <div className="flex justify-between">
@@ -68,6 +103,15 @@ function AgentNodeComponent({ data }: NodeProps) {
           <span>Status</span>
           <span className="text-zinc-300 capitalize">{status}</span>
         </div>
+        {/* Token count overlay when completed */}
+        {nodeData.executionState === 'completed' &&
+          nodeData.tokenCount != null &&
+          nodeData.tokenCount > 0 && (
+            <div className="flex justify-between text-emerald-400">
+              <span>Tokens</span>
+              <span className="font-mono">{nodeData.tokenCount.toLocaleString()}</span>
+            </div>
+          )}
         {nodeData.skills && nodeData.skills.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {nodeData.skills.map((s: string) => (

@@ -17,6 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SwarmGraph } from '@/components/dashboard/swarm-graph';
 import { TaskForm } from '@/components/dashboard/task-form';
 import { CostGauge } from '@/components/dashboard/cost-gauge';
+import { ContainerList } from '@/components/dashboard/container-list';
+import { ExecutionLog } from '@/components/dashboard/execution-log';
 import { useSwarmSSE } from '@/hooks/use-sse';
 import {
   listSwarms,
@@ -42,6 +44,8 @@ export default function DashboardPage() {
     budget,
     connected,
     lastEvent,
+    agentStates,
+    events,
   } = useSwarmSSE(selectedSwarm?.name ?? null);
 
   // Merge: prefer SSE live data when available, fall back to initial fetch
@@ -179,13 +183,17 @@ export default function DashboardPage() {
                 <TabsList className="bg-zinc-900 border border-zinc-800">
                   <TabsTrigger value="graph">Agent Graph</TabsTrigger>
                   <TabsTrigger value="agents">Agents</TabsTrigger>
+                  <TabsTrigger value="containers">Containers</TabsTrigger>
                   <TabsTrigger value="tasks">Tasks</TabsTrigger>
                   <TabsTrigger value="topology">Topology</TabsTrigger>
+                  <TabsTrigger value="logs">Logs</TabsTrigger>
                 </TabsList>
 
                 {/* Graph view */}
                 <TabsContent value="graph">
-                  {selectedSwarm && <SwarmGraph spec={selectedSwarm.spec} />}
+                  {selectedSwarm && (
+                    <SwarmGraph spec={selectedSwarm.spec} agentStates={agentStates} />
+                  )}
                 </TabsContent>
 
                 {/* Agents table */}
@@ -278,6 +286,11 @@ export default function DashboardPage() {
                   )}
                 </TabsContent>
 
+                {/* Containers tab */}
+                <TabsContent value="containers">
+                  {selectedSwarm && <ContainerList swarmName={selectedSwarm.name} />}
+                </TabsContent>
+
                 {/* Tasks table */}
                 <TabsContent value="tasks">
                   <Card>
@@ -352,6 +365,11 @@ export default function DashboardPage() {
                       </Table>
                     </CardContent>
                   </Card>
+                </TabsContent>
+
+                {/* Logs */}
+                <TabsContent value="logs">
+                  <ExecutionLog events={events} />
                 </TabsContent>
               </Tabs>
             </div>

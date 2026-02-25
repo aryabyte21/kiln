@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
@@ -16,20 +16,44 @@ import '@xyflow/react/dist/style.css';
 import { AgentNode, type AgentNodeData } from './agent-node';
 import { DataFlowEdge } from './data-flow-edge';
 import type { SwarmSpec } from '@/lib/api-client';
+import type { AgentExecutionState } from '@/hooks/use-sse';
 
 const nodeTypes = { agent: AgentNode };
 const edgeTypes = { dataflow: DataFlowEdge };
 
 interface SwarmGraphProps {
   spec: SwarmSpec;
+  agentStates?: Record<string, AgentExecutionState>;
   className?: string;
 }
 
-export function SwarmGraph({ spec, className }: SwarmGraphProps) {
+export function SwarmGraph({ spec, agentStates, className }: SwarmGraphProps) {
   const { initialNodes, initialEdges } = useMemo(() => buildGraph(spec), [spec]);
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+
+  // Update node data with execution states when agentStates changes
+  useEffect(() => {
+    if (!agentStates) return;
+
+    setNodes((prevNodes) =>
+      prevNodes.map((node) => {
+        const nodeData = node.data as unknown as AgentNodeData;
+        const execState = agentStates[nodeData.role];
+        if (execState && execState !== nodeData.executionState) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              executionState: execState,
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [agentStates, setNodes]);
 
   const onInit = useCallback(() => {
     // Could fit view here
@@ -105,6 +129,7 @@ function buildGraph(spec: SwarmSpec): { initialNodes: Node[]; initialEdges: Edge
         status: 'pending',
         replicas: { min: agent.replicas.min, max: agent.replicas.max, current: agent.replicas.min },
         skills: agent.skills,
+        executionState: 'idle',
       } satisfies AgentNodeData,
     };
   });

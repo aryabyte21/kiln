@@ -20,13 +20,14 @@ import (
 	"github.com/openswarm/openswarm/internal/executor"
 	"github.com/openswarm/openswarm/internal/genetics"
 	"github.com/openswarm/openswarm/internal/lifecycle"
+	"github.com/openswarm/openswarm/internal/pool"
 	"github.com/openswarm/openswarm/internal/registry"
 	"github.com/openswarm/openswarm/internal/scheduler"
 	"github.com/openswarm/openswarm/internal/sse"
 	"github.com/openswarm/openswarm/internal/store"
 )
 
-var version = "0.1.0-dev"
+var version = "0.1.1-dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -93,14 +94,57 @@ func main() {
 	// SSE event hub
 	hub := sse.NewHub()
 
-	// Lifecycle manager — registers agents from existing swarms
-	lm := lifecycle.New(st, reg)
+	// Settings reader: pool calls this on every Spawn() to get LLM config from DB
+	settingsReader := func(readCtx context.Context) (*pool.LLMConfig, error) {
+		settings, err := st.GetSettings(readCtx, "global")
+		if err != nil {
+			return nil, err
+		}
+		if settings.LLM.Provider == "" || settings.LLM.APIKey == "" {
+			return nil, fmt.Errorf("no LLM provider configured")
+		}
+		return &pool.LLMConfig{
+			Provider: settings.LLM.Provider,
+			BaseURL:  settings.LLM.BaseURL,
+			APIKey:   settings.LLM.APIKey,
+			Model:    settings.LLM.Model,
+			APIType:  settings.LLM.APIType,
+		}, nil
+	}
+
+	// Container pool — manages OpenClaw Gateway Docker containers
+	instancePool, err := pool.New(pool.Config{
+		OpenClawImage: getEnv("OPENCLAW_IMAGE", "openclaw:local"),
+		GatewayToken:  getEnv("OPENCLAW_GATEWAY_TOKEN", "openswarm-secret"),
+		NetworkName:   getEnv("DOCKER_NETWORK", "openswarm"),
+		LLMProvider:   getEnv("LLM_PROVIDER", "groq"),
+		LLMBaseURL:    getEnv("LLM_BASE_URL", "https://api.groq.com/openai"),
+		LLMApiKey:     getEnv("LLM_API_KEY", ""),
+		Model:         getEnv("LLM_MODEL", "llama-3.3-70b-versatile"),
+		WorkspaceDir:  getEnv("WORKSPACE_DIR", "/tmp/openswarm-workspaces"),
+	}, settingsReader)
+	if err != nil {
+		slog.Error("failed to create container pool", "error", err)
+		os.Exit(1)
+	}
+	defer instancePool.Close()
+
+	// Recover any existing OpenSwarm-managed containers from a previous run
+	// (e.g. after hot-reload restart via air)
+	if err := instancePool.RecoverExisting(ctx); err != nil {
+		slog.Warn("failed to recover existing containers", "error", err)
+	}
+
+	// Lifecycle manager — reconciles desired vs actual agent state
+	lm := lifecycle.New(st, reg, instancePool, hub)
 
 	// Scheduler — picks agents for pending tasks
 	sched := scheduler.New(st, reg, msgBus)
 
-	// Executor — runs tasks (mock LLM) and triggers downstream pipeline
-	exec := executor.New(st, reg, msgBus, bt, hub)
+	// Executor — sends tasks to real OpenClaw instances via HTTP
+	exec := executor.New(st, reg, instancePool, msgBus, bt, hub, executor.Config{
+		GatewayToken: getEnv("OPENCLAW_GATEWAY_TOKEN", "openswarm-secret"),
+	})
 
 	// Genetics engine — agent genome tracking and evolution
 	ge := genetics.New(st)
@@ -115,10 +159,10 @@ func main() {
 		RedisURL:          redisURL,
 		NatsURL:           natsURL,
 		OpenClawInstances: getEnv("OPENCLAW_INSTANCES", "localhost:18789"),
-		OpenClawToken:     getEnv("OPENCLAW_TOKEN", ""),
+		OpenClawToken:     getEnv("OPENCLAW_GATEWAY_TOKEN", "openswarm-secret"),
 	}
 
-	server := api.NewServer(cfg, st, reg, msgBus, hub, bt, lm, ge)
+	server := api.NewServer(cfg, st, reg, msgBus, hub, bt, lm, ge, instancePool)
 
 	httpServer := &http.Server{
 		Addr:         ":" + port,
@@ -172,6 +216,12 @@ func main() {
 	exec.Stop()
 	sched.Stop()
 	lm.Stop()
+	// In dev mode (air hot reload), keep containers alive so they can be recovered on restart
+	if os.Getenv("DEV_KEEP_CONTAINERS") != "true" {
+		instancePool.TerminateAll(context.Background())
+	} else {
+		slog.Info("dev mode: keeping containers alive for recovery on next restart")
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

@@ -31,11 +31,20 @@ OpenSwarm is a Kubernetes-like orchestrator for fleets of OpenClaw AI agent inst
 
 ### TypeScript (apps/web/, packages/)
 
-- Strict TypeScript, no `any`
+- **Strict TypeScript everywhere** — zero tolerance for lint warnings or errors
+- Never use `any` — always provide explicit types. Use `unknown` + type guards when the type is truly unknown
+- Never use `undefined` as a type — use `| null` or optional properties (`?:`) instead
+- No type shortcuts: no `as any`, no `@ts-ignore`, no `@ts-expect-error`, no `!` non-null assertions
+- All function parameters and return types must be explicitly typed
+- All component props must have a named interface (e.g., `interface ContainerListProps { ... }`)
+- Use discriminated unions over loose string types where possible
 - pnpm workspace, Nx orchestration
 - React: functional components, hooks only
 - Next.js App Router (not Pages)
 - Imports: use `@cs5224/types` for shared types
+- ESLint must pass with zero warnings (`pnpm --filter @cs5224/web lint`)
+- Prefer `const` over `let`, never use `var`
+- Use early returns over nested if/else
 
 ### SQL (apps/controlplane/internal/store/migrations/)
 
@@ -157,6 +166,7 @@ pnpm nx run-many --target=test
 - Commits: conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`)
 - PR: always to `main`, squash merge
 - Never commit `.env`, credentials, or API keys
+- **NEVER commit or push without explicit user approval** — this applies to the main agent AND all subagents/background agents spawned via the Task tool. Always show the user what changed and ask before running `git commit` or `git push`.
 
 ## Week-by-Week Milestones
 

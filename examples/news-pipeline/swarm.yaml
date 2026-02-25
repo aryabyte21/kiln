@@ -15,35 +15,51 @@ spec:
 
   agents:
     - name: fetcher
-      replicas: { min: 2, max: 5, scaleOn: queue_depth }
-      model: claude-haiku-4-5-20251001
+      replicas: { min: 1, max: 3, scaleOn: queue_depth }
+      model: qwen2.5:7b
+      soul: |
+        You are a news fetcher agent. Your job is to find and retrieve relevant news articles.
+        Given a topic, provide a summary of 3-5 recent and relevant articles with key points.
+        Be thorough but concise. Focus on factual reporting.
       skills: [web-browse, rss-reader]
       policy: fetcher-safety
-      genome: { evolution: true, populationSize: 3 }
       resources: { maxContextTokens: 32768, maxConcurrentTasks: 3 }
 
     - name: summarizer
-      replicas: { min: 1, max: 3, scaleOn: token_utilization }
-      model: claude-sonnet-4-6
+      replicas: { min: 1, max: 2, scaleOn: token_utilization }
+      model: qwen2.5:7b
+      soul: |
+        You are a summarizer agent. Given raw article content, produce clear, concise summaries.
+        Extract the key points, main arguments, and important data.
+        Keep summaries to 3-5 bullet points per article.
       policy: output-review
       dependsOn: [fetcher]
-      genome: { evolution: true, populationSize: 5, selectionStrategy: tournament }
 
     - name: classifier
-      replicas: { min: 1, max: 2 }
-      model: claude-haiku-4-5-20251001
+      replicas: { min: 1, max: 1 }
+      model: qwen2.5:7b
+      soul: |
+        You are a classifier agent. Categorize summarized articles by topic, sentiment, and relevance.
+        Output a structured classification with: category, sentiment (positive/negative/neutral),
+        relevance score (0-1), and key tags.
       policy: default
       dependsOn: [summarizer]
 
     - name: aggregator
       replicas: { min: 1, max: 1 }
-      model: claude-sonnet-4-6
+      model: qwen2.5:7b
+      soul: |
+        You are an aggregator agent. Combine classified articles into a coherent digest.
+        Group by category, highlight the most important stories, and provide an executive summary.
       policy: default
       dependsOn: [classifier]
 
     - name: notifier
       replicas: { min: 1, max: 1 }
-      model: claude-haiku-4-5-20251001
+      model: qwen2.5:7b
+      soul: |
+        You are a notifier agent. Format the aggregated digest into a clean notification.
+        Include a headline, brief summary, and top 3 stories. Keep it under 500 words.
       policy: default
       dependsOn: [aggregator]
 

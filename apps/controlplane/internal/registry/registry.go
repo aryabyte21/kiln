@@ -81,6 +81,7 @@ func agentToMap(a domain.Agent) map[string]interface{} {
 		"status":       string(a.Status),
 		"model":        a.Model,
 		"openclawAddr": a.OpenClawAddr,
+		"containerId":  a.ContainerID,
 		"configHash":   a.ConfigHash,
 		"registeredAt": a.RegisteredAt.Format(time.RFC3339Nano),
 		"lastSeen":     a.LastSeen.Format(time.RFC3339Nano),
@@ -100,6 +101,7 @@ func agentFromMap(m map[string]string) (*domain.Agent, error) {
 		Status:       domain.AgentStatus(m["status"]),
 		Model:        m["model"],
 		OpenClawAddr: m["openclawAddr"],
+		ContainerID:  m["containerId"],
 		ConfigHash:   m["configHash"],
 	}
 

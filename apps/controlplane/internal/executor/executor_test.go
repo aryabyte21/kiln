@@ -1,49 +1,43 @@
 package executor
 
 import (
-	"strings"
 	"testing"
 )
 
-func TestGenerateMockOutput(t *testing.T) {
-	output := generateMockOutput("researcher", "Research quantum computing")
-	if output == "" {
-		t.Fatal("expected non-empty output")
-	}
-	if !strings.Contains(output, "researcher") {
-		t.Error("expected output to reference agent role")
-	}
-}
-
-func TestGenerateMockOutput_UnknownRole(t *testing.T) {
-	output := generateMockOutput("unknown-agent", "do something")
-	if output == "" {
-		t.Fatal("expected non-empty output for unknown role")
-	}
-}
-
-func TestEstimateTokens(t *testing.T) {
-	input, output := estimateTokens("short input", "This is a somewhat longer output from the agent.")
-	if input <= 0 || output <= 0 {
-		t.Errorf("expected positive token counts, got input=%d output=%d", input, output)
-	}
-}
-
-func TestCalculateCost(t *testing.T) {
-	cost := calculateCost("claude-sonnet-4-6", 100, 200)
+func TestEstimateCost(t *testing.T) {
+	// Nominal cost tracking: $0.001 per 1K tokens
+	cost := estimateCost("qwen2.5:7b", 100, 200)
 	if cost <= 0 {
-		t.Error("expected positive cost")
+		t.Error("expected positive nominal cost")
 	}
-	costHaiku := calculateCost("claude-haiku-4-5-20251001", 100, 200)
-	if costHaiku >= cost {
-		t.Error("expected haiku to be cheaper than sonnet")
+	// 300 tokens * 0.001 / 1000 = 0.0000003
+	expected := 0.0003
+	if cost < expected*0.9 || cost > expected*1.1 {
+		t.Errorf("cost = %f, expected ~%f", cost, expected)
 	}
 }
 
-func TestCalculateCost_DefaultsSonnet(t *testing.T) {
-	cost1 := calculateCost("claude-sonnet-4-6", 100, 200)
-	cost2 := calculateCost("unknown-model-xyz", 100, 200)
-	if cost1 != cost2 {
-		t.Error("unknown model should default to sonnet pricing")
+func TestEstimateCost_ZeroTokens(t *testing.T) {
+	cost := estimateCost("qwen2.5:7b", 0, 0)
+	if cost != 0 {
+		t.Errorf("expected zero cost for zero tokens, got %f", cost)
+	}
+}
+
+func TestOpenClawResponseParsing(t *testing.T) {
+	// Verify the response struct can hold all fields
+	resp := OpenClawResponse{
+		Content: "test output",
+		Model:   "qwen2.5:7b",
+	}
+	resp.Usage.PromptTokens = 10
+	resp.Usage.CompletionTokens = 20
+	resp.Usage.TotalTokens = 30
+
+	if resp.Content != "test output" {
+		t.Errorf("Content = %q, want %q", resp.Content, "test output")
+	}
+	if resp.Usage.TotalTokens != 30 {
+		t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
 	}
 }

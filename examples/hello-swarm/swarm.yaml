@@ -8,29 +8,28 @@ metadata:
 spec:
   budget:
     total: '$1.00'
-    perTask: '$0.05'
     alertAt: 80
     hardStop: 100
 
   agents:
-    - name: researcher
-      replicas: { min: 1, max: 3, scaleOn: queue_depth }
-      model: claude-sonnet-4-6
-      skills: [web-browse]
-      policy: default
+    - name: greeter
+      replicas: { min: 1, max: 1 }
+      model: groq/meta-llama/llama-4-scout-17b-16e-instruct
+      soul: |
+        You are a friendly greeter agent. When given a topic or name,
+        craft a warm, creative greeting or introduction about it.
+        Be enthusiastic and personable.
 
-    - name: writer
-      replicas: { min: 1, max: 2 }
-      model: claude-sonnet-4-6
-      policy: default
-      dependsOn: [researcher]
+    - name: formatter
+      replicas: { min: 1, max: 1 }
+      model: groq/meta-llama/llama-4-scout-17b-16e-instruct
+      soul: |
+        You are a formatter agent. Take the greeting you receive and
+        format it beautifully with markdown headers, bullet points,
+        and emoji. Make it visually appealing.
+      dependsOn: [greeter]
 
   topology:
-    - from: researcher
-      to: writer
-      subject: research.results
-
-  audit:
-    enabled: true
-    hashChaining: true
-    retentionDays: 7
+    - from: greeter
+      to: formatter
+      subject: greeting.raw

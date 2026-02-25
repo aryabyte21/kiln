@@ -68,12 +68,86 @@ export interface Task {
   createdAt: string;
 }
 
+export interface Container {
+  id: string;
+  role: string;
+  swarmName?: string;
+  addr: string;
+  port: number;
+  healthy: boolean;
+  createdAt: string;
+}
+
 // Fetch helpers
 export const listSwarms = () => apiFetch<Swarm[]>('/api/v1/swarms');
 export const getSwarm = (name: string) => apiFetch<Swarm>(`/api/v1/swarms/${name}`);
 export const listAgents = (swarm: string) => apiFetch<Agent[]>(`/api/v1/swarms/${swarm}/agents`);
 export const listTasks = (swarm: string) => apiFetch<Task[]>(`/api/v1/swarms/${swarm}/tasks`);
+export const listContainers = (swarm: string) =>
+  apiFetch<Container[]>(`/api/v1/swarms/${swarm}/containers`);
+export const getContainer = (id: string) => apiFetch<Container>(`/api/v1/containers/${id}`);
 
 export function sseURL(swarm: string): string {
   return `${CONTROLPLANE_URL}/api/v1/swarms/${swarm}/events`;
+}
+
+// ---------------------------------------------------------------------------
+// Settings & Provider types
+// ---------------------------------------------------------------------------
+
+export interface LLMSettings {
+  provider: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  apiType: string;
+}
+
+export interface PlatformSettings {
+  llm: LLMSettings;
+  updatedAt?: string;
+}
+
+export interface KnownProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiType: string;
+  models: string[];
+  signupUrl: string;
+  freeKeyNote: string;
+}
+
+export const getSettings = () => apiFetch<PlatformSettings>('/api/v1/settings');
+export const saveSettings = (settings: PlatformSettings) =>
+  apiFetch<{ status: string }>('/api/v1/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+export const listProviders = () => apiFetch<KnownProvider[]>('/api/v1/providers');
+
+// ---------------------------------------------------------------------------
+// Container Chat
+// ---------------------------------------------------------------------------
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+export interface ChatResponse {
+  id: string;
+  model: string;
+  choices: { message: { role: string; content: string } }[];
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+}
+
+export async function chatWithContainer(
+  containerId: string,
+  messages: ChatMessage[]
+): Promise<ChatResponse> {
+  return apiFetch<ChatResponse>(`/api/v1/containers/${containerId}/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  });
 }

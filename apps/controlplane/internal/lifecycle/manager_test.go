@@ -2,55 +2,37 @@ package lifecycle
 
 import (
 	"testing"
-
-	"github.com/openswarm/openswarm/internal/domain"
+	"time"
 )
 
-func TestGenerateAgentID(t *testing.T) {
-	id := generateAgentID("hello-swarm", "researcher", 0)
-	if id == "" {
-		t.Fatal("expected non-empty agent ID")
-	}
-	id2 := generateAgentID("hello-swarm", "researcher", 0)
-	if id != id2 {
-		t.Error("expected deterministic IDs for same inputs")
-	}
-	id3 := generateAgentID("hello-swarm", "researcher", 1)
-	if id == id3 {
-		t.Error("expected different IDs for different indexes")
+func TestReconcileInterval(t *testing.T) {
+	if reconcileInterval != 5*time.Second {
+		t.Errorf("expected 5s reconcile interval, got %v", reconcileInterval)
 	}
 }
 
-func TestBuildAgentsFromSpec(t *testing.T) {
-	spec := domain.SwarmSpec{
-		Agents: []domain.AgentSpec{
-			{Name: "researcher", Replicas: domain.ReplicaSpec{Min: 2, Max: 5}, Model: "claude-sonnet-4-6"},
-			{Name: "writer", Replicas: domain.ReplicaSpec{Min: 1, Max: 2}, Model: "claude-sonnet-4-6"},
-		},
+func TestNewManager(t *testing.T) {
+	// New should accept nil dependencies without panicking (for unit tests)
+	m := New(nil, nil, nil, nil)
+	if m == nil {
+		t.Fatal("expected non-nil manager")
 	}
-	agents := buildAgentsFromSpec("test-swarm", spec)
-	if len(agents) != 3 {
-		t.Fatalf("expected 3 agents (2+1), got %d", len(agents))
+	if m.store != nil {
+		t.Error("expected nil store")
 	}
-	researchers, writers := 0, 0
-	for _, a := range agents {
-		switch a.Role {
-		case "researcher":
-			researchers++
-		case "writer":
-			writers++
-		}
-		if a.Status != domain.AgentStatusOnline {
-			t.Errorf("expected online, got %s", a.Status)
-		}
-		if a.SwarmName != "test-swarm" {
-			t.Errorf("expected test-swarm, got %s", a.SwarmName)
-		}
+	if m.registry != nil {
+		t.Error("expected nil registry")
 	}
-	if researchers != 2 {
-		t.Errorf("expected 2 researchers, got %d", researchers)
+	if m.pool != nil {
+		t.Error("expected nil pool")
 	}
-	if writers != 1 {
-		t.Errorf("expected 1 writer, got %d", writers)
+	if m.hub != nil {
+		t.Error("expected nil hub")
 	}
+}
+
+func TestStopWithoutStart(t *testing.T) {
+	m := New(nil, nil, nil, nil)
+	// Stop should not panic even if Start was never called
+	m.Stop()
 }

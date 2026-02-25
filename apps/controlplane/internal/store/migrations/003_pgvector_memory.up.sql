@@ -18,5 +18,5 @@ CREATE INDEX IF NOT EXISTS idx_memory_embedding
     ON memory_embeddings USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);
 
-CREATE INDEX idx_memory_swarm ON memory_embeddings(swarm_name);
-CREATE INDEX idx_memory_role ON memory_embeddings(swarm_name, agent_role);
+CREATE INDEX IF NOT EXISTS idx_memory_swarm ON memory_embeddings(swarm_name);
+CREATE INDEX IF NOT EXISTS idx_memory_role ON memory_embeddings(swarm_name, agent_role);
