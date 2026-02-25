@@ -6,10 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/openswarm/openswarm/internal/budget"
 	"github.com/openswarm/openswarm/internal/bus"
 	"github.com/openswarm/openswarm/internal/config"
 	"github.com/openswarm/openswarm/internal/domain"
+	"github.com/openswarm/openswarm/internal/genetics"
+	"github.com/openswarm/openswarm/internal/lifecycle"
 	"github.com/openswarm/openswarm/internal/registry"
+	"github.com/openswarm/openswarm/internal/sse"
 	"github.com/openswarm/openswarm/internal/store"
 )
 
@@ -25,19 +29,27 @@ type Config struct {
 
 // Server is the OpenSwarm control plane HTTP server.
 type Server struct {
-	config   Config
-	store    *store.Store
-	registry *registry.Registry
-	bus      *bus.Bus
+	config    Config
+	store     *store.Store
+	registry  *registry.Registry
+	bus       *bus.Bus
+	hub       *sse.Hub
+	budget    *budget.Tracker
+	lifecycle *lifecycle.Manager
+	genetics  *genetics.Engine
 }
 
 // NewServer creates a new API server with the given dependencies.
-func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus) *Server {
+func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, hub *sse.Hub, bt *budget.Tracker, lm *lifecycle.Manager, ge *genetics.Engine) *Server {
 	return &Server{
-		config:   cfg,
-		store:    st,
-		registry: reg,
-		bus:      b,
+		config:    cfg,
+		store:     st,
+		registry:  reg,
+		bus:       b,
+		hub:       hub,
+		budget:    bt,
+		lifecycle: lm,
+		genetics:  ge,
 	}
 }
 
@@ -124,6 +136,27 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Initialize budget tracking in Redis
+	if err := s.budget.InitBudget(r.Context(), sw.Name,
+		sw.Spec.Budget.Total, sw.Spec.Budget.AlertAt, sw.Spec.Budget.HardStop); err != nil {
+		slog.Error("init budget failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to initialize budget: " + err.Error()})
+		return
+	}
+
+	// Register agents and start the swarm
+	if err := s.lifecycle.RegisterSwarmAgents(r.Context(), sw.Name, sw.Spec); err != nil {
+		slog.Error("register agents failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agents: " + err.Error()})
+		return
+	}
+
+	// Broadcast swarm creation to SSE clients
+	s.hub.Broadcast(sw.Name, sse.Event{
+		Type: "swarm_created",
+		Data: sw,
+	})
 
 	slog.Info("swarm created", "name", sw.Name, "id", sw.ID)
 	writeJSON(w, http.StatusCreated, sw)
@@ -246,6 +279,12 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 		slog.Error("publish task failed", "error", err, "subject", subject)
 	}
 
+	// Broadcast task creation to SSE clients
+	s.hub.Broadcast(name, sse.Event{
+		Type: "task_submitted",
+		Data: task,
+	})
+
 	slog.Info("task submitted", "id", task.ID, "swarm", name, "role", task.AgentRole)
 	writeJSON(w, http.StatusCreated, task)
 }
@@ -279,7 +318,14 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleGetBudget(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+	name := r.PathValue("name")
+	state, err := s.budget.GetBudget(r.Context(), name)
+	if err != nil {
+		slog.Error("get budget failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
 }
 func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []any{})
@@ -288,13 +334,53 @@ func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
 }
 func (s *Server) handleListGenomes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []any{})
+	name := r.PathValue("name")
+	genomes, err := s.genetics.ListGenomes(r.Context(), name)
+	if err != nil {
+		slog.Error("list genomes failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if genomes == nil {
+		genomes = []genetics.Genome{}
+	}
+	writeJSON(w, http.StatusOK, genomes)
 }
+
 func (s *Server) handleEvolveGenomes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+	name := r.PathValue("name")
+
+	var req struct {
+		AgentRole string `json:"agentRole"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body: " + err.Error()})
+		return
+	}
+	if req.AgentRole == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agentRole is required"})
+		return
+	}
+
+	children, err := s.genetics.Evolve(r.Context(), name, req.AgentRole)
+	if err != nil {
+		slog.Error("evolve genomes failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	slog.Info("genomes evolved", "swarm", name, "role", req.AgentRole, "children", len(children))
+	writeJSON(w, http.StatusOK, children)
 }
+
 func (s *Server) handleGetGenome(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+	id := r.PathValue("id")
+	genome, err := s.genetics.GetGenome(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, genome)
 }
 
 // ---------------------------------------------------------------------------
@@ -365,21 +451,13 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSSEEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
+	name := r.PathValue("name")
+	s.hub.ServeSwarm(w, r, name)
+}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
-	flusher.Flush()
-
-	<-r.Context().Done()
+// Hub returns the SSE hub for external integration (e.g. NATS bridge).
+func (s *Server) Hub() *sse.Hub {
+	return s.hub
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
+import { ClerkProvider } from '@clerk/nextjs';
+import { dark } from '@clerk/themes';
 import './globals.css';
-import { SiteHeader } from '@/components/site-header';
-import { SiteFooter } from '@/components/site-footer';
 
 export const metadata: Metadata = {
   title: {
@@ -20,14 +20,18 @@ export const metadata: Metadata = {
   },
 };
 
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
+  const content = (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen flex flex-col antialiased">
-        <SiteHeader />
-        <main className="flex-1">{children}</main>
-        <SiteFooter />
-      </body>
+      <body className="min-h-screen flex flex-col antialiased">{children}</body>
     </html>
   );
+
+  if (!clerkKey) {
+    return content;
+  }
+
+  return <ClerkProvider appearance={{ baseTheme: dark }}>{content}</ClerkProvider>;
 }

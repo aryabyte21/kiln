@@ -376,6 +376,123 @@ func (s *Store) GetPolicyByName(ctx context.Context, name string) (*domain.Polic
 }
 
 // ---------------------------------------------------------------------------
+// Genomes
+// ---------------------------------------------------------------------------
+
+// CreateGenome inserts a new genome record. genes and fitness are passed as
+// pre-marshalled JSON ([]byte) to avoid circular imports with the genetics
+// package.
+func (s *Store) CreateGenome(ctx context.Context, id, swarmName, agentRole string, generation int, parentIDs []string, active bool, genesJSON []byte, fitnessJSON []byte) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO genomes (id, swarm_name, agent_role, generation, parent_ids, active, genes, fitness)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		id, swarmName, agentRole, generation, parentIDs, active, genesJSON, fitnessJSON)
+	if err != nil {
+		return fmt.Errorf("store: create genome: %w", err)
+	}
+	return nil
+}
+
+// GenomeRow is a raw row from the genomes table, used to decouple the store
+// from the genetics package types.
+type GenomeRow struct {
+	ID          string
+	SwarmName   string
+	AgentRole   string
+	Generation  int
+	ParentIDs   []string
+	Active      bool
+	GenesJSON   []byte
+	FitnessJSON []byte
+	CreatedAt   time.Time
+}
+
+// ListGenomesBySwarm returns all genomes for a swarm, newest first.
+func (s *Store) ListGenomesBySwarm(ctx context.Context, swarmName string) ([]GenomeRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, swarm_name, agent_role, generation, parent_ids, active, genes, fitness, created_at
+		 FROM genomes WHERE swarm_name = $1
+		 ORDER BY created_at DESC`, swarmName)
+	if err != nil {
+		return nil, fmt.Errorf("store: list genomes for swarm %q: %w", swarmName, err)
+	}
+	defer rows.Close()
+
+	var genomes []GenomeRow
+	for rows.Next() {
+		var g GenomeRow
+		if err := rows.Scan(&g.ID, &g.SwarmName, &g.AgentRole, &g.Generation,
+			&g.ParentIDs, &g.Active, &g.GenesJSON, &g.FitnessJSON, &g.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan genome: %w", err)
+		}
+		genomes = append(genomes, g)
+	}
+	return genomes, rows.Err()
+}
+
+// GetGenomeByID returns a single genome by its UUID.
+func (s *Store) GetGenomeByID(ctx context.Context, id string) (*GenomeRow, error) {
+	var g GenomeRow
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, swarm_name, agent_role, generation, parent_ids, active, genes, fitness, created_at
+		 FROM genomes WHERE id = $1`, id,
+	).Scan(&g.ID, &g.SwarmName, &g.AgentRole, &g.Generation,
+		&g.ParentIDs, &g.Active, &g.GenesJSON, &g.FitnessJSON, &g.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("store: get genome %q: %w", id, err)
+	}
+	return &g, nil
+}
+
+// UpdateGenomeFitness updates the fitness JSONB field for a genome.
+func (s *Store) UpdateGenomeFitness(ctx context.Context, id string, fitnessJSON []byte) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE genomes SET fitness = $1 WHERE id = $2`,
+		fitnessJSON, id)
+	if err != nil {
+		return fmt.Errorf("store: update genome fitness %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("store: genome %q not found", id)
+	}
+	return nil
+}
+
+// DeactivateGenomes marks all active genomes for a swarm+role as inactive.
+func (s *Store) DeactivateGenomes(ctx context.Context, swarmName, agentRole string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE genomes SET active = false WHERE swarm_name = $1 AND agent_role = $2 AND active = true`,
+		swarmName, agentRole)
+	if err != nil {
+		return fmt.Errorf("store: deactivate genomes for %s/%s: %w", swarmName, agentRole, err)
+	}
+	return nil
+}
+
+// ListActiveGenomesByRole returns active genomes for a specific swarm+role.
+func (s *Store) ListActiveGenomesByRole(ctx context.Context, swarmName, agentRole string) ([]GenomeRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, swarm_name, agent_role, generation, parent_ids, active, genes, fitness, created_at
+		 FROM genomes WHERE swarm_name = $1 AND agent_role = $2 AND active = true
+		 ORDER BY created_at DESC`, swarmName, agentRole)
+	if err != nil {
+		return nil, fmt.Errorf("store: list active genomes for %s/%s: %w", swarmName, agentRole, err)
+	}
+	defer rows.Close()
+
+	var genomes []GenomeRow
+	for rows.Next() {
+		var g GenomeRow
+		if err := rows.Scan(&g.ID, &g.SwarmName, &g.AgentRole, &g.Generation,
+			&g.ParentIDs, &g.Active, &g.GenesJSON, &g.FitnessJSON, &g.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan genome: %w", err)
+		}
+		genomes = append(genomes, g)
+	}
+	return genomes, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 
