@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Menu, Github, Zap } from 'lucide-react';
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 
@@ -39,6 +40,18 @@ export function SiteHeader() {
             </a>
           </Button>
 
+          {/* Clerk auth: show sign-in when signed out, user button when signed in */}
+          <SignedOut>
+            <SignInButton mode="redirect">
+              <Button size="sm" className="hidden md:inline-flex">
+                Sign in
+              </Button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <UserButton afterSignOutUrl="/" />
+          </SignedIn>
+
           {/* Mobile Menu */}
           <Sheet>
             <SheetTrigger asChild className="md:hidden">
@@ -60,13 +73,26 @@ export function SiteHeader() {
                 <Button variant="ghost" asChild className="justify-start">
                   <Link href="/docs">Docs</Link>
                 </Button>
-                <div className="border-t pt-4 mt-4">
+                <div className="border-t pt-4 mt-4 space-y-2">
                   <Button variant="outline" size="sm" asChild className="w-full justify-start">
                     <a href="https://github.com" target="_blank" rel="noopener noreferrer">
                       <Github className="h-4 w-4 mr-2" />
                       GitHub
                     </a>
                   </Button>
+                  <SignedOut>
+                    <SignInButton mode="redirect">
+                      <Button size="sm" className="w-full justify-start">
+                        Sign in
+                      </Button>
+                    </SignInButton>
+                  </SignedOut>
+                  <SignedIn>
+                    <div className="flex items-center gap-2 px-2">
+                      <UserButton afterSignOutUrl="/" />
+                      <span className="text-sm text-muted-foreground">Account</span>
+                    </div>
+                  </SignedIn>
                 </div>
               </nav>
             </SheetContent>
