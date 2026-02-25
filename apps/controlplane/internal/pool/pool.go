@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,12 +21,12 @@ import (
 
 // Instance represents a running OpenClaw Gateway container.
 type Instance struct {
-	ID          string    // Docker container ID (short, 12 chars)
+	ID          string // Docker container ID (short, 12 chars)
 	Role        string
 	SwarmName   string
-	Addr        string    // host:port reachable from control plane
-	Port        int       // mapped host port
-	ContainerID string    // full Docker container ID
+	Addr        string // host:port reachable from control plane
+	Port        int    // mapped host port
+	ContainerID string // full Docker container ID
 	CreatedAt   time.Time
 }
 
@@ -461,6 +462,14 @@ func (p *Pool) Close() error {
 // This directory is mounted into the container as OPENCLAW_STATE_DIR.
 func (p *Pool) createWorkspace(cfg SpawnConfig, port int, llm *LLMConfig) (string, error) {
 	instanceDir := filepath.Join(p.cfg.WorkspaceDir, fmt.Sprintf("%s-%s-%d", cfg.SwarmName, cfg.Role, port))
+
+	// Validate that the resolved path stays within the workspace directory
+	absWorkspace, _ := filepath.Abs(p.cfg.WorkspaceDir)
+	absInstance, _ := filepath.Abs(instanceDir)
+	if !strings.HasPrefix(absInstance, absWorkspace) {
+		return "", fmt.Errorf("invalid workspace path: resolved outside base directory")
+	}
+
 	if err := os.MkdirAll(instanceDir, 0o755); err != nil {
 		return "", fmt.Errorf("create workspace dir: %w", err)
 	}

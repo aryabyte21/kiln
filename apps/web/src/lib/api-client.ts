@@ -204,3 +204,76 @@ export async function deploySwarmFromYAML(yamlBody: string): Promise<Response> {
     body: yamlBody,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Swarm Lifecycle Controls
+// ---------------------------------------------------------------------------
+
+export interface SyncStatusRole {
+  role: string;
+  desired: number;
+  actual: number;
+  healthy: number;
+}
+
+export interface SyncStatus {
+  swarmName: string;
+  swarmStatus: string;
+  syncStatus: 'synced' | 'out-of-sync' | 'degraded' | 'stopped';
+  totalDesired: number;
+  totalActual: number;
+  totalHealthy: number;
+  roles: SyncStatusRole[];
+}
+
+export const stopSwarm = (name: string) =>
+  apiFetch<{ status: string }>(`/api/v1/swarms/${name}/stop`, { method: 'POST' });
+
+export const startSwarm = (name: string) =>
+  apiFetch<{ status: string }>(`/api/v1/swarms/${name}/start`, { method: 'POST' });
+
+export const deleteSwarm = (name: string) =>
+  apiFetch<{ status: string }>(`/api/v1/swarms/${name}`, { method: 'DELETE' });
+
+export const getSyncStatus = (name: string) =>
+  apiFetch<SyncStatus>(`/api/v1/swarms/${name}/sync-status`);
+
+export const scaleAgent = (swarm: string, role: string, replicas: number) =>
+  apiFetch<{ status: string; actual: number }>(`/api/v1/swarms/${swarm}/agents/${role}/scale`, {
+    method: 'POST',
+    body: JSON.stringify({ replicas }),
+  });
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+export interface AuditEvent {
+  time: string;
+  swarmName: string;
+  agentId: string;
+  taskId: string;
+  action: string;
+  tokensUsed: number;
+  costUsd: number;
+  inputHash: string;
+  outputHash: string;
+  prevHash: string;
+  eventHash: string;
+  metadata: Record<string, string>;
+}
+
+export interface AuditChainResult {
+  agentId: string;
+  valid: boolean;
+  eventCount: number;
+  firstEvent: string;
+  lastEvent: string;
+  brokenAt: number;
+}
+
+export const getAuditEvents = (swarm: string, limit?: number) =>
+  apiFetch<AuditEvent[]>(`/api/v1/swarms/${swarm}/audit${limit ? `?limit=${limit}` : ''}`);
+
+export const verifyAuditChain = (swarm: string) =>
+  apiFetch<Record<string, AuditChainResult>>(`/api/v1/swarms/${swarm}/audit/verify`);

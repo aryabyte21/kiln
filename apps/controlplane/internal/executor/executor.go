@@ -12,6 +12,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/openswarm/openswarm/internal/audit"
 	"github.com/openswarm/openswarm/internal/budget"
 	"github.com/openswarm/openswarm/internal/bus"
 	"github.com/openswarm/openswarm/internal/domain"
@@ -35,13 +36,14 @@ type Executor struct {
 	bus      *bus.Bus
 	budget   *budget.Tracker
 	hub      *sse.Hub
+	audit    *audit.Logger
 	cfg      Config
 	client   *http.Client
 	cancel   context.CancelFunc
 }
 
 // New creates an Executor that sends real HTTP requests to OpenClaw.
-func New(st *store.Store, reg *registry.Registry, p *pool.Pool, b *bus.Bus, bt *budget.Tracker, hub *sse.Hub, cfg Config) *Executor {
+func New(st *store.Store, reg *registry.Registry, p *pool.Pool, b *bus.Bus, bt *budget.Tracker, hub *sse.Hub, al *audit.Logger, cfg Config) *Executor {
 	if cfg.HTTPTimeout == 0 {
 		cfg.HTTPTimeout = 120 * time.Second
 	}
@@ -52,6 +54,7 @@ func New(st *store.Store, reg *registry.Registry, p *pool.Pool, b *bus.Bus, bt *
 		bus:      b,
 		budget:   bt,
 		hub:      hub,
+		audit:    al,
 		cfg:      cfg,
 		client:   &http.Client{Timeout: cfg.HTTPTimeout},
 	}
@@ -109,6 +112,16 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 
 	_ = e.store.UpdateTaskStatus(ctx, task.ID, domain.TaskStatusRunning, task.AssignedAgent)
 
+	// Audit: task started
+	e.audit.Log(domain.AuditEvent{
+		SwarmName: task.SwarmName,
+		AgentID:   task.AssignedAgent,
+		TaskID:    task.ID,
+		Action:    domain.AuditTaskStarted,
+		InputHash: audit.HashContent(task.Input),
+		Metadata:  audit.Meta("role", task.AgentRole),
+	})
+
 	// Broadcast task running event
 	e.hub.Broadcast(task.SwarmName, sse.Event{
 		Type: "task_running",
@@ -134,6 +147,15 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 		slog.Error("executor: openclaw call failed", "id", task.ID, "addr", addr, "error", err)
 		_ = e.store.UpdateTaskResult(ctx, task.ID, "", 0, 0, latencyMs, err.Error())
 		_ = e.store.UpdateTaskStatus(ctx, task.ID, domain.TaskStatusFailed, task.AssignedAgent)
+
+		// Audit: task failed
+		e.audit.Log(domain.AuditEvent{
+			SwarmName: task.SwarmName,
+			AgentID:   task.AssignedAgent,
+			TaskID:    task.ID,
+			Action:    domain.AuditTaskFailed,
+			Metadata:  audit.Meta("role", task.AgentRole, "error", err.Error(), "latencyMs", fmt.Sprintf("%d", latencyMs)),
+		})
 
 		e.hub.Broadcast(task.SwarmName, sse.Event{
 			Type: "task_failed",
@@ -169,6 +191,19 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 			slog.Error("executor: reset agent status", "error", err, "agent", task.AssignedAgent)
 		}
 	}
+
+	// Audit: task completed with real metrics
+	e.audit.Log(domain.AuditEvent{
+		SwarmName:  task.SwarmName,
+		AgentID:    task.AssignedAgent,
+		TaskID:     task.ID,
+		Action:     domain.AuditTaskCompleted,
+		TokensUsed: totalTokens,
+		CostUSD:    costUSD,
+		InputHash:  audit.HashContent(task.Input),
+		OutputHash: audit.HashContent(output),
+		Metadata:   audit.Meta("role", task.AgentRole, "model", result.Model, "latencyMs", fmt.Sprintf("%d", latencyMs)),
+	})
 
 	// Broadcast task completion with REAL data
 	e.hub.Broadcast(task.SwarmName, sse.Event{

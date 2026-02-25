@@ -4,8 +4,8 @@ import "time"
 
 // PlatformSettings holds the global configuration for the OpenSwarm platform.
 type PlatformSettings struct {
-	LLM       LLMSettings       `json:"llm"`
-	UpdatedAt time.Time         `json:"updatedAt,omitempty"`
+	LLM       LLMSettings `json:"llm"`
+	UpdatedAt time.Time   `json:"updatedAt,omitempty"`
 }
 
 // LLMSettings configures the LLM provider used by all OpenClaw instances.

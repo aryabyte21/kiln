@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openswarm/openswarm/internal/audit"
 	"github.com/openswarm/openswarm/internal/bridge"
 	"github.com/openswarm/openswarm/internal/budget"
 	"github.com/openswarm/openswarm/internal/bus"
@@ -49,11 +50,25 @@ type Server struct {
 	lifecycle *lifecycle.Manager
 	genetics  *genetics.Engine
 	pool      *pool.Pool
+	audit     *audit.Logger
 	bridges   map[string]*bridge.Bridge // swarmName → running bridge
 }
 
+// validName checks that a swarm/agent name is safe for use in file paths and NATS subjects.
+func validName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // NewServer creates a new API server with the given dependencies.
-func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, hub *sse.Hub, bt *budget.Tracker, lm *lifecycle.Manager, ge *genetics.Engine, p *pool.Pool) *Server {
+func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, hub *sse.Hub, bt *budget.Tracker, lm *lifecycle.Manager, ge *genetics.Engine, p *pool.Pool, al *audit.Logger) *Server {
 	return &Server{
 		config:    cfg,
 		store:     st,
@@ -64,6 +79,7 @@ func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, 
 		lifecycle: lm,
 		genetics:  ge,
 		pool:      p,
+		audit:     al,
 		bridges:   make(map[string]*bridge.Bridge),
 	}
 }
@@ -82,6 +98,11 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /api/v1/swarms", s.handleListSwarms)
 	mux.HandleFunc("GET /api/v1/swarms/{name}", s.handleGetSwarm)
 	mux.HandleFunc("DELETE /api/v1/swarms/{name}", s.handleDeleteSwarm)
+
+	// Swarm lifecycle controls
+	mux.HandleFunc("POST /api/v1/swarms/{name}/stop", s.handleStopSwarm)
+	mux.HandleFunc("POST /api/v1/swarms/{name}/start", s.handleStartSwarm)
+	mux.HandleFunc("GET /api/v1/swarms/{name}/sync-status", s.handleSyncStatus)
 
 	// Agent management
 	mux.HandleFunc("GET /api/v1/swarms/{name}/agents", s.handleListAgents)
@@ -157,6 +178,10 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body: " + err.Error()})
 		return
 	}
+	if !validName(manifest.Metadata.Name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid swarm name: must be 1-64 alphanumeric/dash/underscore characters"})
+		return
+	}
 
 	sw := &domain.Swarm{
 		Name:   manifest.Metadata.Name,
@@ -164,30 +189,40 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 		Spec:   manifest.Spec,
 	}
 
+	if !s.createOrUpdateSwarm(r.Context(), w, sw) {
+		return
+	}
+
+	slog.Info("swarm created", "name", sw.Name, "id", sw.ID)
+	writeJSON(w, http.StatusCreated, sw)
+}
+
+// createOrUpdateSwarm handles the common logic for creating or replacing a swarm.
+func (s *Server) createOrUpdateSwarm(ctx context.Context, w http.ResponseWriter, sw *domain.Swarm) bool {
 	// Upsert: if the swarm already exists, terminate its containers and delete it first
-	if existing, err := s.store.GetSwarmByName(r.Context(), sw.Name); err == nil && existing != nil {
+	if existing, err := s.store.GetSwarmByName(ctx, sw.Name); err == nil && existing != nil {
 		slog.Info("swarm already exists, replacing", "name", sw.Name)
 		s.stopBridge(sw.Name)
 		instances := s.pool.ListBySwarm(sw.Name)
 		for _, inst := range instances {
-			_ = s.registry.Deregister(r.Context(), sw.Name, inst.ID)
-			_ = s.pool.Terminate(r.Context(), inst.ID)
+			_ = s.registry.Deregister(ctx, sw.Name, inst.ID)
+			_ = s.pool.Terminate(ctx, inst.ID)
 		}
-		_ = s.store.DeleteSwarm(r.Context(), sw.Name)
+		_ = s.store.DeleteSwarm(ctx, sw.Name)
 	}
 
-	if err := s.store.CreateSwarm(r.Context(), sw); err != nil {
+	if err := s.store.CreateSwarm(ctx, sw); err != nil {
 		slog.Error("create swarm failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return false
 	}
 
 	// Initialize budget tracking in Redis
-	if err := s.budget.InitBudget(r.Context(), sw.Name,
+	if err := s.budget.InitBudget(ctx, sw.Name,
 		sw.Spec.Budget.Total, sw.Spec.Budget.AlertAt, sw.Spec.Budget.HardStop); err != nil {
 		slog.Error("init budget failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to initialize budget: " + err.Error()})
-		return
+		return false
 	}
 
 	// Resolve defaults for all agents in the spec
@@ -195,13 +230,13 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 	resolvedSpec.Agents = config.ResolveAllAgents(sw.Spec)
 
 	// Register agents and start the swarm
-	if err := s.lifecycle.RegisterSwarmAgents(r.Context(), sw.Name, resolvedSpec); err != nil {
+	if err := s.lifecycle.RegisterSwarmAgents(ctx, sw.Name, resolvedSpec); err != nil {
 		slog.Error("register agents failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agents: " + err.Error()})
-		return
+		return false
 	}
 
-	s.startBridge(r.Context(), sw.Name, resolvedSpec)
+	s.startBridge(ctx, sw.Name, resolvedSpec)
 
 	// Broadcast swarm creation to SSE clients
 	s.hub.Broadcast(sw.Name, sse.Event{
@@ -209,8 +244,14 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 		Data: sw,
 	})
 
-	slog.Info("swarm created", "name", sw.Name, "id", sw.ID)
-	writeJSON(w, http.StatusCreated, sw)
+	// Audit: swarm created
+	s.audit.Log(domain.AuditEvent{
+		SwarmName: sw.Name,
+		Action:    domain.AuditSwarmCreated,
+		Metadata:  audit.Meta("agents", fmt.Sprintf("%d", len(sw.Spec.Agents))),
+	})
+
+	return true
 }
 
 func (s *Server) handleListSwarms(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +307,10 @@ func (s *Server) handleDeleteSwarm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Deregister all agents from Redis registry
-	agents, _ := s.registry.ListAgentsBySwarm(r.Context(), name)
+	agents, listErr := s.registry.ListAgentsBySwarm(r.Context(), name)
+	if listErr != nil {
+		slog.Warn("failed to list agents for deregistration during swarm deletion", "swarm", name, "error", listErr)
+	}
 	for _, a := range agents {
 		if err := s.registry.Deregister(r.Context(), name, a.ID); err != nil {
 			slog.Warn("failed to deregister agent during swarm deletion",
@@ -274,8 +318,197 @@ func (s *Server) handleDeleteSwarm(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Audit: swarm deleted
+	s.audit.Log(domain.AuditEvent{
+		SwarmName: name,
+		Action:    domain.AuditSwarmDeleted,
+		Metadata:  audit.Meta("containersTerminated", fmt.Sprintf("%d", terminated)),
+	})
+
 	slog.Info("swarm deleted", "name", name, "containersTerminated", terminated)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "name": name})
+}
+
+// handleStopSwarm gracefully stops a swarm: terminates containers, deregisters
+// agents, sets status to "stopped", but keeps the DB record so it can be restarted.
+func (s *Server) handleStopSwarm(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	sw, err := s.store.GetSwarmByName(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "swarm not found"})
+		return
+	}
+
+	if sw.Status == domain.SwarmStatusStopped {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "already stopped", "name": name})
+		return
+	}
+
+	// Stop the NATS bridge
+	s.stopBridge(name)
+
+	// Terminate all Docker containers
+	instances := s.pool.ListBySwarm(name)
+	terminated := 0
+	for _, inst := range instances {
+		_ = s.registry.Deregister(r.Context(), name, inst.ID)
+		if err := s.pool.Terminate(r.Context(), inst.ID); err != nil {
+			slog.Warn("stop swarm: terminate container", "id", inst.ID, "error", err)
+		} else {
+			terminated++
+		}
+	}
+
+	// Update swarm status to stopped
+	if err := s.store.UpdateSwarmStatus(r.Context(), name, domain.SwarmStatusStopped); err != nil {
+		slog.Error("stop swarm: update status", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Audit event
+	s.audit.Log(domain.AuditEvent{
+		SwarmName: name,
+		Action:    domain.AuditSwarmDeleted, // reuse "stopped" semantics
+		Metadata:  audit.Meta("action", "stop", "containersTerminated", fmt.Sprintf("%d", terminated)),
+	})
+
+	// Broadcast SSE
+	s.hub.Broadcast(name, sse.Event{
+		Type: "swarm_stopped",
+		Data: map[string]string{"name": name, "containersTerminated": fmt.Sprintf("%d", terminated)},
+	})
+
+	slog.Info("swarm stopped", "name", name, "containersTerminated", terminated)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped", "name": name, "containersTerminated": fmt.Sprintf("%d", terminated)})
+}
+
+// handleStartSwarm re-starts a stopped swarm by re-applying its existing spec.
+func (s *Server) handleStartSwarm(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	sw, err := s.store.GetSwarmByName(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "swarm not found"})
+		return
+	}
+
+	if sw.Status == domain.SwarmStatusRunning {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "already running", "name": name})
+		return
+	}
+
+	// Re-initialize budget
+	if err := s.budget.InitBudget(r.Context(), sw.Name,
+		sw.Spec.Budget.Total, sw.Spec.Budget.AlertAt, sw.Spec.Budget.HardStop); err != nil {
+		slog.Error("start swarm: init budget", "error", err)
+	}
+
+	// Resolve agent configs and reconcile
+	resolvedSpec := sw.Spec
+	resolvedSpec.Agents = config.ResolveAllAgents(sw.Spec)
+
+	if err := s.lifecycle.RegisterSwarmAgents(r.Context(), sw.Name, resolvedSpec); err != nil {
+		slog.Error("start swarm: register agents", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Re-start NATS bridge
+	s.startBridge(r.Context(), sw.Name, resolvedSpec)
+
+	// Broadcast SSE
+	s.hub.Broadcast(sw.Name, sse.Event{
+		Type: "swarm_started",
+		Data: sw,
+	})
+
+	// Audit
+	s.audit.Log(domain.AuditEvent{
+		SwarmName: name,
+		Action:    domain.AuditSwarmCreated, // reuse "started" semantics
+		Metadata:  audit.Meta("action", "start"),
+	})
+
+	slog.Info("swarm started", "name", name)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "running", "name": name})
+}
+
+// handleSyncStatus returns the sync status of a swarm (desired vs actual state).
+func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	sw, err := s.store.GetSwarmByName(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "swarm not found"})
+		return
+	}
+
+	type roleStatus struct {
+		Role    string `json:"role"`
+		Desired int    `json:"desired"`
+		Actual  int    `json:"actual"`
+		Healthy int    `json:"healthy"`
+	}
+
+	roles := make([]roleStatus, 0, len(sw.Spec.Agents))
+	totalDesired := 0
+	totalActual := 0
+	totalHealthy := 0
+
+	for _, agentSpec := range sw.Spec.Agents {
+		desired := int(agentSpec.Replicas.Min)
+		if desired < 1 {
+			desired = 1
+		}
+		actual := s.pool.CountByRole(name, agentSpec.Name)
+
+		// Count healthy instances
+		healthy := 0
+		instances := s.pool.ListByRole(name, agentSpec.Name)
+		for _, inst := range instances {
+			if s.pool.HealthCheck(r.Context(), inst) {
+				healthy++
+			}
+		}
+
+		roles = append(roles, roleStatus{
+			Role:    agentSpec.Name,
+			Desired: desired,
+			Actual:  actual,
+			Healthy: healthy,
+		})
+		totalDesired += desired
+		totalActual += actual
+		totalHealthy += healthy
+	}
+
+	// Determine sync status
+	syncStatus := "synced"
+	if sw.Status == domain.SwarmStatusStopped {
+		syncStatus = "stopped"
+	} else if totalActual == 0 && totalDesired > 0 {
+		syncStatus = "stopped"
+	} else if totalHealthy < totalDesired {
+		if totalActual >= totalDesired {
+			syncStatus = "degraded" // right count but some unhealthy
+		} else {
+			syncStatus = "out-of-sync" // wrong count
+		}
+	} else if totalActual > totalDesired {
+		syncStatus = "out-of-sync"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"swarmName":    name,
+		"swarmStatus":  sw.Status,
+		"syncStatus":   syncStatus,
+		"totalDesired": totalDesired,
+		"totalActual":  totalActual,
+		"totalHealthy": totalHealthy,
+		"roles":        roles,
+	})
 }
 
 func (s *Server) handleSwarmSend(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +555,7 @@ func (s *Server) handleSwarmSend(w http.ResponseWriter, r *http.Request) {
 // handleDeploySwarmYAML accepts raw YAML and creates/updates a swarm.
 // Used by the dashboard deploy page which sends YAML directly.
 func (s *Server) handleDeploySwarmYAML(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 		return
@@ -333,61 +566,27 @@ func (s *Server) handleDeploySwarmYAML(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
+	if !validName(manifest.Metadata.Name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid swarm name: must be 1-64 alphanumeric/dash/underscore characters"})
+		return
+	}
 
-	// Delegate to the same swarm creation logic
 	sw := &domain.Swarm{
 		Name:   manifest.Metadata.Name,
 		Status: domain.SwarmStatusPending,
 		Spec:   manifest.Spec,
 	}
 
-	// Upsert: if the swarm already exists, terminate its containers and delete it first
-	if existing, err := s.store.GetSwarmByName(r.Context(), sw.Name); err == nil && existing != nil {
-		slog.Info("swarm already exists, replacing", "name", sw.Name)
-		s.stopBridge(sw.Name)
-		instances := s.pool.ListBySwarm(sw.Name)
-		for _, inst := range instances {
-			_ = s.registry.Deregister(r.Context(), sw.Name, inst.ID)
-			_ = s.pool.Terminate(r.Context(), inst.ID)
-		}
-		_ = s.store.DeleteSwarm(r.Context(), sw.Name)
-	}
-
-	if err := s.store.CreateSwarm(r.Context(), sw); err != nil {
-		slog.Error("create swarm failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if !s.createOrUpdateSwarm(r.Context(), w, sw) {
 		return
 	}
-
-	if err := s.budget.InitBudget(r.Context(), sw.Name,
-		sw.Spec.Budget.Total, sw.Spec.Budget.AlertAt, sw.Spec.Budget.HardStop); err != nil {
-		slog.Error("init budget failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to initialize budget: " + err.Error()})
-		return
-	}
-
-	resolvedSpec := sw.Spec
-	resolvedSpec.Agents = config.ResolveAllAgents(sw.Spec)
-
-	if err := s.lifecycle.RegisterSwarmAgents(r.Context(), sw.Name, resolvedSpec); err != nil {
-		slog.Error("register agents failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agents: " + err.Error()})
-		return
-	}
-
-	s.startBridge(r.Context(), sw.Name, resolvedSpec)
-
-	s.hub.Broadcast(sw.Name, sse.Event{
-		Type: "swarm_created",
-		Data: sw,
-	})
 
 	slog.Info("swarm deployed from YAML", "name", sw.Name, "id", sw.ID)
 	writeJSON(w, http.StatusCreated, sw)
 }
 
 func (s *Server) handleValidateSwarm(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 		return
@@ -442,7 +641,63 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScaleAgent(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "scaling not yet implemented"})
+	name := r.PathValue("name")
+	role := r.PathValue("role")
+
+	var req struct {
+		Replicas int `json:"replicas"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Replicas < 0 || req.Replicas > 10 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "replicas must be 0-10"})
+		return
+	}
+
+	sw, err := s.store.GetSwarmByName(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "swarm not found"})
+		return
+	}
+
+	// Find the agent spec and adjust desired replicas
+	found := false
+	for i, a := range sw.Spec.Agents {
+		if a.Name == role {
+			sw.Spec.Agents[i].Replicas.Min = int32(req.Replicas)
+			sw.Spec.Agents[i].Replicas.Max = int32(req.Replicas)
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("role %q not found", role)})
+		return
+	}
+
+	// Persist updated spec
+	if err := s.store.UpdateSwarmSpec(r.Context(), name, sw.Spec); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Reconcile immediately
+	resolvedSpec := sw.Spec
+	resolvedSpec.Agents = config.ResolveAllAgents(sw.Spec)
+	if err := s.lifecycle.Reconcile(r.Context(), name, resolvedSpec); err != nil {
+		slog.Error("scale: reconcile", "error", err)
+	}
+
+	actual := s.pool.CountByRole(name, role)
+	slog.Info("scaled agent", "swarm", name, "role", role, "replicas", req.Replicas, "actual", actual)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "scaled",
+		"role":    role,
+		"desired": req.Replicas,
+		"actual":  actual,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -540,10 +795,51 @@ func (s *Server) handleGetBudget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, state)
 }
 func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []any{})
+	name := r.PathValue("name")
+
+	filter := domain.AuditFilter{
+		SwarmName: name,
+		AgentID:   r.URL.Query().Get("agent"),
+		Limit:     100,
+	}
+	if action := r.URL.Query().Get("action"); action != "" {
+		filter.Action = domain.AuditAction(action)
+	}
+
+	events, err := s.store.ListAuditEvents(r.Context(), filter)
+	if err != nil {
+		slog.Error("list audit events failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if events == nil {
+		events = []domain.AuditEvent{}
+	}
+	writeJSON(w, http.StatusOK, events)
 }
+
 func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+	name := r.PathValue("name")
+	agentID := r.URL.Query().Get("agent")
+
+	if agentID != "" {
+		// Verify a single agent's chain
+		result, err := s.audit.VerifyChain(r.Context(), name, agentID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	// Verify all agents in the swarm
+	results, err := s.audit.VerifySwarm(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 func (s *Server) handleListGenomes(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,11 +15,14 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SwarmGraph } from '@/components/dashboard/swarm-graph';
-import { TaskForm } from '@/components/dashboard/task-form';
 import { CostGauge } from '@/components/dashboard/cost-gauge';
 import { ContainerList } from '@/components/dashboard/container-list';
 import { ExecutionLog } from '@/components/dashboard/execution-log';
+import { SwarmCommandBar } from '@/components/dashboard/swarm-command-bar';
+import { AuditPanel } from '@/components/dashboard/audit-panel';
+import { AgentDetailDrawer } from '@/components/dashboard/agent-detail-drawer';
 import { useSwarmSSE } from '@/hooks/use-sse';
+import { shortenModel } from '@/lib/utils';
 import {
   listSwarms,
   listAgents,
@@ -37,6 +40,8 @@ export default function DashboardPage() {
   const [initialTasks, setInitialTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drawerAgent, setDrawerAgent] = useState<AgentSpec | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Real-time SSE data
   const {
@@ -53,12 +58,6 @@ export default function DashboardPage() {
   const agents = sseAgents.length > 0 ? sseAgents : initialAgents;
   const tasks = sseTasks.length > 0 ? sseTasks : initialTasks;
 
-  // Extract unique agent roles from the swarm spec for the task form
-  const agentRoles = useMemo(
-    () => selectedSwarm?.spec.agents.map((a) => a.name) ?? [],
-    [selectedSwarm]
-  );
-
   // Fetch swarms on mount
   useEffect(() => {
     fetchSwarms();
@@ -71,18 +70,33 @@ export default function DashboardPage() {
     }
   }, [selectedSwarm]);
 
-  async function fetchSwarms() {
+  async function fetchSwarms(isInitial = true) {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const data = await listSwarms();
       setSwarms(data);
       if (data.length > 0) {
-        setSelectedSwarm(data[0]);
+        // On refresh, update the selected swarm's data while preserving selection
+        if (selectedSwarm) {
+          const updated = data.find((s) => s.name === selectedSwarm.name);
+          if (updated) {
+            setSelectedSwarm(updated);
+          } else {
+            // Selected swarm was deleted, fall back to first
+            setSelectedSwarm(data[0]);
+          }
+        } else {
+          setSelectedSwarm(data[0]);
+        }
+      } else {
+        setSelectedSwarm(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect to control plane');
+      if (isInitial) {
+        setError(err instanceof Error ? err.message : 'Failed to connect to control plane');
+      }
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }
 
@@ -99,6 +113,13 @@ export default function DashboardPage() {
   /** Resolve the effective model for an agent (per-agent overrides swarm defaults). */
   function resolveModel(agent: AgentSpec): string {
     return agent.model || selectedSwarm?.spec.defaults?.model || 'default';
+  }
+
+  /** Open the agent detail drawer when a node is clicked in the graph. */
+  function handleAgentClick(agentName: string) {
+    const spec = selectedSwarm?.spec.agents.find((a) => a.name === agentName) ?? null;
+    setDrawerAgent(spec);
+    setDrawerOpen(true);
   }
 
   if (loading) {
@@ -246,6 +267,11 @@ export default function DashboardPage() {
             </Card>
           )}
 
+          {/* Swarm lifecycle command bar */}
+          {selectedSwarm && (
+            <SwarmCommandBar swarm={selectedSwarm} onSwarmChanged={() => fetchSwarms(false)} />
+          )}
+
           {/* Sidebar panel: Task Form + Cost Gauge */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Main content — takes 2 cols on large screens */}
@@ -259,12 +285,17 @@ export default function DashboardPage() {
                   <TabsTrigger value="tasks">Tasks</TabsTrigger>
                   <TabsTrigger value="topology">Topology</TabsTrigger>
                   <TabsTrigger value="logs">Logs</TabsTrigger>
+                  <TabsTrigger value="audit">Audit</TabsTrigger>
                 </TabsList>
 
                 {/* Graph view */}
                 <TabsContent value="graph">
                   {selectedSwarm && (
-                    <SwarmGraph spec={selectedSwarm.spec} agentStates={agentStates} />
+                    <SwarmGraph
+                      spec={selectedSwarm.spec}
+                      agentStates={agentStates}
+                      onNodeClick={handleAgentClick}
+                    />
                   )}
                 </TabsContent>
 
@@ -538,6 +569,11 @@ export default function DashboardPage() {
                 <TabsContent value="logs">
                   <ExecutionLog events={events} />
                 </TabsContent>
+
+                {/* Audit */}
+                <TabsContent value="audit">
+                  {selectedSwarm && <AuditPanel swarmName={selectedSwarm.name} />}
+                </TabsContent>
               </Tabs>
             </div>
 
@@ -545,7 +581,6 @@ export default function DashboardPage() {
             <div className="space-y-6">
               {selectedSwarm && (
                 <>
-                  <TaskForm swarmName={selectedSwarm.name} agentRoles={agentRoles} />
                   <CostGauge budget={budget} specBudget={selectedSwarm.spec.budget} />
 
                   {/* Swarm config summary */}
@@ -606,6 +641,15 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+
+      {/* Agent detail drawer (slide-out) */}
+      <AgentDetailDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        agentSpec={drawerAgent}
+        executionState={drawerAgent ? (agentStates[drawerAgent.name] ?? 'idle') : 'idle'}
+        swarmName={selectedSwarm?.name ?? ''}
+      />
     </div>
   );
 }
@@ -685,15 +729,4 @@ function DashboardSkeleton() {
       <Skeleton className="h-[600px]" />
     </div>
   );
-}
-
-function shortenModel(model: string | undefined): string {
-  if (!model) return 'default';
-  if (model.includes('haiku')) return 'Haiku';
-  if (model.includes('sonnet')) return 'Sonnet';
-  if (model.includes('opus')) return 'Opus';
-  if (model.includes('llama')) return model.split('/').pop() || 'Llama';
-  if (model.includes('groq')) return model.split('/').pop() || model;
-  if (model.includes('/')) return model.split('/').pop() || model;
-  return model;
 }

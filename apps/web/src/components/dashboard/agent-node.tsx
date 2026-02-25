@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { AgentExecutionState } from '@/hooks/use-sse';
+import { shortenModel } from '@/lib/utils';
 
 export interface AgentNodeData {
   label: string;
@@ -173,16 +174,6 @@ function AgentNodeComponent({ data }: NodeProps) {
       />
     </div>
   );
-}
-
-function shortenModel(model: string | undefined): string {
-  if (!model) return 'default';
-  if (model.includes('haiku')) return 'Haiku';
-  if (model.includes('sonnet')) return 'Sonnet';
-  if (model.includes('opus')) return 'Opus';
-  if (model.includes('llama')) return 'Llama';
-  if (model.includes('/')) return model.split('/').pop() || model;
-  return model.split('-').slice(0, 2).join('-');
 }
 
 export const AgentNode = memo(AgentNodeComponent);

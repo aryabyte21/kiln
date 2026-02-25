@@ -21,7 +21,7 @@ type Agent struct {
 	Role         string            `json:"role"`
 	Status       AgentStatus       `json:"status"`
 	Model        string            `json:"model"`
-	OpenClawAddr string            `json:"openclawAddr"` // host:port of the OpenClaw Gateway
+	OpenClawAddr string            `json:"openclawAddr"`          // host:port of the OpenClaw Gateway
 	ContainerID  string            `json:"containerId,omitempty"` // Docker container ID
 	ConfigHash   string            `json:"configHash"`
 	Labels       map[string]string `json:"labels,omitempty"`

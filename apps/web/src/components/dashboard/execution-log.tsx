@@ -35,6 +35,10 @@ function getEventDisplay(type: string): { label: string; colorClass: string } {
       return { label: 'SWARM', colorClass: 'text-cyan-300' };
     case 'connected':
       return { label: 'CONN', colorClass: 'text-emerald-300' };
+    case 'swarm_stopped':
+      return { label: 'STOP', colorClass: 'text-red-300' };
+    case 'swarm_started':
+      return { label: 'START', colorClass: 'text-emerald-300' };
     default:
       return { label: type.toUpperCase().slice(0, 6), colorClass: 'text-zinc-500' };
   }
@@ -107,6 +111,12 @@ function formatLogLine(entry: EventLogEntry): {
       break;
     case 'swarm_created':
       details = 'swarm initialized';
+      break;
+    case 'swarm_stopped':
+      details = 'swarm stopped';
+      break;
+    case 'swarm_started':
+      details = 'swarm started';
       break;
     default:
       details = JSON.stringify(data).slice(0, 60);

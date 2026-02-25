@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/openswarm/openswarm/internal/api"
+	"github.com/openswarm/openswarm/internal/audit"
 	"github.com/openswarm/openswarm/internal/budget"
 	"github.com/openswarm/openswarm/internal/bus"
 	"github.com/openswarm/openswarm/internal/executor"
@@ -135,6 +136,13 @@ func main() {
 		slog.Warn("failed to recover existing containers", "error", err)
 	}
 
+	// Audit logger — hash-chained tamper-evident audit trail
+	// Must be created before executor (executor emits audit events)
+	auditLog := audit.New(st, msgBus, hub)
+	if err := auditLog.LoadChains(ctx); err != nil {
+		slog.Warn("audit: failed to load existing chains (OK on first run)", "error", err)
+	}
+
 	// Lifecycle manager — reconciles desired vs actual agent state
 	lm := lifecycle.New(st, reg, instancePool, hub)
 
@@ -142,7 +150,7 @@ func main() {
 	sched := scheduler.New(st, reg, msgBus)
 
 	// Executor — sends tasks to real OpenClaw instances via HTTP
-	exec := executor.New(st, reg, instancePool, msgBus, bt, hub, executor.Config{
+	exec := executor.New(st, reg, instancePool, msgBus, bt, hub, auditLog, executor.Config{
 		GatewayToken: getEnv("OPENCLAW_GATEWAY_TOKEN", "openswarm-secret"),
 	})
 
@@ -162,7 +170,7 @@ func main() {
 		OpenClawToken:     getEnv("OPENCLAW_GATEWAY_TOKEN", "openswarm-secret"),
 	}
 
-	server := api.NewServer(cfg, st, reg, msgBus, hub, bt, lm, ge, instancePool)
+	server := api.NewServer(cfg, st, reg, msgBus, hub, bt, lm, ge, instancePool, auditLog)
 
 	httpServer := &http.Server{
 		Addr:         ":" + port,
@@ -175,6 +183,11 @@ func main() {
 	// -----------------------------------------------------------------------
 	// Start subsystems
 	// -----------------------------------------------------------------------
+
+	if err := auditLog.Start(ctx); err != nil {
+		slog.Error("failed to start audit logger", "error", err)
+		os.Exit(1)
+	}
 
 	if err := lm.Start(ctx); err != nil {
 		slog.Error("failed to start lifecycle manager", "error", err)
@@ -216,6 +229,7 @@ func main() {
 	exec.Stop()
 	sched.Stop()
 	lm.Stop()
+	auditLog.Stop()
 	// In dev mode (air hot reload), keep containers alive so they can be recovered on restart
 	if os.Getenv("DEV_KEEP_CONTAINERS") != "true" {
 		instancePool.TerminateAll(context.Background())

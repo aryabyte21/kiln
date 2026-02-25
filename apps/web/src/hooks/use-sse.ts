@@ -228,6 +228,34 @@ export function useSwarmSSE(swarmName: string | null) {
       }
     });
 
+    // --- swarm_stopped ---
+    es.addEventListener('swarm_stopped', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as Record<string, unknown>;
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'swarm_stopped', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: { time: nowTimestamp(), type: 'swarm_stopped', data },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    // --- swarm_started ---
+    es.addEventListener('swarm_started', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as Record<string, unknown>;
+        dispatch({ type: 'SET_LAST_EVENT', event: { type: 'swarm_started', data } });
+        dispatch({
+          type: 'APPEND_EVENT',
+          entry: { time: nowTimestamp(), type: 'swarm_started', data },
+        });
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
     // --- agent_registered ---
     es.addEventListener('agent_registered', (e: MessageEvent) => {
       try {

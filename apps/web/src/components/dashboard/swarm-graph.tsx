@@ -24,10 +24,11 @@ const edgeTypes = { dataflow: DataFlowEdge };
 interface SwarmGraphProps {
   spec: SwarmSpec;
   agentStates?: Record<string, AgentExecutionState>;
+  onNodeClick?: (agentName: string) => void;
   className?: string;
 }
 
-export function SwarmGraph({ spec, agentStates, className }: SwarmGraphProps) {
+export function SwarmGraph({ spec, agentStates, onNodeClick, className }: SwarmGraphProps) {
   const { initialNodes, initialEdges } = useMemo(() => buildGraph(spec), [spec]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -68,6 +69,7 @@ export function SwarmGraph({ spec, agentStates, className }: SwarmGraphProps) {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeClick={(_event, node) => onNodeClick?.(node.id)}
         onInit={onInit}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}

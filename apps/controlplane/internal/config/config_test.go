@@ -216,9 +216,9 @@ spec:
 func TestExampleYAMLs(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..", "examples")
 	examples := []struct {
-		dir       string
-		name      string
-		agentCnt  int
+		dir         string
+		name        string
+		agentCnt    int
 		hasDefaults bool
 	}{
 		{"hello-swarm", "hello-swarm", 2, true},

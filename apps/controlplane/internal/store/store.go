@@ -199,6 +199,21 @@ func (s *Store) UpdateSwarmStatus(ctx context.Context, name string, status domai
 	return nil
 }
 
+// UpdateSwarmSpec persists an updated swarm spec (e.g. after scaling replicas).
+func (s *Store) UpdateSwarmSpec(ctx context.Context, name string, spec domain.SwarmSpec) error {
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("store: marshal spec: %w", err)
+	}
+	_, err = s.pool.Exec(ctx,
+		`UPDATE swarms SET spec = $1, updated_at = now() WHERE name = $2`,
+		specJSON, name)
+	if err != nil {
+		return fmt.Errorf("store: update swarm spec %q: %w", name, err)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Tasks (sqlc-backed)
 // ---------------------------------------------------------------------------
@@ -623,4 +638,178 @@ func (s *Store) SaveSettings(ctx context.Context, key string, settings *domain.P
 		return fmt.Errorf("save settings %s: %w", key, err)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Audit Events (direct SQL — hypertable, not sqlc)
+// ---------------------------------------------------------------------------
+
+// InsertAuditEvent writes a single audit event to the TimescaleDB hypertable.
+func (s *Store) InsertAuditEvent(ctx context.Context, e *domain.AuditEvent) error {
+	metaJSON, err := json.Marshal(e.Metadata)
+	if err != nil {
+		metaJSON = []byte("{}")
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO audit_events (time, swarm_name, agent_id, task_id, action, tokens_used, cost_usd,
+			input_hash, output_hash, prev_hash, event_hash, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	`, e.Time, e.SwarmName, e.AgentID, nullUUID(e.TaskID), string(e.Action),
+		e.TokensUsed, e.CostUSD, e.InputHash, e.OutputHash, e.PrevHash, e.EventHash, metaJSON)
+	if err != nil {
+		return fmt.Errorf("store: insert audit event: %w", err)
+	}
+	return nil
+}
+
+// ListAuditEvents returns audit events for a swarm with optional filters.
+func (s *Store) ListAuditEvents(ctx context.Context, f domain.AuditFilter) ([]domain.AuditEvent, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+		SELECT time, swarm_name, agent_id, COALESCE(task_id::text, '') AS task_id,
+			action, tokens_used, cost_usd, COALESCE(input_hash,'') AS input_hash,
+			COALESCE(output_hash,'') AS output_hash, COALESCE(prev_hash,'') AS prev_hash,
+			event_hash, COALESCE(metadata, '{}') AS metadata
+		FROM audit_events
+		WHERE swarm_name = $1
+	`
+	args := []interface{}{f.SwarmName}
+	argIdx := 2
+
+	if f.AgentID != "" {
+		query += fmt.Sprintf(" AND agent_id = $%d", argIdx)
+		args = append(args, f.AgentID)
+		argIdx++
+	}
+	if f.Action != "" {
+		query += fmt.Sprintf(" AND action = $%d", argIdx)
+		args = append(args, string(f.Action))
+		argIdx++
+	}
+
+	query += fmt.Sprintf(" ORDER BY time DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list audit events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []domain.AuditEvent
+	for rows.Next() {
+		var e domain.AuditEvent
+		var action string
+		var metaJSON []byte
+		if err := rows.Scan(&e.Time, &e.SwarmName, &e.AgentID, &e.TaskID,
+			&action, &e.TokensUsed, &e.CostUSD, &e.InputHash,
+			&e.OutputHash, &e.PrevHash, &e.EventHash, &metaJSON); err != nil {
+			return nil, fmt.Errorf("store: scan audit event: %w", err)
+		}
+		e.Action = domain.AuditAction(action)
+		if len(metaJSON) > 0 {
+			_ = json.Unmarshal(metaJSON, &e.Metadata)
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+// ListAuditEventsByAgent returns all audit events for a specific agent in
+// chronological order (oldest first) for chain verification.
+func (s *Store) ListAuditEventsByAgent(ctx context.Context, swarmName, agentID string) ([]domain.AuditEvent, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT time, swarm_name, agent_id, COALESCE(task_id::text, '') AS task_id,
+			action, tokens_used, cost_usd, COALESCE(input_hash,'') AS input_hash,
+			COALESCE(output_hash,'') AS output_hash, COALESCE(prev_hash,'') AS prev_hash,
+			event_hash, COALESCE(metadata, '{}') AS metadata
+		FROM audit_events
+		WHERE swarm_name = $1 AND agent_id = $2
+		ORDER BY time ASC
+	`, swarmName, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list audit events by agent: %w", err)
+	}
+	defer rows.Close()
+
+	var events []domain.AuditEvent
+	for rows.Next() {
+		var e domain.AuditEvent
+		var action string
+		var metaJSON []byte
+		if err := rows.Scan(&e.Time, &e.SwarmName, &e.AgentID, &e.TaskID,
+			&action, &e.TokensUsed, &e.CostUSD, &e.InputHash,
+			&e.OutputHash, &e.PrevHash, &e.EventHash, &metaJSON); err != nil {
+			return nil, fmt.Errorf("store: scan audit event: %w", err)
+		}
+		e.Action = domain.AuditAction(action)
+		if len(metaJSON) > 0 {
+			_ = json.Unmarshal(metaJSON, &e.Metadata)
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+// GetLastAuditHashes returns the last event_hash for each agent_id,
+// used to resume hash chains after a restart.
+func (s *Store) GetLastAuditHashes(ctx context.Context) (map[string]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (agent_id) agent_id, event_hash
+		FROM audit_events
+		ORDER BY agent_id, time DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("store: get last audit hashes: %w", err)
+	}
+	defer rows.Close()
+
+	chains := make(map[string]string)
+	for rows.Next() {
+		var agentID, hash string
+		if err := rows.Scan(&agentID, &hash); err != nil {
+			return nil, fmt.Errorf("store: scan audit hash: %w", err)
+		}
+		chains[agentID] = hash
+	}
+	return chains, nil
+}
+
+// ListAuditAgentIDs returns all distinct agent IDs that have audit events
+// for a given swarm.
+func (s *Store) ListAuditAgentIDs(ctx context.Context, swarmName string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT agent_id FROM audit_events WHERE swarm_name = $1 ORDER BY agent_id
+	`, swarmName)
+	if err != nil {
+		return nil, fmt.Errorf("store: list audit agent IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scan agent ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// nullUUID converts a string ID to a pgtype-compatible value.
+// Empty strings become NULL.
+func nullUUID(id string) interface{} {
+	if id == "" {
+		return nil
+	}
+	return id
 }
