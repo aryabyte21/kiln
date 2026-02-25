@@ -1,493 +1,304 @@
 <div align="center">
 
-# 🚀 CS5224 Cloud SaaS Monorepo
+# OpenSwarm
 
-**A production-ready polyglot monorepo for building and comparing cloud-native SaaS applications**
+**Kubernetes-like orchestrator for fleets of OpenClaw AI agent instances**
 
-[![CI JS](https://github.com/YOUR_USERNAME/cs5224-monorepo/actions/workflows/ci-js.yml/badge.svg)](https://github.com/YOUR_USERNAME/cs5224-monorepo/actions/workflows/ci-js.yml)
-[![CI Python Go](https://github.com/YOUR_USERNAME/cs5224-monorepo/actions/workflows/ci-python-go.yml/badge.svg)](https://github.com/YOUR_USERNAME/cs5224-monorepo/actions/workflows/ci-python-go.yml)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
-[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)](https://www.python.org/)
+[![CI JS](https://github.com/aryabyte21/openswarm/actions/workflows/ci-js.yml/badge.svg)](https://github.com/aryabyte21/openswarm/actions/workflows/ci-js.yml)
+[![CI Go](https://github.com/aryabyte21/openswarm/actions/workflows/ci-python-go.yml/badge.svg)](https://github.com/aryabyte21/openswarm/actions/workflows/ci-python-go.yml)
 [![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go)](https://go.dev/)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-_Built for NUS CS5224 Cloud Computing Project (Spring 2026)_
+_NUS CS5224 Cloud Computing — Spring 2026_
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [Documentation](#-documentation) • [Contributing](#-contributing)
+[Architecture](#architecture) · [Quick Start](#quick-start) · [Commands](#commands) · [API](#api-routes)
 
 </div>
 
 ---
 
-## ✨ Features
+## What is OpenSwarm?
 
-### 🎨 Modern Frontend Stack
+OpenSwarm manages fleets of AI agent instances the way Kubernetes manages containers. You declare a **swarm manifest** in YAML — agent roles, models, scaling policies, topology — and OpenSwarm handles scheduling, inter-agent messaging, cost tracking, and auto-scaling.
 
-- **Next.js 15** with App Router and React Server Components
-- **React 19** with the latest concurrent features
-- **shadcn/ui** - Beautiful, accessible component library (full core UI set installed)
-- **Tailwind CSS** - Utility-first styling
-- **Drizzle ORM** - Type-safe database access with migrations
-- **TypeScript** - End-to-end type safety
+```yaml
+apiVersion: openswarm/v1alpha1
+kind: Swarm
+metadata:
+  name: news-pipeline
+spec:
+  agents:
+    - name: researcher
+      model: claude-sonnet-4-20250514
+      replicas: { min: 2, max: 5 }
+      skills: [web-search, summarize]
+    - name: writer
+      model: claude-sonnet-4-20250514
+      dependsOn: [researcher]
+      skills: [long-form-writing]
+    - name: editor
+      model: claude-sonnet-4-20250514
+      dependsOn: [writer]
+      skills: [fact-check, style-guide]
+  topology:
+    - from: researcher
+      to: writer
+      subject: swarm.news-pipeline.pipeline.articles
+    - from: writer
+      to: editor
+      subject: swarm.news-pipeline.pipeline.drafts
+  budget:
+    maxDailyUSD: 10.00
+```
 
-### 🔧 Polyglot Backend Services
+Then apply it:
 
-- **FastAPI** (Python) - High-performance async API framework
-- **Go HTTP** - Low-latency service endpoints
-- **PostgreSQL** - Robust relational database
-- Service health monitoring and status endpoints
-
-### 🛠️ Developer Experience
-
-- **⚡ 2-Minute Setup** - Automated quickstart script
-- **📦 Nx Monorepo** - Efficient task orchestration and caching
-- **🔄 mise** - Runtime version management (Node, Python, Go)
-- **🎯 Pre-commit Hooks** - Auto-fix linting and formatting
-- **📝 Changesets** - Version management and changelog generation
-- **🐳 Docker Compose** - Local infrastructure orchestration
-
-### 🚀 Production Ready
-
-- **CI/CD Pipelines** - GitHub Actions for JS, Python, and Go
-- **Infrastructure as Code** - Terraform + Kubernetes manifests
-- **GitOps Ready** - ArgoCD configuration for deployments
-- **Environment Validation** - Zod-based env var validation
-- **Type-Safe APIs** - Shared types across services
+```bash
+openswarm apply -f swarm.yaml
+openswarm status news-pipeline
+openswarm agents news-pipeline
+```
 
 ---
 
-## 🎯 Quick Start
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Next.js Dashboard                     │
+│              React Flow graph · SSE updates              │
+│                  shadcn/ui · Drizzle ORM                 │
+└────────────────────────┬────────────────────────────────┘
+                         │ HTTP + SSE
+┌────────────────────────▼────────────────────────────────┐
+│                   Go Control Plane                       │
+│   stdlib net/http · slog · API :9090 · CLI (Cobra)      │
+├──────────┬──────────────┬───────────────┬───────────────┤
+│  Store   │   Registry   │     Bus       │    Config     │
+│  (pgx)   │  (go-redis)  │  (NATS JS)   │  (YAML)      │
+└────┬─────┴──────┬───────┴───────┬───────┴───────────────┘
+     │            │               │
+     ▼            ▼               ▼
+ PostgreSQL    Redis 7       NATS JetStream
+ TimescaleDB   heartbeats    4 streams:
+ + pgvector    + registry    TASKS, PIPELINE,
+               + budget      AUDIT, GENOME
+```
+
+| Component           | Stack                                       | Location                    |
+| ------------------- | ------------------------------------------- | --------------------------- |
+| **Control Plane**   | Go 1.23, stdlib `net/http`, `slog`          | `apps/controlplane/`        |
+| **Dashboard**       | Next.js 15, React 19, React Flow, shadcn/ui | `apps/web/`                 |
+| **OpenClaw Client** | TypeScript WebSocket client                 | `packages/openclaw-client/` |
+| **Shared Types**    | TypeScript                                  | `packages/types/`           |
+| **Message Bus**     | NATS JetStream (4 streams)                  | via Docker Compose          |
+| **State**           | Redis 7 (registry, heartbeats, budget)      | via Docker Compose          |
+| **Database**        | PostgreSQL 16 + TimescaleDB + pgvector      | via Docker Compose          |
+| **Observability**   | Prometheus + Grafana + OpenTelemetry        | via Docker Compose          |
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- [**mise**](https://mise.jdx.dev/) - Runtime version manager
-- [**Docker Desktop**](https://www.docker.com/products/docker-desktop/) - For PostgreSQL
-- **Git** - Version control
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [Go 1.23+](https://go.dev/dl/)
+- [Node.js 22+](https://nodejs.org/) and [pnpm](https://pnpm.io/)
 
-### One-Command Setup
-
-```bash
-./scripts/quickstart.sh
-```
-
-This script will:
-
-1. ✅ Install Node.js, pnpm, Python, and Go via mise
-2. ✅ Install all dependencies (Node + Python)
-3. ✅ Set up Python virtual environment
-4. ✅ Create `.env` file from template
-5. ✅ Start PostgreSQL with Docker
-6. ✅ Run database migrations
-
-**Setup time: ~2 minutes** ⏱️
-
-### Manual Setup
-
-<details>
-<summary>Click to expand manual setup steps</summary>
+### Setup
 
 ```bash
-# 1. Install runtimes
-mise install
-
-# 2. Install Node dependencies
+# 1. Clone and install
+git clone https://github.com/aryabyte21/openswarm.git
+cd openswarm
 pnpm install
 
-# 3. Set up Python environment
-python -m venv .venv
-./.venv/bin/pip install --upgrade pip
-./.venv/bin/pip install -r apps/py-api/requirements-dev.txt
-
-# 4. Configure environment
-cp .env.example .env
-
-# 5. Start infrastructure
+# 2. Start infrastructure (PostgreSQL, Redis, NATS)
 docker compose up -d
 
-# 6. Run database migrations
-pnpm db:migrate
+# 3. Start the control plane
+go run ./apps/controlplane/cmd/openswarm-controller
 
-# 7. Start all services
-pnpm dev
+# 4. Start the dashboard (separate terminal)
+pnpm dev:web
 ```
 
-</details>
+### Access
 
-### Access Your Services
-
-| Service            | URL                                                          | Description                         |
-| ------------------ | ------------------------------------------------------------ | ----------------------------------- |
-| **Web App**        | [http://localhost:3000](http://localhost:3000)               | Next.js frontend with shadcn/ui     |
-| **FastAPI**        | [http://localhost:8000/docs](http://localhost:8000/docs)     | Python API with auto-generated docs |
-| **Go API**         | [http://localhost:8080/health](http://localhost:8080/health) | Go service health check             |
-| **Drizzle Studio** | `pnpm db:studio`                                             | Database GUI on port 4983           |
+| Service            | URL                                                         | Description                                 |
+| ------------------ | ----------------------------------------------------------- | ------------------------------------------- |
+| **Dashboard**      | [localhost:3000/dashboard](http://localhost:3000/dashboard) | Agent graph, tasks, topology                |
+| **Control Plane**  | [localhost:9090/healthz](http://localhost:9090/healthz)     | REST API                                    |
+| **Drizzle Studio** | `pnpm db:studio`                                            | Database GUI                                |
+| **Prometheus**     | [localhost:9191](http://localhost:9191)                     | Metrics (with `--profile observability`)    |
+| **Grafana**        | [localhost:3001](http://localhost:3001)                     | Dashboards (with `--profile observability`) |
 
 ---
 
-## 🏗️ Architecture
-
-### Repository Structure
-
-```
-cs5224-monorepo/
-├── apps/
-│   ├── web/              # Next.js 15 + React 19 + shadcn/ui
-│   │   ├── app/          # App Router pages and layouts
-│   │   ├── src/
-│   │   │   ├── components/  # React components (shadcn/ui)
-│   │   │   ├── db/          # Drizzle ORM schema and client
-│   │   │   └── lib/         # Utilities and services
-│   │   └── drizzle/      # Database migrations
-│   │
-│   ├── py-api/           # FastAPI Python service
-│   │   ├── app/
-│   │   │   └── main.py      # FastAPI app entry and endpoints
-│   │   └── tests/
-│   │
-│   └── go-api/           # Go HTTP service
-│       ├── cmd/server/      # Main entry point
-│       └── internal/        # Internal packages
-│
-├── packages/
-│   ├── types/            # Shared TypeScript types
-│   ├── eslint-config/    # Shared ESLint configurations
-│   └── tsconfig/         # Shared TypeScript configs
-│
-├── infra/                # Infrastructure as Code
-│   ├── terraform/        # Terraform configurations
-│   ├── k8s/              # Kubernetes manifests
-│   └── argocd/           # ArgoCD applications
-│
-├── docs/                 # Project documentation
-│   ├── architecture.md
-│   ├── cost-comparison.md
-│   └── preliminary-outline.md
-│
-├── scripts/              # Automation scripts
-│   └── quickstart.sh     # One-command setup
-│
-└── .cursor/              # AI assistant configuration
-    ├── rules/            # Coding standards
-    ├── agents/           # Specialized AI agents
-    └── commands/         # Common workflows
-```
-
-### Tech Stack Deep Dive
-
-#### Frontend (`apps/web`)
-
-- **Framework**: Next.js 15 with App Router
-- **React**: Version 19 with Server Components
-- **UI Components**: shadcn/ui (15+ components included)
-- **Styling**: Tailwind CSS with CSS variables
-- **Database**: Drizzle ORM + PostgreSQL
-- **Forms**: react-hook-form + Zod validation
-- **Icons**: Lucide React
-- **Testing**: Vitest
-
-#### Backend Services
-
-- **FastAPI** (`apps/py-api`): Async Python API with automatic OpenAPI docs
-- **Go** (`apps/go-api`): High-performance service layer
-- **PostgreSQL**: Primary database (via Docker Compose)
-
-#### DevOps & Tooling
-
-- **Monorepo**: Nx for task orchestration
-- **Package Manager**: pnpm with workspaces
-- **Runtime Management**: mise (Node 22, Python 3.12, Go 1.23)
-- **Git Hooks**: Husky + lint-staged
-- **CI/CD**: GitHub Actions (separate pipelines for JS, Python, Go)
-- **Containerization**: Docker + docker-compose
-- **IaC**: Terraform for cloud resources
-- **GitOps**: ArgoCD for Kubernetes deployments
-
----
-
-## 📦 Available Commands
+## Commands
 
 ### Development
 
 ```bash
-pnpm dev              # Start all services (web + py-api + go-api)
-pnpm dev:web          # Start Next.js only
-pnpm dev:py           # Start FastAPI only
-pnpm dev:go           # Start Go API only
+pnpm dev:web                    # Next.js dashboard on :3000
+pnpm dev:controlplane           # Go control plane on :9090
+docker compose up -d            # Infrastructure (Postgres, Redis, NATS)
 ```
 
-### Building
+### CLI
 
 ```bash
-pnpm build            # Build web + types
-pnpm build:all        # Build all services (including Python + Go)
+# Build the CLI
+cd apps/controlplane && go build ./cmd/openswarm
+
+# Usage
+./openswarm apply -f swarm.yaml         # Deploy a swarm
+./openswarm apply -f policies/          # Apply policies from directory
+./openswarm status                      # List all swarms
+./openswarm status <name>               # Swarm detail view
+./openswarm agents <swarm>              # List live agents
+./openswarm tasks submit <swarm> <msg>  # Submit a task
+./openswarm tasks <swarm>               # List tasks
+./openswarm policy list                 # List policies
+./openswarm down <swarm>                # Tear down a swarm
 ```
 
-### Code Quality
+### Build & Test
 
 ```bash
-pnpm lint             # Lint TypeScript projects
-pnpm lint:all         # Lint all projects (TS + Python + Go)
-pnpm lint:fix         # Auto-fix linting issues + format
-pnpm typecheck        # TypeScript type checking
-pnpm format           # Format all files with Prettier
-pnpm format:check     # Check formatting without writing
-```
+# Go control plane
+cd apps/controlplane && go vet ./... && go test ./...
 
-### Testing
+# TypeScript
+pnpm lint && pnpm typecheck && pnpm build
 
-```bash
-pnpm test             # Run web tests
-pnpm test:all         # Run all tests (web + py + go)
-pnpm test:watch       # Run tests in watch mode
+# Full validation
+pnpm check
 ```
 
 ### Database
 
 ```bash
-pnpm db:generate      # Generate migration when schema changes
-pnpm db:migrate       # Apply migrations
-pnpm db:studio        # Open Drizzle Studio GUI
-pnpm db:push          # Push schema changes (dev only)
-```
-
-### Validation
-
-```bash
-pnpm check            # Run all JS/TS checks (lint + typecheck + test + build)
-pnpm check:all        # Run checks for all languages
-pnpm run ci:local     # CI-like local run (frozen lockfile + check:all)
-```
-
-### Utilities
-
-```bash
-pnpm clean            # Remove node_modules and cache
-pnpm clean:all        # Remove all build artifacts + venv
-pnpm setup            # Run quickstart script
-pnpm changeset        # Create a changeset for versioning
+pnpm db:generate     # Generate Drizzle migration from schema changes
+pnpm db:migrate      # Apply migrations
+pnpm db:push         # Push schema directly (dev only)
+pnpm db:studio       # Open Drizzle Studio GUI
 ```
 
 ---
 
-## 🧩 Integrated Components
+## API Routes
 
-### shadcn/ui Components (15+)
+Control plane serves on `:9090`:
 
-All components are fully typed and accessible out of the box:
-
-- ✅ **Button** - Multiple variants and sizes
-- ✅ **Card** - Flexible container with header/content/footer
-- ✅ **Badge** - Status indicators and labels
-- ✅ **Input** - Text inputs with validation
-- ✅ **Label** - Form labels
-- ✅ **Textarea** - Multi-line text input
-- ✅ **Select** - Dropdown selections
-- ✅ **Form** - react-hook-form integration
-- ✅ **Dropdown Menu** - Context menus and dropdowns
-- ✅ **Avatar** - User profile pictures with fallback
-- ✅ **Dialog** - Modal dialogs
-- ✅ **Sheet** - Sliding panels
-- ✅ **Tabs** - Tabbed interfaces
-- ✅ **Table** - Data tables
-- ✅ **Tooltip** - Hover tooltips
-- ✅ **Sonner** - Toast notifications
-
-**See them in action**: Visit [http://localhost:3000/showcase](http://localhost:3000/showcase) after running `pnpm dev`
-
-### Adding More Components
-
-```bash
-cd apps/web
-npx shadcn@latest add [component-name]
+```
+GET    /healthz
+POST   /api/v1/swarms
+GET    /api/v1/swarms
+GET    /api/v1/swarms/{name}
+DELETE /api/v1/swarms/{name}
+GET    /api/v1/swarms/{name}/agents
+GET    /api/v1/swarms/{name}/agents/{id}
+POST   /api/v1/swarms/{name}/agents/{role}/scale
+POST   /api/v1/swarms/{name}/tasks
+GET    /api/v1/swarms/{name}/tasks
+GET    /api/v1/swarms/{name}/tasks/{id}
+GET    /api/v1/swarms/{name}/budget
+GET    /api/v1/swarms/{name}/audit
+GET    /api/v1/swarms/{name}/events          (SSE stream)
+POST   /api/v1/swarms/{name}/genomes/evolve
+POST   /api/v1/policies
+GET    /api/v1/policies
 ```
 
-Browse available components: [ui.shadcn.com](https://ui.shadcn.com/)
-
 ---
 
-## 📚 Documentation
+## Repository Structure
 
-### Project Documentation
-
-- **[Architecture Overview](docs/architecture.md)** - System design and runtime topology
-- **[Cost Comparison](docs/cost-comparison.md)** - On-premise vs. cloud cost analysis
-- **[Preliminary Report Outline](docs/preliminary-outline.md)** - Project report structure
-- **[Infrastructure Strategy](docs/infra-strategy.md)** - IaC and GitOps approach
-- **[Contributing Guide](CONTRIBUTING.md)** - Contribution guidelines and workflow
-
-### Key Files
-
-- **[AGENTS.md](AGENTS.md)** - AI assistant instructions for codebase
-- **[.env.example](.env.example)** - Environment variable template
-- **[components.json](apps/web/components.json)** - shadcn/ui configuration
-
-### Online Resources
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [shadcn/ui Components](https://ui.shadcn.com/)
-- [Drizzle ORM Docs](https://orm.drizzle.team/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Nx Workspace](https://nx.dev/)
-
----
-
-## 🎓 CS5224 Project Context
-
-This monorepo is designed for the **NUS CS5224 Cloud Computing** course project. The goal is to:
-
-1. **Develop a Business Case** - Identify a problem and design a cloud service solution
-2. **Implement a Working Prototype** - Build a functional SaaS application
-3. **Compare Deployment Costs** - Analyze on-premise vs. cloud hosting costs
-4. **Evaluate Performance** - Benchmark and optimize the solution
-
-### Project Deadlines
-
-- ⏰ **Preliminary Report**: March 9, 2026 @ 18:00
-- ⏰ **Final Report & Video**: April 19, 2026 @ 23:59
-
-### What Makes This Repo Special
-
-✅ **Production-Ready** - Not just a prototype, but a solid foundation  
-✅ **Best Practices** - Industry-standard tooling and patterns  
-✅ **Fast Iteration** - Optimized DX for rapid development  
-✅ **Cost-Conscious** - Tools and architecture chosen for cost comparison analysis  
-✅ **Documentation-First** - Clear guides for onboarding and contribution  
-✅ **AI-Enhanced** - Cursor rules and agents for intelligent assistance
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) for details on:
-
-- Setting up your development environment
-- Code standards and style guides
-- Commit message conventions
-- Pull request process
-- Testing requirements
-
-### Quick Contribution Workflow
-
-```bash
-# 1. Create a feature branch
-git checkout -b feat/your-feature
-
-# 2. Make your changes and commit
-git add .
-git commit -m "feat: add amazing feature"
-
-# 3. Run validation
-pnpm check:all
-
-# 4. Push and create PR
-git push origin feat/your-feature
+```
+openswarm/
+├── apps/
+│   ├── controlplane/           # Go control plane
+│   │   ├── cmd/
+│   │   │   ├── openswarm-controller/  # Server entry point
+│   │   │   └── openswarm/             # CLI entry point
+│   │   └── internal/
+│   │       ├── api/            # HTTP router + handlers
+│   │       ├── bus/            # NATS JetStream wrapper
+│   │       ├── config/         # YAML manifest parser
+│   │       ├── domain/         # Core domain types
+│   │       ├── registry/       # Redis agent registry
+│   │       └── store/          # PostgreSQL store + migrations
+│   │
+│   └── web/                    # Next.js 15 dashboard
+│       ├── app/                # App Router pages
+│       ├── src/
+│       │   ├── components/     # React components (shadcn/ui + dashboard)
+│       │   ├── db/             # Drizzle ORM schema + client
+│       │   ├── hooks/          # React hooks (SSE, mobile, toast)
+│       │   └── lib/            # API client, utilities
+│       └── drizzle/            # SQL migrations
+│
+├── packages/
+│   ├── openclaw-client/        # TypeScript WebSocket client for OpenClaw
+│   ├── types/                  # Shared TypeScript types
+│   ├── eslint-config/          # Shared ESLint flat config
+│   └── tsconfig/               # Shared TypeScript configs
+│
+├── examples/
+│   ├── news-pipeline/          # 5-agent news pipeline demo
+│   └── hello-swarm/            # Minimal swarm example
+│
+├── infra/
+│   └── prometheus/             # Prometheus scrape config
+│
+├── docs/
+│   └── plans/                  # Architecture and scaling design docs
+│
+├── docker-compose.yml          # PostgreSQL + Redis + NATS + observability
+├── CLAUDE.md                   # Claude Code project config
+└── .coderabbit.yaml            # AI PR review config
 ```
 
-Our pre-commit hooks will automatically:
+---
 
-- Lint and fix code
-- Format with Prettier
-- Prevent commits with errors
+## Key Design Decisions
+
+| Decision               | Choice                     | Rationale                                                          |
+| ---------------------- | -------------------------- | ------------------------------------------------------------------ |
+| Control plane language | Go                         | Low latency, small binary, stdlib HTTP is sufficient               |
+| Message bus            | NATS JetStream             | Lightweight, built-in persistence, queue groups for load balancing |
+| State store            | Redis                      | Sub-ms reads for heartbeats/registry, TTL-based expiry             |
+| Database               | PostgreSQL + TimescaleDB   | Single DB for structured + time-series + vector data               |
+| Dashboard              | Next.js + React Flow       | SSR for SEO, React Flow for agent DAG visualization                |
+| Agent protocol         | OpenClaw Gateway WebSocket | Session management, multi-agent, tool use built-in                 |
 
 ---
 
-## 🔧 Troubleshooting
+## Project Timeline
 
-<details>
-<summary><strong>mise not found</strong></summary>
-
-Install mise:
-
-```bash
-curl https://mise.run | sh
-```
-
-Then activate it in your shell:
-
-```bash
-# For bash
-echo 'eval "$(~/.local/bin/mise activate bash)"' >> ~/.bashrc
-
-# For zsh
-echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc
-```
-
-</details>
-
-<details>
-<summary><strong>Docker not running</strong></summary>
-
-Ensure Docker Desktop is installed and running:
-
-- macOS: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/)
-- Windows: [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
-- Linux: [Docker Engine](https://docs.docker.com/engine/install/)
-
-</details>
-
-<details>
-<summary><strong>Database connection error</strong></summary>
-
-1. Check if PostgreSQL is running: `docker compose ps`
-2. Restart services: `docker compose restart`
-3. Verify `.env` has correct `DATABASE_URL`
-4. Try: `pnpm db:migrate` again
-
-</details>
-
-<details>
-<summary><strong>Port already in use</strong></summary>
-
-Check what's using the port:
-
-```bash
-# macOS/Linux
-lsof -i :3000  # or :8000, :8080
-
-# Windows
-netstat -ano | findstr :3000
-```
-
-Kill the process or change port in `.env`
-
-</details>
-
-<details>
-<summary><strong>Python tests fail</strong></summary>
-
-Ensure virtual environment is activated and dependencies installed:
-
-```bash
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -r apps/py-api/requirements-dev.txt
-```
-
-</details>
+| Week | Dates           | Milestone                                                          |
+| ---- | --------------- | ------------------------------------------------------------------ |
+| 1    | Feb 24 – Mar 2  | Infrastructure + scaffold, Docker Compose, domain types, CLI       |
+| 2    | Mar 3 – Mar 9   | Agent registry, OpenClaw client, dashboard, **preliminary report** |
+| 3    | Mar 10 – Mar 16 | Task scheduler, NATS messaging, task execution                     |
+| 4    | Mar 17 – Mar 23 | Audit trail, policies, cost tracking                               |
+| 5    | Mar 24 – Mar 30 | News pipeline demo (5 agents end-to-end)                           |
+| 6    | Mar 31 – Apr 6  | Bankruptcy, HITL, auto-scaling, observability                      |
+| 7    | Apr 7 – Apr 13  | Agent Genetics engine                                              |
+| 8    | Apr 14 – Apr 19 | Polish, K3s deploy, **final report + demo video**                  |
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **NUS CS5224** - Cloud Computing course and project guidelines
-- **shadcn** - For the amazing UI component library
-- **Vercel** - Next.js framework and tooling
-- **FastAPI Community** - Excellent Python web framework
-- **The Go Team** - Robust and performant language
-
----
+MIT — see [LICENSE](LICENSE)
 
 <div align="center">
 
-**Built with ❤️ for CS5224 Spring 2026**
-
-[⬆ Back to Top](#-cs5224-cloud-saas-monorepo)
+**NUS CS5224 Cloud Computing — Spring 2026**
 
 </div>
