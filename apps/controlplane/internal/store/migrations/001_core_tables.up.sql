@@ -53,9 +53,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_tasks_swarm_status ON tasks(swarm_id, status);
-CREATE INDEX idx_tasks_agent_role ON tasks(agent_role);
-CREATE INDEX idx_tasks_created_at ON tasks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_swarm_status ON tasks(swarm_id, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_agent_role ON tasks(agent_role);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);
 
 -- Agent genomes
 CREATE TABLE IF NOT EXISTS genomes (
@@ -69,5 +69,5 @@ CREATE TABLE IF NOT EXISTS genomes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_genomes_role_gen ON genomes(agent_role, generation);
-CREATE INDEX idx_genomes_active ON genomes(active) WHERE active = true;
+CREATE INDEX IF NOT EXISTS idx_genomes_role_gen ON genomes(agent_role, generation);
+CREATE INDEX IF NOT EXISTS idx_genomes_active ON genomes(active) WHERE active = true;

@@ -2,66 +2,7 @@ import Link from 'next/link';
 import { Menu, Github, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-
-const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-function AuthSection() {
-  if (!clerkEnabled) {
-    return (
-      <Button size="sm" asChild className="hidden md:inline-flex">
-        <Link href="/sign-in">Sign in</Link>
-      </Button>
-    );
-  }
-
-  // Dynamic import to avoid errors when ClerkProvider is absent
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { SignedIn, SignedOut, SignInButton, UserButton } = require('@clerk/nextjs');
-  return (
-    <>
-      <SignedOut>
-        <SignInButton mode="redirect">
-          <Button size="sm" className="hidden md:inline-flex">
-            Sign in
-          </Button>
-        </SignInButton>
-      </SignedOut>
-      <SignedIn>
-        <UserButton afterSignOutUrl="/" />
-      </SignedIn>
-    </>
-  );
-}
-
-function MobileAuthSection() {
-  if (!clerkEnabled) {
-    return (
-      <Button size="sm" asChild className="w-full justify-start">
-        <Link href="/sign-in">Sign in</Link>
-      </Button>
-    );
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { SignedIn, SignedOut, SignInButton, UserButton } = require('@clerk/nextjs');
-  return (
-    <>
-      <SignedOut>
-        <SignInButton mode="redirect">
-          <Button size="sm" className="w-full justify-start">
-            Sign in
-          </Button>
-        </SignInButton>
-      </SignedOut>
-      <SignedIn>
-        <div className="flex items-center gap-2 px-2">
-          <UserButton afterSignOutUrl="/" />
-          <span className="text-sm text-muted-foreground">Account</span>
-        </div>
-      </SignedIn>
-    </>
-  );
-}
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@/components/clerk-components';
 
 export function SiteHeader() {
   return (
@@ -93,7 +34,17 @@ export function SiteHeader() {
             </a>
           </Button>
 
-          <AuthSection />
+          {/* Clerk auth — renders nothing when Clerk is not configured */}
+          <SignedOut>
+            <SignInButton mode="redirect">
+              <Button size="sm" className="hidden md:inline-flex">
+                Sign in
+              </Button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <UserButton afterSignOutUrl="/" />
+          </SignedIn>
 
           {/* Mobile Menu */}
           <Sheet>
@@ -117,7 +68,19 @@ export function SiteHeader() {
                       GitHub
                     </a>
                   </Button>
-                  <MobileAuthSection />
+                  <SignedOut>
+                    <SignInButton mode="redirect">
+                      <Button size="sm" className="w-full justify-start">
+                        Sign in
+                      </Button>
+                    </SignInButton>
+                  </SignedOut>
+                  <SignedIn>
+                    <div className="flex items-center gap-2 px-2">
+                      <UserButton afterSignOutUrl="/" />
+                      <span className="text-sm text-muted-foreground">Account</span>
+                    </div>
+                  </SignedIn>
                 </div>
               </nav>
             </SheetContent>
