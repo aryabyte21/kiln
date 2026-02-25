@@ -23,6 +23,10 @@ if ! command -v go &> /dev/null; then
   print_error "Go is not installed. Install Go 1.23+ from https://go.dev/dl/"
 fi
 
+if ! command -v node &> /dev/null; then
+  print_error "Node.js is not installed. Install Node.js 18+ from https://nodejs.org/"
+fi
+
 if ! command -v pnpm &> /dev/null; then
   print_error "pnpm is not installed. Install from https://pnpm.io/"
 fi
@@ -72,7 +76,7 @@ echo ""
 echo -e "${GREEN}Next steps:${NC}"
 echo ""
 echo "  1. Start the control plane:"
-echo -e "     ${BLUE}go run ./apps/controlplane/cmd/openswarm-controller${NC}"
+echo -e "     ${BLUE}./apps/controlplane/openswarm-controller${NC}"
 echo ""
 echo "  2. Start the dashboard (separate terminal):"
 echo -e "     ${BLUE}pnpm dev:web${NC}"
