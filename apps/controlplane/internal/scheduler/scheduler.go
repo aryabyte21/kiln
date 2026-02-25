@@ -74,7 +74,11 @@ func (s *Scheduler) handleTask(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	_ = s.registry.UpdateStatus(ctx, task.SwarmName, agent.ID, domain.AgentStatusBusy)
+	if err := s.registry.UpdateStatus(ctx, task.SwarmName, agent.ID, domain.AgentStatusBusy); err != nil {
+		slog.Error("scheduler: update agent status to busy failed", "error", err, "agent", agent.ID)
+		_ = msg.NakWithDelay(2 * time.Second)
+		return
+	}
 
 	task.AssignedAgent = agent.ID
 	task.Status = domain.TaskStatusAssigned

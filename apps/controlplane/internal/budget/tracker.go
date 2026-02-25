@@ -97,11 +97,26 @@ func (t *Tracker) GetBudget(ctx context.Context, swarm string) (*BudgetState, er
 	if len(m) == 0 {
 		return &BudgetState{}, nil
 	}
-	total, _ := strconv.ParseFloat(m["total"], 64)
-	spent, _ := strconv.ParseFloat(m["spent"], 64)
-	taskCount, _ := strconv.Atoi(m["taskCount"])
-	alertAt, _ := strconv.Atoi(m["alertAt"])
-	hardStop, _ := strconv.Atoi(m["hardStop"])
+	total, err := strconv.ParseFloat(m["total"], 64)
+	if err != nil {
+		return nil, fmt.Errorf("budget: parse total: %w", err)
+	}
+	spent, err := strconv.ParseFloat(m["spent"], 64)
+	if err != nil {
+		return nil, fmt.Errorf("budget: parse spent: %w", err)
+	}
+	taskCount, err := strconv.Atoi(m["taskCount"])
+	if err != nil {
+		return nil, fmt.Errorf("budget: parse taskCount: %w", err)
+	}
+	alertAt, err := strconv.Atoi(m["alertAt"])
+	if err != nil {
+		return nil, fmt.Errorf("budget: parse alertAt: %w", err)
+	}
+	hardStop, err := strconv.Atoi(m["hardStop"])
+	if err != nil {
+		return nil, fmt.Errorf("budget: parse hardStop: %w", err)
+	}
 	pct := 0.0
 	if total > 0 {
 		pct = spent / total * 100

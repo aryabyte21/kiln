@@ -20,12 +20,18 @@ export const metadata: Metadata = {
   },
 };
 
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <ClerkProvider appearance={{ baseTheme: dark }}>
-      <html lang="en" suppressHydrationWarning>
-        <body className="min-h-screen flex flex-col antialiased">{children}</body>
-      </html>
-    </ClerkProvider>
+  const content = (
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen flex flex-col antialiased">{children}</body>
+    </html>
   );
+
+  if (!clerkKey) {
+    return content;
+  }
+
+  return <ClerkProvider appearance={{ baseTheme: dark }}>{content}</ClerkProvider>;
 }

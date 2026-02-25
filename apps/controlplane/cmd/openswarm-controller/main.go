@@ -148,7 +148,10 @@ func main() {
 	}
 
 	// NATS-to-SSE bridge: forward real-time events to dashboard clients
-	startSSEBridge(msgBus, hub)
+	if err := startSSEBridge(msgBus, hub); err != nil {
+		slog.Error("failed to start SSE bridge", "error", err)
+		os.Exit(1)
+	}
 
 	// -----------------------------------------------------------------------
 	// Start HTTP server
@@ -181,7 +184,7 @@ func main() {
 }
 
 // startSSEBridge subscribes to NATS events and broadcasts them to SSE clients.
-func startSSEBridge(msgBus *bus.Bus, hub *sse.Hub) {
+func startSSEBridge(msgBus *bus.Bus, hub *sse.Hub) error {
 	// Bridge agent heartbeats → SSE (dashboard shows live agent status)
 	if _, err := msgBus.Subscribe("swarm.*.agent.heartbeat", func(msg jetstream.Msg) {
 		swarm := extractSwarmFromSubject(msg.Subject())
@@ -193,7 +196,7 @@ func startSSEBridge(msgBus *bus.Bus, hub *sse.Hub) {
 			Data: json.RawMessage(msg.Data()),
 		})
 	}); err != nil {
-		slog.Error("sse bridge: subscribe heartbeats", "error", err)
+		return fmt.Errorf("sse bridge: subscribe heartbeats: %w", err)
 	}
 
 	// Bridge agent register/deregister → SSE
@@ -207,10 +210,11 @@ func startSSEBridge(msgBus *bus.Bus, hub *sse.Hub) {
 			Data: json.RawMessage(msg.Data()),
 		})
 	}); err != nil {
-		slog.Error("sse bridge: subscribe agent register", "error", err)
+		return fmt.Errorf("sse bridge: subscribe agent register: %w", err)
 	}
 
 	slog.Info("sse bridge: started")
+	return nil
 }
 
 // extractSwarmFromSubject returns the swarm name from subjects like "swarm.{name}.task.submit".

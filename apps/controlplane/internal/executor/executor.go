@@ -112,23 +112,27 @@ func (e *Executor) handleAssignment(ctx context.Context, msg jetstream.Msg) {
 
 	if _, err := e.budget.RecordCost(ctx, task.SwarmName, costUSD); err != nil {
 		slog.Error("executor: record cost", "error", err)
+		_ = msg.NakWithDelay(2 * time.Second)
+		return
 	}
 
 	if task.AssignedAgent != "" {
-		_ = e.registry.UpdateStatus(ctx, task.SwarmName, task.AssignedAgent, domain.AgentStatusOnline)
+		if err := e.registry.UpdateStatus(ctx, task.SwarmName, task.AssignedAgent, domain.AgentStatusOnline); err != nil {
+			slog.Error("executor: reset agent status", "error", err, "agent", task.AssignedAgent)
+		}
 	}
 
 	// Broadcast task completion to dashboard
 	e.hub.Broadcast(task.SwarmName, sse.Event{
 		Type: "task_completed",
 		Data: map[string]interface{}{
-			"taskId":     task.ID,
-			"agentRole":  task.AgentRole,
-			"agentId":    task.AssignedAgent,
-			"tokens":     totalTokens,
-			"costUsd":    costUSD,
-			"latencyMs":  latencyMs,
-			"output":     output,
+			"taskId":    task.ID,
+			"agentRole": task.AgentRole,
+			"agentId":   task.AssignedAgent,
+			"tokens":    totalTokens,
+			"costUsd":   costUSD,
+			"latencyMs": latencyMs,
+			"output":    output,
 		},
 	})
 
@@ -210,13 +214,13 @@ func (e *Executor) triggerDownstream(ctx context.Context, task domain.Task, outp
 
 func generateMockOutput(role, input string) string {
 	templates := map[string]string{
-		"researcher":  "Based on analysis by %s agent: Research on '%s' reveals several key findings. Multiple sources confirm significant developments. Key data points extracted and cross-referenced.",
-		"writer":      "Article drafted by %s agent: Drawing from research, here is a comprehensive summary of '%s'. Findings indicate notable progress with implications for multiple stakeholders.",
-		"summarizer":  "Summary by %s agent: Key points regarding '%s': (1) significant recent developments, (2) measurable impact across sectors, (3) ongoing challenges requiring attention.",
-		"classifier":  "Classification by %s agent: Content '%s' categorized. Primary: Technology/Science. Sentiment: Positive. Relevance: 0.87.",
-		"fetcher":     "Fetched by %s agent: Retrieved content for '%s'. Sources: 3 articles, 2 papers, 1 dataset. ~4,500 words.",
-		"aggregator":  "Aggregated by %s agent: Combined analysis of '%s'. Synthesized from 5 sources into unified report.",
-		"notifier":    "Notification by %s agent: Alert prepared for '%s'. Priority: normal. Delivery: immediate.",
+		"researcher": "Based on analysis by %s agent: Research on '%s' reveals several key findings. Multiple sources confirm significant developments. Key data points extracted and cross-referenced.",
+		"writer":     "Article drafted by %s agent: Drawing from research, here is a comprehensive summary of '%s'. Findings indicate notable progress with implications for multiple stakeholders.",
+		"summarizer": "Summary by %s agent: Key points regarding '%s': (1) significant recent developments, (2) measurable impact across sectors, (3) ongoing challenges requiring attention.",
+		"classifier": "Classification by %s agent: Content '%s' categorized. Primary: Technology/Science. Sentiment: Positive. Relevance: 0.87.",
+		"fetcher":    "Fetched by %s agent: Retrieved content for '%s'. Sources: 3 articles, 2 papers, 1 dataset. ~4,500 words.",
+		"aggregator": "Aggregated by %s agent: Combined analysis of '%s'. Synthesized from 5 sources into unified report.",
+		"notifier":   "Notification by %s agent: Alert prepared for '%s'. Priority: normal. Delivery: immediate.",
 	}
 	tmpl, ok := templates[role]
 	if !ok {

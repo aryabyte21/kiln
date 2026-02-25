@@ -107,7 +107,11 @@ func (h *Hub) ServeSwarm(w http.ResponseWriter, r *http.Request, swarm string) {
 			if !ok {
 				return
 			}
-			data, _ := json.Marshal(evt.Data)
+			data, err := json.Marshal(evt.Data)
+			if err != nil {
+				slog.Error("sse: failed to marshal event data", "type", evt.Type, "error", err)
+				continue
+			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
 			flusher.Flush()
 		}

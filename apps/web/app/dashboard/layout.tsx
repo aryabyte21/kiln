@@ -1,7 +1,26 @@
 import Link from 'next/link';
 import { Zap } from 'lucide-react';
-import { UserButton } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
+
+const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+function ClerkUserButton() {
+  if (!clerkEnabled) return null;
+
+  // Dynamic import to avoid errors when ClerkProvider is absent
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { UserButton } = require('@clerk/nextjs');
+  return (
+    <UserButton
+      afterSignOutUrl="/"
+      appearance={{
+        elements: {
+          avatarBox: 'h-8 w-8',
+        },
+      }}
+    />
+  );
+}
 
 function DashboardHeader() {
   return (
@@ -25,14 +44,7 @@ function DashboardHeader() {
 
         {/* Right: Clerk UserButton */}
         <div className="flex items-center gap-3">
-          <UserButton
-            afterSignOutUrl="/"
-            appearance={{
-              elements: {
-                avatarBox: 'h-8 w-8',
-              },
-            }}
-          />
+          <ClerkUserButton />
         </div>
       </div>
     </header>

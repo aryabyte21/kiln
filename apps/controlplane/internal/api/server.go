@@ -141,11 +141,15 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 	if err := s.budget.InitBudget(r.Context(), sw.Name,
 		sw.Spec.Budget.Total, sw.Spec.Budget.AlertAt, sw.Spec.Budget.HardStop); err != nil {
 		slog.Error("init budget failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to initialize budget: " + err.Error()})
+		return
 	}
 
 	// Register agents and start the swarm
 	if err := s.lifecycle.RegisterSwarmAgents(r.Context(), sw.Name, sw.Spec); err != nil {
 		slog.Error("register agents failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agents: " + err.Error()})
+		return
 	}
 
 	// Broadcast swarm creation to SSE clients

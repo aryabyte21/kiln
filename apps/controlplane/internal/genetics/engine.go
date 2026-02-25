@@ -40,7 +40,7 @@ type GeneSet struct {
 
 // FitnessScore aggregates task performance metrics.
 type FitnessScore struct {
-	Score          float64 `json:"score"`          // composite 0-1
+	Score          float64 `json:"score"` // composite 0-1
 	TasksCompleted int     `json:"tasksCompleted"`
 	AvgLatencyMs   int64   `json:"avgLatencyMs"`
 	AvgCostUSD     float64 `json:"avgCostUsd"`
@@ -102,8 +102,10 @@ func (e *Engine) RecordFitness(ctx context.Context, genomeID string, task domain
 	}
 
 	var fitness FitnessScore
-	if row.FitnessJSON != nil && len(row.FitnessJSON) > 0 {
-		_ = json.Unmarshal(row.FitnessJSON, &fitness)
+	if row.FitnessJSON != nil && len(row.FitnessJSON) > 2 {
+		if err := json.Unmarshal(row.FitnessJSON, &fitness); err != nil {
+			return fmt.Errorf("genetics: unmarshal existing fitness: %w", err)
+		}
 	}
 
 	// Determine if this task was an error
