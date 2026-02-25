@@ -18,6 +18,7 @@ import (
 	"github.com/openswarm/openswarm/internal/budget"
 	"github.com/openswarm/openswarm/internal/bus"
 	"github.com/openswarm/openswarm/internal/executor"
+	"github.com/openswarm/openswarm/internal/genetics"
 	"github.com/openswarm/openswarm/internal/lifecycle"
 	"github.com/openswarm/openswarm/internal/registry"
 	"github.com/openswarm/openswarm/internal/scheduler"
@@ -101,6 +102,9 @@ func main() {
 	// Executor — runs tasks (mock LLM) and triggers downstream pipeline
 	exec := executor.New(st, reg, msgBus, bt, hub)
 
+	// Genetics engine — agent genome tracking and evolution
+	ge := genetics.New(st)
+
 	// -----------------------------------------------------------------------
 	// Build the API server
 	// -----------------------------------------------------------------------
@@ -114,7 +118,7 @@ func main() {
 		OpenClawToken:     getEnv("OPENCLAW_TOKEN", ""),
 	}
 
-	server := api.NewServer(cfg, st, reg, msgBus, hub, bt, lm)
+	server := api.NewServer(cfg, st, reg, msgBus, hub, bt, lm, ge)
 
 	httpServer := &http.Server{
 		Addr:         ":" + port,

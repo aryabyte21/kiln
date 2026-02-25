@@ -10,6 +10,7 @@ import (
 	"github.com/openswarm/openswarm/internal/bus"
 	"github.com/openswarm/openswarm/internal/config"
 	"github.com/openswarm/openswarm/internal/domain"
+	"github.com/openswarm/openswarm/internal/genetics"
 	"github.com/openswarm/openswarm/internal/lifecycle"
 	"github.com/openswarm/openswarm/internal/registry"
 	"github.com/openswarm/openswarm/internal/sse"
@@ -35,10 +36,11 @@ type Server struct {
 	hub       *sse.Hub
 	budget    *budget.Tracker
 	lifecycle *lifecycle.Manager
+	genetics  *genetics.Engine
 }
 
 // NewServer creates a new API server with the given dependencies.
-func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, hub *sse.Hub, bt *budget.Tracker, lm *lifecycle.Manager) *Server {
+func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, hub *sse.Hub, bt *budget.Tracker, lm *lifecycle.Manager, ge *genetics.Engine) *Server {
 	return &Server{
 		config:    cfg,
 		store:     st,
@@ -47,6 +49,7 @@ func NewServer(cfg Config, st *store.Store, reg *registry.Registry, b *bus.Bus, 
 		hub:       hub,
 		budget:    bt,
 		lifecycle: lm,
+		genetics:  ge,
 	}
 }
 
@@ -327,13 +330,53 @@ func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
 }
 func (s *Server) handleListGenomes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []any{})
+	name := r.PathValue("name")
+	genomes, err := s.genetics.ListGenomes(r.Context(), name)
+	if err != nil {
+		slog.Error("list genomes failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if genomes == nil {
+		genomes = []genetics.Genome{}
+	}
+	writeJSON(w, http.StatusOK, genomes)
 }
+
 func (s *Server) handleEvolveGenomes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+	name := r.PathValue("name")
+
+	var req struct {
+		AgentRole string `json:"agentRole"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body: " + err.Error()})
+		return
+	}
+	if req.AgentRole == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agentRole is required"})
+		return
+	}
+
+	children, err := s.genetics.Evolve(r.Context(), name, req.AgentRole)
+	if err != nil {
+		slog.Error("evolve genomes failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	slog.Info("genomes evolved", "swarm", name, "role", req.AgentRole, "children", len(children))
+	writeJSON(w, http.StatusOK, children)
 }
+
 func (s *Server) handleGetGenome(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not yet implemented"})
+	id := r.PathValue("id")
+	genome, err := s.genetics.GetGenome(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, genome)
 }
 
 // ---------------------------------------------------------------------------
