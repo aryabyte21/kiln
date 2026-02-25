@@ -1,26 +1,60 @@
 language: en-US
+early_access: true
 reviews:
   profile: assertive
+  request_changes_workflow: true
   high_level_summary: true
+  high_level_summary_placeholder: '@coderabbitai summary'
   poem: false
   review_status: true
   collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - '!pnpm-lock.yaml'
+    - '!**/*.sum'
+    - '!drizzle/**'
   path_instructions:
     - path: 'apps/controlplane/**/*.go'
       instructions: >
-        Go control plane for OpenSwarm. Uses stdlib net/http, slog for logging.
-        Wrap errors with fmt.Errorf("context: %w", err), never swallow errors.
-        Pass context.Context as first parameter.
+        Go control plane for OpenSwarm orchestrator.
+        Uses stdlib net/http with Go 1.22+ pattern matching (no frameworks).
+        Uses slog for structured logging (JSON in prod, text in dev).
+        Error handling: always wrap with fmt.Errorf("context: %w", err), never swallow errors.
+        Context propagation: pass context.Context as first parameter.
+        Domain types live in internal/domain/.
+        Check for: missing error handling, context not propagated, goroutine leaks,
+        race conditions, resource leaks (connections not closed), SQL injection in store layer.
     - path: 'apps/web/**/*.{ts,tsx}'
       instructions: >
-        Next.js 15 App Router with React 19. Use shadcn/ui components for all
-        UI primitives. Strict TypeScript, no any. Use Drizzle ORM for DB access.
+        Next.js 15 App Router with React 19. Strict TypeScript, no `any`.
+        Use shadcn/ui components for ALL UI primitives (buttons, inputs, cards, tables, badges, dialogs).
+        Use Drizzle ORM for all database access (schema in src/db/schema/).
+        Use lucide-react for icons, sonner for toasts.
+        Check for: missing error boundaries, unhandled promise rejections, missing loading/error states,
+        accessibility issues, unused imports, components not using shadcn when they should.
     - path: 'packages/openclaw-client/**/*.ts'
       instructions: >
-        TypeScript WebSocket client for OpenClaw Gateway. Strict types, no any.
+        TypeScript WebSocket client for OpenClaw Gateway protocol.
+        Strict types, no any. Must handle reconnection, timeouts, and connection failures gracefully.
+        Check for: missing error handling on WebSocket events, memory leaks from event listeners,
+        uncleaned timeouts, race conditions in async request/response handling.
     - path: '**/*.sql'
       instructions: >
-        PostgreSQL with TimescaleDB and pgvector extensions.
-        Use hypertables for time-series data.
+        PostgreSQL 16 with TimescaleDB and pgvector extensions.
+        Use hypertables for time-series data, proper indexes, and CASCADE on foreign keys.
+        Check for: missing indexes on frequently queried columns, N+1 query patterns,
+        missing NOT NULL constraints, unsafe string concatenation (SQL injection).
+    - path: 'docker-compose.yml'
+      instructions: >
+        Local development infrastructure. Services: PostgreSQL (TimescaleDB), Redis 7, NATS with JetStream.
+        Check for: missing health checks, hardcoded credentials that should be in .env,
+        missing volume persistence, port conflicts.
+    - path: '.github/workflows/**'
+      instructions: >
+        GitHub Actions CI/CD workflows.
+        Check for: command injection via untrusted inputs (PR titles, issue bodies),
+        missing pinned action versions, missing caching, unnecessary permissions.
 chat:
   auto_reply: true
