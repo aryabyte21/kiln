@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@cs5224/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "controlplane",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./apps/controlplane/cmd/openswarm-controller"],
+      "port": 9090
+    }
+  ]
+}

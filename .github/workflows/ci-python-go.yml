@@ -1,4 +1,4 @@
-name: CI Python Go
+name: CI Go
 
 on:
   pull_request:
@@ -10,35 +10,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  python:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/py-api
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
-
-      - name: Lint
-        run: python -m ruff check .
-
-      - name: Test
-        run: python -m pytest
-
   go:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/go-api
+        working-directory: apps/controlplane
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +33,11 @@ jobs:
             echo "$out"
             exit 1
           fi
+
+      - name: Build
+        run: |
+          go build ./cmd/openswarm-controller
+          go build ./cmd/openswarm
 
       - name: Test
         run: go test ./...

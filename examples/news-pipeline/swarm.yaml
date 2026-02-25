@@ -1,0 +1,82 @@
+apiVersion: openswarm/v1alpha1
+kind: Swarm
+metadata:
+  name: news-pipeline
+  labels:
+    team: platform
+    env: demo
+
+spec:
+  budget:
+    total: '$2.00'
+    perTask: '$0.05'
+    alertAt: 80
+    hardStop: 100
+
+  agents:
+    - name: fetcher
+      replicas: { min: 2, max: 5, scaleOn: queue_depth }
+      model: claude-haiku-4-5-20251001
+      skills: [web-browse, rss-reader]
+      policy: fetcher-safety
+      genome: { evolution: true, populationSize: 3 }
+      resources: { maxContextTokens: 32768, maxConcurrentTasks: 3 }
+
+    - name: summarizer
+      replicas: { min: 1, max: 3, scaleOn: token_utilization }
+      model: claude-sonnet-4-6
+      policy: output-review
+      dependsOn: [fetcher]
+      genome: { evolution: true, populationSize: 5, selectionStrategy: tournament }
+
+    - name: classifier
+      replicas: { min: 1, max: 2 }
+      model: claude-haiku-4-5-20251001
+      policy: default
+      dependsOn: [summarizer]
+
+    - name: aggregator
+      replicas: { min: 1, max: 1 }
+      model: claude-sonnet-4-6
+      policy: default
+      dependsOn: [classifier]
+
+    - name: notifier
+      replicas: { min: 1, max: 1 }
+      model: claude-haiku-4-5-20251001
+      policy: default
+      dependsOn: [aggregator]
+
+  topology:
+    - from: fetcher
+      to: summarizer
+      subject: articles.raw
+    - from: summarizer
+      to: classifier
+      subject: articles.summarized
+    - from: classifier
+      to: aggregator
+      subject: articles.classified
+    - from: aggregator
+      to: notifier
+      subject: digest.ready
+
+  memory:
+    l2:
+      backend: redis
+      ttl: 3600
+    l3:
+      backend: pgvector
+      collection: news-knowledge
+
+  checkpoints:
+    - before: tool_call
+      tool: send_email
+      requireApproval: true
+      timeout: 300s
+      onTimeout: skip_and_log
+
+  audit:
+    enabled: true
+    hashChaining: true
+    retentionDays: 30

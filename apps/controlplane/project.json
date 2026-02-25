@@ -1,0 +1,41 @@
+{
+  "name": "controlplane",
+  "root": "apps/controlplane",
+  "sourceRoot": "apps/controlplane",
+  "projectType": "application",
+  "tags": ["scope:backend", "lang:go", "type:app"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/controlplane",
+        "commands": [
+          "go build -o ../../dist/openswarm-controller ./cmd/openswarm-controller",
+          "go build -o ../../dist/openswarm ./cmd/openswarm"
+        ],
+        "parallel": false
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/controlplane",
+        "command": "go run ./cmd/openswarm-controller"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/controlplane",
+        "commands": ["go vet ./...", "gofmt -l ."]
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/controlplane",
+        "command": "go test ./..."
+      }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Menu, Github, Cloud } from 'lucide-react';
+import { Menu, Github, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 
@@ -10,8 +10,8 @@ export function SiteHeader() {
         {/* Logo */}
         <Button variant="ghost" asChild className="h-auto px-0 hover:bg-transparent">
           <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-            <Cloud className="h-6 w-6 text-primary" />
-            <span>CS5224</span>
+            <Zap className="h-6 w-6 text-primary" />
+            <span>OpenSwarm</span>
           </Link>
         </Button>
 
@@ -21,13 +21,13 @@ export function SiteHeader() {
             <Link href="/">Home</Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>
+            <Link href="/dashboard">Dashboard</Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
             <Link href="/showcase">Components</Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>
-            <Link href="/docs">Documentation</Link>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/api">API</Link>
+            <Link href="/docs">Docs</Link>
           </Button>
         </nav>
 
@@ -52,13 +52,13 @@ export function SiteHeader() {
                   <Link href="/">Home</Link>
                 </Button>
                 <Button variant="ghost" asChild className="justify-start">
+                  <Link href="/dashboard">Dashboard</Link>
+                </Button>
+                <Button variant="ghost" asChild className="justify-start">
                   <Link href="/showcase">Components</Link>
                 </Button>
                 <Button variant="ghost" asChild className="justify-start">
-                  <Link href="/docs">Documentation</Link>
-                </Button>
-                <Button variant="ghost" asChild className="justify-start">
-                  <Link href="/api">API</Link>
+                  <Link href="/docs">Docs</Link>
                 </Button>
                 <div className="border-t pt-4 mt-4">
                   <Button variant="outline" size="sm" asChild className="w-full justify-start">

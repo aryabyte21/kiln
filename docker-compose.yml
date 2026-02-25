@@ -1,16 +1,72 @@
 services:
   postgres:
-    image: postgres:16
-    container_name: cs5224-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: cs5224
-      POSTGRES_PASSWORD: cs5224
-      POSTGRES_DB: cs5224
+    image: timescale/timescaledb:latest-pg16
+    container_name: openswarm-postgres
     ports:
       - '5432:5432'
+    environment:
+      POSTGRES_USER: openswarm
+      POSTGRES_PASSWORD: openswarm
+      POSTGRES_DB: openswarm
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U openswarm']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: openswarm-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --notify-keyspace-events Ex --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:2-alpine
+    container_name: openswarm-nats
+    ports:
+      - '4222:4222'
+      - '8222:8222'
+    command: --jetstream --store_dir /data --http_port 8222
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8222/healthz']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Observability (start with: docker compose --profile observability up)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: openswarm-prometheus
+    ports:
+      - '9091:9090'
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: openswarm-grafana
+    ports:
+      - '3001:3000'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: openswarm
+    profiles:
+      - observability
 
 volumes:
-  postgres_data:
+  pgdata:
+  redisdata:
+  natsdata:

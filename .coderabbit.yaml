@@ -1,0 +1,26 @@
+language: en-US
+reviews:
+  profile: assertive
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  path_instructions:
+    - path: 'apps/controlplane/**/*.go'
+      instructions: >
+        Go control plane for OpenSwarm. Uses stdlib net/http, slog for logging.
+        Wrap errors with fmt.Errorf("context: %w", err), never swallow errors.
+        Pass context.Context as first parameter.
+    - path: 'apps/web/**/*.{ts,tsx}'
+      instructions: >
+        Next.js 15 App Router with React 19. Use shadcn/ui components for all
+        UI primitives. Strict TypeScript, no any. Use Drizzle ORM for DB access.
+    - path: 'packages/openclaw-client/**/*.ts'
+      instructions: >
+        TypeScript WebSocket client for OpenClaw Gateway. Strict types, no any.
+    - path: '**/*.sql'
+      instructions: >
+        PostgreSQL with TimescaleDB and pgvector extensions.
+        Use hypertables for time-series data.
+chat:
+  auto_reply: true

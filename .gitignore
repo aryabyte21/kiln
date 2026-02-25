@@ -35,7 +35,7 @@ build/
 # ===================================
 coverage/
 dist/
-lib/
+/lib/
 *.d.ts.map
 *.js.map
 
@@ -76,6 +76,8 @@ bin/
 *.test
 go.work
 go.work.sum
+apps/controlplane/openswarm
+apps/controlplane/openswarm-controller
 
 # ===================================
 # Environment Variables
@@ -151,6 +153,11 @@ coverage/
 # ===================================
 .dockerignore
 docker-compose.override.yml
+
+# ===================================
+# Large / Generated Files
+# ===================================
+*.pdf
 
 # ===================================
 # Misc

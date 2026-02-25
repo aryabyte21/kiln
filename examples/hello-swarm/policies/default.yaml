@@ -1,0 +1,20 @@
+apiVersion: openswarm/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: default
+
+spec:
+  tools:
+    allowed: [web-browse, read-file]
+    denied: [execute-shell]
+
+  budget:
+    maxTokensPerTask: 8000
+    maxCostPerTask: '$0.10'
+
+  safety:
+    blastRadius: contained
+
+  failure:
+    maxRetries: 2
+    onBankruptcy: restart
