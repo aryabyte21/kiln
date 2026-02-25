@@ -1,12 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -46,7 +48,9 @@ func (s *Store) Close() {
 // ---------------------------------------------------------------------------
 
 // RunMigrations reads embedded SQL files in lexicographic order and executes
-// each one inside a transaction.
+// each one inside a transaction. Migrations containing the directive
+// "-- no-transaction" on their first line are executed directly (required by
+// PostgreSQL for commands like CREATE MATERIALIZED VIEW ... WITH DATA).
 func (s *Store) RunMigrations(ctx context.Context) error {
 	entries, err := fs.ReadDir(migrationFS, "migrations")
 	if err != nil {
@@ -67,6 +71,26 @@ func (s *Store) RunMigrations(ctx context.Context) error {
 			return fmt.Errorf("store: read migration %s: %w", entry.Name(), err)
 		}
 
+		// Check for no-transaction directive. When present, split by
+		// semicolons and execute each statement individually so that
+		// commands like CREATE MATERIALIZED VIEW run outside any
+		// transaction context (PostgreSQL wraps multi-statement queries
+		// in an implicit transaction otherwise).
+		if bytes.Contains(data[:min(len(data), 100)], []byte("-- no-transaction")) {
+			for _, stmt := range strings.Split(string(data), ";") {
+				stmt = strings.TrimSpace(stmt)
+				// Strip leading comment-only lines to find real SQL.
+				stripped := stripSQLComments(stmt)
+				if stripped == "" {
+					continue
+				}
+				if _, err := s.pool.Exec(ctx, stmt); err != nil {
+					return fmt.Errorf("store: exec migration %s (no-tx): %w", entry.Name(), err)
+				}
+			}
+			continue
+		}
+
 		tx, err := s.pool.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("store: begin tx for %s: %w", entry.Name(), err)
@@ -80,6 +104,21 @@ func (s *Store) RunMigrations(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// stripSQLComments removes leading lines that are SQL comments (-- ...) and
+// returns the remaining non-comment content. Used to detect if a split
+// fragment contains any real SQL.
+func stripSQLComments(s string) string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		lines = append(lines, trimmed)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+-- no-transaction
 -- OpenSwarm TimescaleDB Hypertables
 -- Migration 002: Create time-series tables for audit, cost, and metrics
 
@@ -19,9 +20,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
 SELECT create_hypertable('audit_events', 'time', if_not_exists => TRUE);
 SELECT add_retention_policy('audit_events', INTERVAL '30 days', if_not_exists => TRUE);
 
-CREATE INDEX idx_audit_agent ON audit_events(agent_id, time DESC);
-CREATE INDEX idx_audit_action ON audit_events(action, time DESC);
-CREATE INDEX idx_audit_task ON audit_events(task_id, time DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_events(agent_id, time DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_events(action, time DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_events(task_id, time DESC);
 
 -- Cost tracking per model call
 CREATE TABLE IF NOT EXISTS cost_events (
@@ -38,7 +39,7 @@ CREATE TABLE IF NOT EXISTS cost_events (
 
 SELECT create_hypertable('cost_events', 'time', if_not_exists => TRUE);
 
-CREATE INDEX idx_cost_swarm ON cost_events(swarm_name, time DESC);
+CREATE INDEX IF NOT EXISTS idx_cost_swarm ON cost_events(swarm_name, time DESC);
 
 -- Continuous aggregate for hourly cost rollups
 CREATE MATERIALIZED VIEW IF NOT EXISTS cost_hourly
@@ -66,4 +67,4 @@ CREATE TABLE IF NOT EXISTS agent_metrics (
 
 SELECT create_hypertable('agent_metrics', 'time', if_not_exists => TRUE);
 
-CREATE INDEX idx_metrics_agent ON agent_metrics(agent_id, time DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_agent ON agent_metrics(agent_id, time DESC);

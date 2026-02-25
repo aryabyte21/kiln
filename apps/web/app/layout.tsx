@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import { ClerkProvider } from '@clerk/nextjs';
-import { dark } from '@clerk/themes';
+import { ConditionalClerkProvider } from '@/components/clerk-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -20,18 +19,12 @@ export const metadata: Metadata = {
   },
 };
 
-const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const content = (
-    <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen flex flex-col antialiased">{children}</body>
-    </html>
+  return (
+    <ConditionalClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <body className="min-h-screen flex flex-col antialiased">{children}</body>
+      </html>
+    </ConditionalClerkProvider>
   );
-
-  if (!clerkKey) {
-    return content;
-  }
-
-  return <ClerkProvider appearance={{ baseTheme: dark }}>{content}</ClerkProvider>;
 }
