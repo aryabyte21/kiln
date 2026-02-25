@@ -1,0 +1,11 @@
+---
+description: Monorepo boundaries and conventions
+globs: ["**/*"]
+alwaysApply: false
+---
+# Monorepo Structure
+
+- `apps/web` is the only JS app in pnpm workspace.
+- Python and Go services are standalone and validated in CI.
+- Cross-service protocol should be documented in `docs/`.
+- Shared frontend contracts go under `packages/types`.
