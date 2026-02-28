@@ -30,8 +30,8 @@ from langchain_core.tools import StructuredTool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_mistralai import ChatMistralAI
 
-from babel.registry.local_registry import LocalRegistry
-from babel.runtime.babel_runtime import BabelRuntime
+from babel_registry.registry.local_registry import LocalRegistry
+from babel_registry.runtime.babel_runtime import BabelRuntime
 
 
 def babel_tool_to_langchain(tool: dict) -> StructuredTool:

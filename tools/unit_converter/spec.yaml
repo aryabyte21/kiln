@@ -1,0 +1,90 @@
+babel_version: "1.0"
+id: com.aria.tools.unit_converter
+name: Unit Converter Tool
+description: Convert a value between common units of measurement — length (km, miles, meters, feet), weight (kg, lbs, grams, ounces), and temperature (celsius, fahrenheit, kelvin).
+
+interface:
+  inputs:
+    - name: value
+      type: float
+      description: The numeric value to convert
+      required: true
+
+    - name: from_unit
+      type: string
+      description: Source unit (e.g. km, miles, kg, lbs, celsius, fahrenheit)
+      required: true
+
+    - name: to_unit
+      type: string
+      description: Target unit (e.g. km, miles, kg, lbs, celsius, fahrenheit)
+      required: true
+
+  output:
+    type: object
+    fields:
+      - name: converted_value
+        type: float
+        description: The converted numeric result
+      - name: from_unit
+        type: string
+      - name: to_unit
+        type: string
+      - name: formatted
+        type: string
+        description: Human-readable result (e.g. "5 km = 3.1069 miles")
+
+implementation:
+  language: python
+  entry_point: impl.py
+  function: run
+  dependencies: []
+
+targets:
+  - ag2
+  - raw_python
+
+testing:
+  fixtures:
+    - description: km to miles
+      input:
+        value: 5.0
+        from_unit: km
+        to_unit: miles
+      expect_keys:
+        - converted_value
+        - formatted
+
+    - description: celsius to fahrenheit
+      input:
+        value: 100.0
+        from_unit: celsius
+        to_unit: fahrenheit
+      expect_keys:
+        - converted_value
+        - formatted
+
+    - description: kg to lbs
+      input:
+        value: 70.0
+        from_unit: kg
+        to_unit: lbs
+      expect_keys:
+        - converted_value
+        - formatted
+
+execution:
+  timeout: 5
+  retries: 0
+  async: false
+  error_format:
+    type: object
+    fields:
+      - name: error
+        type: string
+
+metadata:
+  author: ARIA Team — E2
+  version: 1.0.0
+  tags: [unit, conversion, length, weight, temperature, math]
+  api_keys_required: []

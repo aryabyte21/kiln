@@ -29,8 +29,8 @@ import yaml
 
 def cmd_compile(args: argparse.Namespace) -> None:
     """Compile a Babel spec to a target binding."""
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
-    from babel.compiler.adapters.raw_python_adapter import RawPythonAdapter
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.compiler.adapters.raw_python_adapter import RawPythonAdapter
 
     spec_path = Path(args.spec).resolve()
     if not spec_path.exists():
@@ -40,8 +40,8 @@ def cmd_compile(args: argparse.Namespace) -> None:
     dist_dir = Path(args.output).resolve() if args.output else Path("dist").resolve()
     target = args.target.lower()
 
-    from babel.compiler.adapters.pydantic_adapter import PydanticAdapter
-    from babel.compiler.adapters.langchain_adapter import LangChainAdapter
+    from babel_registry.compiler.adapters.pydantic_adapter import PydanticAdapter
+    from babel_registry.compiler.adapters.langchain_adapter import LangChainAdapter
 
     adapter_map = {
         "ag2":        AG2Adapter,
@@ -67,7 +67,7 @@ def cmd_compile(args: argparse.Namespace) -> None:
 def cmd_validate(args: argparse.Namespace) -> None:
     """Validate a Babel spec against the schema."""
     import jsonschema
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
 
     spec_path = Path(args.spec).resolve()
     if not spec_path.exists():
@@ -90,8 +90,8 @@ def cmd_validate(args: argparse.Namespace) -> None:
 
 def cmd_publish(args: argparse.Namespace) -> None:
     """Validate a spec, run fixtures, and publish to the registry."""
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.registry.local_registry import LocalRegistry
 
     spec_path = Path(args.spec).resolve()
     if not spec_path.exists():
@@ -162,7 +162,7 @@ def _run_fixtures(spec: dict, impl_path: Path) -> None:
 
 def cmd_registry_list(args: argparse.Namespace) -> None:
     """List all tools in the registry."""
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.registry.local_registry import LocalRegistry
 
     registry = LocalRegistry()
     tools = registry.list()
@@ -181,7 +181,7 @@ def cmd_registry_list(args: argparse.Namespace) -> None:
 
 def cmd_registry_info(args: argparse.Namespace) -> None:
     """Show full info for a single tool."""
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.registry.local_registry import LocalRegistry
 
     registry = LocalRegistry()
     row = registry.get(args.tool_id)
@@ -208,8 +208,8 @@ def cmd_registry_seed(args: argparse.Namespace) -> None:
         print(f"ERROR: tools/ directory not found at: {tools_dir}", file=sys.stderr)
         sys.exit(1)
 
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.registry.local_registry import LocalRegistry
 
     adapter = AG2Adapter()
     registry = LocalRegistry()
@@ -237,7 +237,7 @@ def cmd_registry_seed(args: argparse.Namespace) -> None:
 
 def cmd_registry_stats(args: argparse.Namespace) -> None:
     """Show registry statistics."""
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.registry.local_registry import LocalRegistry
 
     registry = LocalRegistry()
     tools = registry.list()

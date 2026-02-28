@@ -8,10 +8,10 @@ Sections:
   2. Implementation unit tests (mock + live fallback)
   3. Compile via AG2Adapter
   4. Publish to registry + verify it's stored
-  5. Load via BabelRuntime
-  6. Call via Pydantic-AI agent
-  7. Call via AG2 agent
-  8. Call via LangChain agent
+  5. Load via BabelRuntime (ag2 target)
+  6. Call via Pydantic-AI agent   — uses TOOL_OBJECT from PydanticAdapter
+  7. Call via AG2 agent           — uses raw TOOL_FUNCTION from ag2 target
+  8. Call via LangChain agent     — uses TOOL_OBJECT from LangChainAdapter
 
 Run:
     python test_currency_tool.py
@@ -76,7 +76,7 @@ def fail(label: str, reason: str) -> None:
 
 def test_spec_validation():
     section("1. Spec Validation")
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
     import jsonschema
 
     adapter = AG2Adapter()
@@ -153,7 +153,7 @@ def test_implementation():
 
 def test_compile() -> Path:
     section("3. Compiler — AG2Adapter")
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
 
     adapter = AG2Adapter()
     tmp_dist = Path(tempfile.mkdtemp()) / "dist"
@@ -198,8 +198,8 @@ def test_compile() -> Path:
 
 def test_registry() -> None:
     section("4. Registry — Publish & Verify")
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.registry.local_registry import LocalRegistry
 
     registry = LocalRegistry()
     adapter  = AG2Adapter()
@@ -256,8 +256,8 @@ def test_registry() -> None:
 
 def test_runtime() -> dict:
     section("5. BabelRuntime — load()")
-    from babel.registry.local_registry import LocalRegistry
-    from babel.runtime.babel_runtime import BabelRuntime
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
 
     registry = LocalRegistry()
     runtime  = BabelRuntime(registry=registry, dist_dir=ROOT / "dist")
@@ -282,7 +282,8 @@ def test_runtime() -> dict:
 
     # Second load hits LRU cache
     tool2 = runtime.load(TOOL_ID)
-    assert TOOL_ID in runtime.cache_info()["cached_tools"]
+    cached = runtime.cache_info()["cached_tools"]
+    assert any(TOOL_ID in c for c in cached)
     ok(f"second load hits LRU cache (size={runtime.cache_info()['size']})")
 
     return tool
@@ -292,11 +293,23 @@ def test_runtime() -> dict:
 # 6. Pydantic-AI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_pydantic_agent(tool_fn) -> None:
-    section("6. Pydantic-AI Agent")
+def test_pydantic_agent() -> None:
+    section("6. Pydantic-AI Agent (compiler-native TOOL_OBJECT)")
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
     from pydantic_ai import Agent
     from pydantic_ai.models.mistral import MistralModel
     from pydantic_ai.providers.mistral import MistralProvider
+    from pydantic_ai.tools import Tool as PydanticTool
+
+    registry = LocalRegistry()
+    runtime  = BabelRuntime(registry=registry, dist_dir=ROOT / "dist")
+    tool     = runtime.load(TOOL_ID, target="pydantic")
+
+    tool_obj = tool["tool_object"]
+    assert isinstance(tool_obj, PydanticTool), \
+        f"Expected pydantic_ai.Tool, got {type(tool_obj)}"
+    ok(f"runtime.load(target='pydantic') → TOOL_OBJECT is {type(tool_obj).__name__}")
 
     model = MistralModel(
         "mistral-large-latest",
@@ -304,7 +317,7 @@ def test_pydantic_agent(tool_fn) -> None:
     )
     agent = Agent(
         model=model,
-        tools=[tool_fn],
+        tools=[tool_obj],   # ← compiler-native pydantic_ai.Tool, not raw callable
         system_prompt="You are ARIA. Use the currency_conversion tool to answer.",
     )
 
@@ -369,24 +382,29 @@ def test_ag2_agent(tool: dict) -> None:
 # 8. LangChain Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_langchain_agent(tool: dict) -> None:
-    section("8. LangChain Agent")
+def test_langchain_agent() -> None:
+    section("8. LangChain Agent (compiler-native TOOL_OBJECT)")
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
     from langchain_core.tools import StructuredTool
     from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
     from langchain_mistralai import ChatMistralAI
 
-    lc_tool = StructuredTool.from_function(
-        func=tool["function"],
-        name=tool["name"],
-        description=tool["description"],
-    )
+    registry = LocalRegistry()
+    runtime  = BabelRuntime(registry=registry, dist_dir=ROOT / "dist")
+    tool     = runtime.load(TOOL_ID, target="langchain")
+
+    lc_tool = tool["tool_object"]
+    assert isinstance(lc_tool, StructuredTool), \
+        f"Expected StructuredTool, got {type(lc_tool)}"
+    ok(f"runtime.load(target='langchain') → TOOL_OBJECT is {type(lc_tool).__name__}")
 
     llm = ChatMistralAI(
         model="mistral-large-latest",
         api_key=os.getenv("MISTRAL_API_KEY"),
         temperature=0,
     )
-    llm_with_tools = llm.bind_tools([lc_tool])
+    llm_with_tools = llm.bind_tools([lc_tool])   # ← compiler-native StructuredTool
     messages = [HumanMessage(content=QUERY)]
 
     # Tool-calling loop
@@ -426,25 +444,26 @@ if __name__ == "__main__":
     test_registry()
     loaded_tool = test_runtime()
 
-    tool_fn = loaded_tool["function"]
-
     try:
-        test_pydantic_agent(tool_fn)
+        test_pydantic_agent()
         results["Pydantic-AI agent"] = "PASS"
     except Exception as e:
         fail("Pydantic-AI agent", str(e))
+        import traceback; traceback.print_exc()
 
     try:
         test_ag2_agent(loaded_tool)
         results["AG2 agent"] = "PASS"
     except Exception as e:
         fail("AG2 agent", str(e))
+        import traceback; traceback.print_exc()
 
     try:
-        test_langchain_agent(loaded_tool)
+        test_langchain_agent()
         results["LangChain agent"] = "PASS"
     except Exception as e:
         fail("LangChain agent", str(e))
+        import traceback; traceback.print_exc()
 
     # ── Final summary ────────────────────────────────────────────────────────
     elapsed = time.monotonic() - t_start

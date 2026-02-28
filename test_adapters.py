@@ -62,9 +62,9 @@ def fail(label: str, reason: str) -> None:
 
 
 def compile_to(target: str) -> Path:
-    from babel.compiler.adapters.pydantic_adapter import PydanticAdapter
-    from babel.compiler.adapters.langchain_adapter import LangChainAdapter
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.compiler.adapters.pydantic_adapter import PydanticAdapter
+    from babel_registry.compiler.adapters.langchain_adapter import LangChainAdapter
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
 
     adapter_map = {"pydantic": PydanticAdapter, "langchain": LangChainAdapter, "ag2": AG2Adapter}
     adapter = adapter_map[target]()
@@ -188,7 +188,7 @@ def test_cli():
     for target in ("pydantic", "langchain"):
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
-                [sys.executable, "-m", "babel.cli", "compile",
+                [sys.executable, "-m", "babel_registry.cli", "compile",
                  str(SPEC_PATH), "--target", target, "--output", tmp],
                 cwd=str(ROOT),
                 capture_output=True,
@@ -209,8 +209,8 @@ def test_cli():
 def test_runtime():
     section("4. BabelRuntime — load(target='pydantic') and load(target='langchain')")
 
-    from babel.registry.local_registry import LocalRegistry
-    from babel.runtime.babel_runtime import BabelRuntime
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
     from pydantic_ai.tools import Tool as PydanticTool
     from langchain_core.tools import StructuredTool
 
@@ -218,7 +218,7 @@ def test_runtime():
     runtime  = BabelRuntime(registry=registry, dist_dir=ROOT / "dist")
 
     # Ensure currency tool is in registry
-    from babel.compiler.adapters.ag2_adapter import AG2Adapter
+    from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
     adapter = AG2Adapter()
     with open(SPEC_PATH) as f:
         spec = yaml.safe_load(f)
@@ -266,8 +266,8 @@ def test_runtime():
 def test_pydantic_agent_with_tool_object():
     section("5a. Pydantic-AI Agent using TOOL_OBJECT from compiler")
 
-    from babel.registry.local_registry import LocalRegistry
-    from babel.runtime.babel_runtime import BabelRuntime
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
     from pydantic_ai import Agent
     from pydantic_ai.models.mistral import MistralModel
     from pydantic_ai.providers.mistral import MistralProvider
@@ -301,8 +301,8 @@ def test_pydantic_agent_with_tool_object():
 def test_langchain_agent_with_tool_object():
     section("5b. LangChain Agent using TOOL_OBJECT from compiler")
 
-    from babel.registry.local_registry import LocalRegistry
-    from babel.runtime.babel_runtime import BabelRuntime
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
     from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
     from langchain_mistralai import ChatMistralAI
 

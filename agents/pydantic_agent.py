@@ -23,8 +23,8 @@ from pydantic_ai import Agent
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.providers.mistral import MistralProvider
 
-from babel.registry.local_registry import LocalRegistry
-from babel.runtime.babel_runtime import BabelRuntime
+from babel_registry.registry.local_registry import LocalRegistry
+from babel_registry.runtime.babel_runtime import BabelRuntime
 
 
 def build_agent() -> Agent:

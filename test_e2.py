@@ -58,7 +58,7 @@ def load_impl(path: Path):
 class TestSchemaValidation(unittest.TestCase):
 
     def setUp(self):
-        from babel.compiler.adapters.ag2_adapter import AG2Adapter
+        from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
         self.adapter = AG2Adapter()
 
     def _load(self, path):
@@ -122,17 +122,17 @@ class TestSchemaValidation(unittest.TestCase):
 class TestBabelAdapterHelpers(unittest.TestCase):
 
     def setUp(self):
-        from babel.compiler.adapters.ag2_adapter import AG2Adapter
+        from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
         self.adapter = AG2Adapter()
 
     def test_babel_type_to_json_schema_string(self):
-        from babel.compiler.base import BabelAdapter
+        from babel_registry.compiler.base import BabelAdapter
         result = BabelAdapter._babel_type_to_json_schema({"name": "x", "type": "string", "description": "a str"})
         self.assertEqual(result["type"], "string")
         self.assertEqual(result["description"], "a str")
 
     def test_babel_type_to_json_schema_enum(self):
-        from babel.compiler.base import BabelAdapter
+        from babel_registry.compiler.base import BabelAdapter
         result = BabelAdapter._babel_type_to_json_schema({
             "name": "units", "type": "enum", "values": ["metric", "imperial"]
         })
@@ -141,12 +141,12 @@ class TestBabelAdapterHelpers(unittest.TestCase):
         self.assertIn("metric", result["enum"])
 
     def test_babel_type_to_json_schema_float(self):
-        from babel.compiler.base import BabelAdapter
+        from babel_registry.compiler.base import BabelAdapter
         result = BabelAdapter._babel_type_to_json_schema({"name": "temp", "type": "float"})
         self.assertEqual(result["type"], "number")
 
     def test_build_openai_tool_schema_structure(self):
-        from babel.compiler.base import BabelAdapter
+        from babel_registry.compiler.base import BabelAdapter
         with open(WEATHER_SPEC_PATH) as f:
             spec = yaml.safe_load(f)
         schema = BabelAdapter._build_openai_tool_schema(spec)
@@ -160,7 +160,7 @@ class TestBabelAdapterHelpers(unittest.TestCase):
         self.assertIn("location", fn["parameters"]["required"])
 
     def test_build_python_signature_required_param(self):
-        from babel.compiler.base import BabelAdapter
+        from babel_registry.compiler.base import BabelAdapter
         with open(WEATHER_SPEC_PATH) as f:
             spec = yaml.safe_load(f)
         sig = BabelAdapter._build_python_signature(spec)
@@ -168,7 +168,7 @@ class TestBabelAdapterHelpers(unittest.TestCase):
         self.assertIn("def weather(", sig)
 
     def test_build_python_signature_default_param(self):
-        from babel.compiler.base import BabelAdapter
+        from babel_registry.compiler.base import BabelAdapter
         with open(WEATHER_SPEC_PATH) as f:
             spec = yaml.safe_load(f)
         sig = BabelAdapter._build_python_signature(spec)
@@ -183,7 +183,7 @@ class TestBabelAdapterHelpers(unittest.TestCase):
 class TestAG2Adapter(unittest.TestCase):
 
     def setUp(self):
-        from babel.compiler.adapters.ag2_adapter import AG2Adapter
+        from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
         self.adapter = AG2Adapter()
         self.tmp = tempfile.mkdtemp()
         self.dist_dir = Path(self.tmp) / "dist"
@@ -255,7 +255,7 @@ class TestAG2Adapter(unittest.TestCase):
 class TestRawPythonAdapter(unittest.TestCase):
 
     def setUp(self):
-        from babel.compiler.adapters.raw_python_adapter import RawPythonAdapter
+        from babel_registry.compiler.adapters.raw_python_adapter import RawPythonAdapter
         self.adapter = RawPythonAdapter()
         self.tmp = tempfile.mkdtemp()
         self.dist_dir = Path(self.tmp) / "dist"
@@ -290,7 +290,7 @@ class TestRawPythonAdapter(unittest.TestCase):
 class TestLocalRegistry(unittest.TestCase):
 
     def setUp(self):
-        from babel.registry.local_registry import LocalRegistry
+        from babel_registry.registry.local_registry import LocalRegistry
         self.tmp = tempfile.mkdtemp()
         self.db_path = Path(self.tmp) / "test_registry.db"
         self.registry = LocalRegistry(db_path=self.db_path)
@@ -411,8 +411,8 @@ class TestLocalRegistry(unittest.TestCase):
 class TestBabelRuntime(unittest.TestCase):
 
     def setUp(self):
-        from babel.registry.local_registry import LocalRegistry
-        from babel.runtime.babel_runtime import BabelRuntime
+        from babel_registry.registry.local_registry import LocalRegistry
+        from babel_registry.runtime.babel_runtime import BabelRuntime
 
         self.tmp = tempfile.mkdtemp()
         db_path = Path(self.tmp) / "runtime_test.db"
@@ -580,7 +580,7 @@ class TestCLI(unittest.TestCase):
     def _run(self, *args):
         """Run babel CLI as subprocess and return (returncode, stdout, stderr)."""
         result = subprocess.run(
-            [sys.executable, "-m", "babel.cli", *args],
+            [sys.executable, "-m", "babel_registry.cli", *args],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,

@@ -21,9 +21,9 @@ from pathlib import Path
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from babel.compiler.adapters.ag2_adapter import AG2Adapter
-from babel.registry.local_registry import LocalRegistry
-from babel.runtime.babel_runtime import BabelRuntime
+from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
+from babel_registry.registry.local_registry import LocalRegistry
+from babel_registry.runtime.babel_runtime import BabelRuntime
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 

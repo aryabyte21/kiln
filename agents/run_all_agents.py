@@ -62,8 +62,8 @@ def run_ag2() -> None:
     import os, sys
     from pathlib import Path
 
-    from babel.registry.local_registry import LocalRegistry
-    from babel.runtime.babel_runtime import BabelRuntime
+    from babel_registry.registry.local_registry import LocalRegistry
+    from babel_registry.runtime.babel_runtime import BabelRuntime
     import autogen
     from autogen import AssistantAgent, UserProxyAgent, register_function
 
@@ -140,7 +140,7 @@ def run_langchain() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def print_registry_summary() -> None:
-    from babel.registry.local_registry import LocalRegistry
+    from babel_registry.registry.local_registry import LocalRegistry
     registry = LocalRegistry()
 
     section("BABEL REGISTRY SUMMARY")

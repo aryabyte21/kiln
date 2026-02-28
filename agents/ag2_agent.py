@@ -26,8 +26,8 @@ load_dotenv(ROOT.parent / ".env")
 import autogen
 from autogen import AssistantAgent, UserProxyAgent, register_function
 
-from babel.registry.local_registry import LocalRegistry
-from babel.runtime.babel_runtime import BabelRuntime
+from babel_registry.registry.local_registry import LocalRegistry
+from babel_registry.runtime.babel_runtime import BabelRuntime
 
 
 def build_and_run(query: str) -> None:
