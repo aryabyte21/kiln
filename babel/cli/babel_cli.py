@@ -62,15 +62,14 @@ def cmd_compile(args: argparse.Namespace) -> None:
 def cmd_validate(args: argparse.Namespace) -> None:
     """Validate a Babel spec against the schema."""
     import jsonschema
-    from babel.compiler.base import BabelAdapter
+    from babel.compiler.adapters.ag2_adapter import AG2Adapter
 
     spec_path = Path(args.spec).resolve()
     if not spec_path.exists():
         print(f"ERROR: File not found: {spec_path}", file=sys.stderr)
         sys.exit(1)
 
-    adapter = BabelAdapter.__new__(BabelAdapter)
-    BabelAdapter.__init__(adapter)
+    adapter = AG2Adapter()
 
     with open(spec_path) as f:
         spec = yaml.safe_load(f)
