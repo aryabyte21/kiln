@@ -1,0 +1,78 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.weather
+  name: get_weather
+  version: 1.0.0
+  description: "Get current weather conditions and temperature for any city worldwide."
+  author: shekhar
+  license: MIT
+
+interface:
+  inputs:
+    - name: location
+      type: string
+      required: true
+      description: "City name or coordinates, e.g. 'Singapore' or '1.3521,103.8198'"
+    - name: units
+      type: string
+      required: false
+      default: celsius
+      description: "Temperature unit: celsius or fahrenheit"
+      enum: [celsius, fahrenheit]
+
+  outputs:
+    - name: location
+      type: string
+      description: "The requested location"
+    - name: temperature
+      type: integer
+      description: "Current temperature in the requested unit"
+    - name: conditions
+      type: string
+      description: "Short weather conditions description"
+    - name: humidity
+      type: integer
+      description: "Humidity percentage"
+    - name: forecast
+      type: string
+      description: "Short forecast"
+    - name: success
+      type: boolean
+
+implementation:
+  runtime: python3.10
+  entrypoint: weather.py
+  dependencies: []
+  execution:
+    timeout: 5000ms
+    retries: 1
+    async: false
+
+targets:
+  - ag2
+  - mistral
+  - langchain
+  - pydantic_ai
+
+testing:
+  fixtures:
+    - input:
+        location: Singapore
+      expected_output_contains:
+        - temperature
+        - conditions
+        - success
+    - input:
+        location: Tokyo
+        units: fahrenheit
+      expected_output_contains:
+        - temperature
+        - units
+        - success
+
+metadata:
+  tags: [weather, real-time]
+  category: data
+  generated_by: human
+  generation_timestamp: "2026-02-28T00:00:00Z"

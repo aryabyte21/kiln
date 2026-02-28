@@ -1,0 +1,60 @@
+active_model = "devstral-2"
+vim_keybindings = false
+disable_welcome_banner_animation = true
+auto_approve = false
+enable_telemetry = false
+enable_update_checks = false
+enable_auto_update = false
+enable_notifications = false
+api_timeout = 720.0
+tool_paths = []
+mcp_servers = []
+
+[[providers]]
+name = "mistral"
+api_base = "https://api.mistral.ai/v1"
+api_key_env_var = "MISTRAL_API_KEY"
+api_style = "openai"
+backend = "mistral"
+reasoning_field_name = "reasoning_content"
+project_id = ""
+region = ""
+
+[[models]]
+name = "mistral-vibe-cli-latest"
+provider = "mistral"
+alias = "devstral-2"
+temperature = 0.2
+input_price = 0.4
+output_price = 2.0
+thinking = "off"
+
+[tools.bash]
+permission = "always"
+allowlist = []
+denylist = []
+
+[tools.read_file]
+permission = "always"
+allowlist = []
+denylist = []
+
+[tools.write_file]
+permission = "always"
+allowlist = []
+denylist = []
+
+[tools.search_replace]
+permission = "always"
+allowlist = []
+denylist = []
+
+[tools.grep]
+permission = "always"
+allowlist = []
+denylist = []
+
+[tools.task]
+permission = "always"
+allowlist = []
+denylist = []
