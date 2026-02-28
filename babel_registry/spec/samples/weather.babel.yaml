@@ -1,0 +1,93 @@
+babel_version: "1.0"
+id: com.aria.tools.weather
+name: Weather Tool
+description: Get current weather conditions and forecast for any location using OpenWeatherMap
+
+interface:
+  inputs:
+    - name: location
+      type: string
+      description: City name, "City, Country" or "lat,lon" coordinates
+      required: true
+
+    - name: units
+      type: enum
+      description: Temperature unit system
+      required: false
+      values: [metric, imperial, standard]
+      default: metric
+
+    - name: forecast_days
+      type: integer
+      description: Number of forecast days to return (0–5)
+      required: false
+      default: 0
+
+  output:
+    type: object
+    fields:
+      - name: temperature
+        type: float
+        description: Current temperature in requested units
+      - name: feels_like
+        type: float
+      - name: conditions
+        type: string
+        description: Human-readable weather description (e.g. "light rain")
+      - name: humidity
+        type: integer
+      - name: wind_speed
+        type: float
+      - name: location_name
+        type: string
+      - name: forecast
+        type: array
+        description: List of daily forecast objects (empty if forecast_days=0)
+
+implementation:
+  language: python
+  entry_point: impl.py
+  function: run
+  dependencies:
+    - requests
+
+targets:
+  - ag2
+  - raw_python
+
+testing:
+  fixtures:
+    - description: Basic city lookup
+      input:
+        location: Singapore
+      expect_keys:
+        - temperature
+        - conditions
+        - location_name
+
+    - description: Imperial units with forecast
+      input:
+        location: "New York, US"
+        units: imperial
+        forecast_days: 3
+      expect_keys:
+        - temperature
+        - forecast
+
+execution:
+  timeout: 10
+  retries: 2
+  async: false
+  error_format:
+    type: object
+    fields:
+      - name: error
+        type: string
+      - name: code
+        type: integer
+
+metadata:
+  author: ARIA Team — E2
+  version: 1.0.0
+  tags: [weather, utility, real-time]
+  api_keys_required: [OPENWEATHERMAP_API_KEY]

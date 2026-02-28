@@ -1,0 +1,69 @@
+babel_version: "1.0"
+id: com.aria.tools.web_search
+name: Web Search Tool
+description: Search the web and return ranked results with snippets and URLs using Serper or Tavily
+
+interface:
+  inputs:
+    - name: query
+      type: string
+      description: Search query string
+      required: true
+
+    - name: num_results
+      type: integer
+      description: Maximum number of results to return (1–10)
+      required: false
+      default: 5
+
+    - name: search_type
+      type: enum
+      description: Type of search to perform
+      required: false
+      values: [web, news, images]
+      default: web
+
+  output:
+    type: object
+    fields:
+      - name: results
+        type: array
+        description: List of result objects with title, snippet, url
+      - name: snippets
+        type: array
+        description: Plain text snippets for quick consumption
+      - name: urls
+        type: array
+        description: Ordered list of result URLs
+
+implementation:
+  language: python
+  entry_point: impl.py
+  function: run
+  dependencies:
+    - requests
+
+targets:
+  - ag2
+  - raw_python
+
+testing:
+  fixtures:
+    - description: Basic web search
+      input:
+        query: "best Italian restaurants Singapore"
+        num_results: 3
+      expect_keys:
+        - results
+        - urls
+
+execution:
+  timeout: 15
+  retries: 1
+  async: false
+
+metadata:
+  author: ARIA Team — E3
+  version: 1.0.0
+  tags: [search, web, research]
+  api_keys_required: [SERPER_API_KEY]

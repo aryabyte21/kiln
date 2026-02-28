@@ -1,0 +1,98 @@
+babel_version: "1.0"
+id: com.aria.tools.maps_directions
+name: Maps Directions Tool
+description: Get driving or transit directions between two locations including duration, distance, and step-by-step instructions using Google Maps
+
+interface:
+  inputs:
+    - name: origin
+      type: string
+      description: Starting address, place name, or "lat,lon" coordinates
+      required: true
+
+    - name: destination
+      type: string
+      description: Destination address, place name, or "lat,lon" coordinates
+      required: true
+
+    - name: mode
+      type: enum
+      description: Travel mode
+      required: false
+      values: [driving, walking, transit, bicycling]
+      default: driving
+
+    - name: departure_time
+      type: string
+      description: Optional ISO 8601 departure time for transit/traffic-aware routing (e.g. "2025-06-07T19:00:00+08:00")
+      required: false
+
+  output:
+    type: object
+    fields:
+      - name: duration_mins
+        type: float
+        description: Estimated travel time in minutes
+      - name: distance_km
+        type: float
+        description: Total route distance in kilometres
+      - name: steps
+        type: array
+        description: Turn-by-turn instruction strings
+      - name: summary
+        type: string
+        description: One-line route summary (e.g. "via CTE")
+      - name: start_address
+        type: string
+      - name: end_address
+        type: string
+
+implementation:
+  language: python
+  entry_point: impl.py
+  function: run
+  dependencies:
+    - requests
+
+targets:
+  - ag2
+  - raw_python
+
+testing:
+  fixtures:
+    - description: Driving directions in Singapore
+      input:
+        origin: "Changi Airport, Singapore"
+        destination: "Marina Bay Sands, Singapore"
+        mode: driving
+      expect_keys:
+        - duration_mins
+        - distance_km
+        - steps
+
+    - description: Walking directions
+      input:
+        origin: "Raffles Hotel, Singapore"
+        destination: "Esplanade, Singapore"
+        mode: walking
+      expect_keys:
+        - duration_mins
+        - steps
+
+execution:
+  timeout: 10
+  retries: 1
+  async: false
+  error_format:
+    type: object
+    fields:
+      - name: error
+        type: string
+      - name: code
+        type: integer
+
+metadata:
+  author: ARIA Team — E2
+  version: 1.0.0
+  tags: [maps, navigation, directions, google]
+  api_keys_required: [GOOGLE_MAPS_API_KEY]
