@@ -61,7 +61,12 @@ babel/
 │   │   ├── interpreter.py             # Agent 1: voice/text → structured intent
 │   │   ├── planner.py                 # Agent 2: intent → task graph
 │   │   ├── aria.py                     # Agent 3 (ARIA): resolve tools (registry + synthesis)
-│   │   └── executor.py                # Agent 4: run graph, stream events, respond
+│   │   ├── executor.py                # Agent 4: run graph, stream events, respond
+│   │   └── prompts/                   # YAML prompt files for each agent
+│   │       ├── interpreter.yml        # Interpreter system prompt
+│   │       ├── planner.yml            # Planner system prompt
+│   │       ├── aria.yml               # ARIA (Toolsmith) system prompt
+│   │       └── executor.yml           # Executor system prompt
 │   ├── voice/
 │   │   ├── voxtral_stt.py             # Voxtral Mini STT client
 │   │   └── elevenlabs_tts.py          # 11 Labs TTS client
