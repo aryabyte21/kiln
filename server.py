@@ -18,7 +18,8 @@ Endpoints
   POST /tools/{tool_id}/test        → run spec.yaml fixtures, return report
   DELETE /tools/{tool_id}           → unregister a tool
 
-  POST /aria/start                  → {"request": "..."} → {"run_id": "..."}
+  POST /aria/start                  → plan graph, detect missing env vars
+  POST /aria/execute/{run_id}       → start execution after supplying env vars
   GET  /aria/stream/{run_id}        → SSE stream of ARIA execution events
 
 Usage:
@@ -70,9 +71,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── ARIA run queue registry ────────────────────────────────────────────────────
+# ── ARIA run state ────────────────────────────────────────────────────────────
 # run_id → Queue of event dicts; None sentinel = stream finished
 _run_queues: dict[str, Queue] = {}
+# run_id → planned task graph (stored between /aria/start and /aria/execute)
+_run_plans:  dict[str, dict]  = {}
 
 # ── Startup: hydrate registry from disk ───────────────────────────────────────
 
@@ -351,18 +354,78 @@ def delete_tool(tool_id: str):
 
 # ── ARIA Endpoints ─────────────────────────────────────────────────────────────
 
-@app.post("/aria/start", summary="Start an ARIA multi-agent run")
+def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
+    """
+    For each tool referenced in the task graph, check whether its
+    REQUIRED_ENV_VARS are present in os.environ or in the provided dict.
+    Returns a deduplicated list of missing var descriptors.
+    """
+    import importlib.util
+
+    seen:   set[str]   = set()
+    missing: list[dict] = []
+
+    for node in graph.get("nodes", []):
+        for tool_id in node.get("tools", []):
+            # Find the tool's implementation file on disk
+            tool_dir = REGISTRY_DIR / tool_id
+            if not tool_dir.exists():
+                continue
+            # Pick the latest version directory
+            impl_file = None
+            for ver_dir in sorted(tool_dir.iterdir()):
+                spec_path = ver_dir / "spec.yaml"
+                if not spec_path.exists():
+                    continue
+                raw = yaml.safe_load(spec_path.read_text())
+                entrypoint = raw.get("implementation", {}).get("entrypoint", "")
+                candidate = ver_dir / entrypoint
+                if candidate.exists():
+                    impl_file = candidate
+                    break
+
+            if impl_file is None:
+                continue
+
+            # Dynamically load the module to read REQUIRED_ENV_VARS
+            try:
+                spec = importlib.util.spec_from_file_location("_tmp", impl_file)
+                mod  = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                required = getattr(mod, "REQUIRED_ENV_VARS", [])
+            except Exception:
+                continue
+
+            for ev in required:
+                name = ev.get("name", "")
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                if not os.environ.get(name) and not provided.get(name):
+                    missing.append({
+                        "tool_id":     tool_id,
+                        "var_name":    name,
+                        "description": ev.get("description", ""),
+                    })
+
+    return missing
+
+
+@app.post("/aria/start", summary="Plan an ARIA run; returns plan + any missing env vars")
 async def aria_start(body: dict):
     """
-    Begin planning + execution of a user request via ARIA.
+    Phase 1 of a two-phase start: plan the task graph and check for missing
+    environment variables (API keys) required by the planned tools.
 
     Body:
-        {"request": "What's the weather in Singapore and 500 SGD in EUR?"}
+        {"request": "...", "env_vars": {"SERPER_API_KEY": "..."}}  # env_vars optional
 
-    Returns:
-        {"run_id": "<uuid>"}
+    Returns one of:
+        {"status": "needs_config", "run_id": "...", "plan": {...}, "missing_envs": [...]}
+        {"status": "started",      "run_id": "..."}
 
-    Then stream events from GET /aria/stream/{run_id}.
+    If "needs_config", collect the missing keys and call POST /aria/execute/{run_id}.
+    If "started", connect to GET /aria/stream/{run_id} immediately.
     """
     api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
     if not api_key:
@@ -372,21 +435,75 @@ async def aria_start(body: dict):
     if not user_request:
         raise HTTPException(status_code=422, detail="'request' field is required")
 
+    provided_env: dict[str, str] = body.get("env_vars", {}) or {}
+
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from aria import ARIAPlanner
+
+    # Build tool list directly from the in-memory registry to avoid a
+    # self-request deadlock (the planner would otherwise GET /tools from
+    # this same server, timing out because the event loop is busy here).
+    registry   = get_global_registry()
+    tools_list = [{**_tool_to_dict(t), "tool_def": _tool_def(t)} for t in registry.list()]
+
+    planner = ARIAPlanner(babel_server_url="http://localhost:8765", api_key=api_key)
+    graph   = planner.plan(user_request, tools=tools_list)
+
     run_id = str(uuid.uuid4())
-    q: Queue = Queue()
-    _run_queues[run_id] = q
+    _run_plans[run_id]  = graph
+    _run_queues[run_id] = Queue()
+
+    missing = _collect_missing_envs(graph, provided_env)
+
+    if missing:
+        return {
+            "status":       "needs_config",
+            "run_id":       run_id,
+            "plan":         graph,
+            "missing_envs": missing,
+        }
+
+    # All env vars present — kick off execution immediately
+    _launch_execution(run_id, graph, provided_env, api_key)
+    return {"status": "started", "run_id": run_id}
+
+
+@app.post("/aria/execute/{run_id}", summary="Start execution after supplying missing env vars")
+async def aria_execute(run_id: str, body: dict):
+    """
+    Phase 2 of a two-phase start: supply the missing environment variables
+    and begin executing the already-planned task graph.
+
+    Body:
+        {"env_vars": {"SERPER_API_KEY": "...", "NEWS_API_KEY": "..."}}
+
+    Returns:
+        {"status": "started", "run_id": "..."}
+
+    Connect to GET /aria/stream/{run_id} for execution events.
+    """
+    graph = _run_plans.get(run_id)
+    if graph is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found — call /aria/start first")
+
+    api_key      = os.environ.get("MISTRAL_API_KEY", "").strip()
+    provided_env = body.get("env_vars", {}) or {}
+
+    _launch_execution(run_id, graph, provided_env, api_key)
+    return {"status": "started", "run_id": run_id}
+
+
+def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_key: str) -> None:
+    """Spawn the background thread that runs ARIAGraphFlow and feeds the SSE queue."""
+    q = _run_queues[run_id]
 
     def _run() -> None:
         try:
             import sys
             sys.path.insert(0, str(Path(__file__).parent.parent))
-            from aria import ARIAPlanner, ARIAGraphFlow
+            from aria import ARIAGraphFlow
 
-            planner = ARIAPlanner(
-                babel_server_url="http://localhost:8765",
-                api_key=api_key,
-            )
-            graph = planner.plan(user_request)
             q.put({"type": "plan_ready", **graph})
 
             llm_config = {
@@ -402,16 +519,16 @@ async def aria_start(body: dict):
                 llm_config=llm_config,
                 on_event=q.put,
             )
-            final_answer = flow.run(graph, verbose=False)
+            final_answer = flow.run(graph, extra_env=extra_env, verbose=False)
             q.put({"type": "flow_complete", "final_answer": final_answer})
 
         except Exception as exc:
             q.put({"type": "error", "message": str(exc)})
         finally:
             q.put(None)  # sentinel — stream is done
+            _run_plans.pop(run_id, None)
 
     threading.Thread(target=_run, daemon=True).start()
-    return {"run_id": run_id}
 
 
 @app.get("/aria/stream/{run_id}", summary="SSE stream of ARIA execution events")
