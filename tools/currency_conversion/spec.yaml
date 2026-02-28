@@ -1,0 +1,96 @@
+babel_version: "1.0"
+id: com.aria.tools.currency_conversion
+name: Currency Conversion Tool
+description: Convert an amount from one currency to another using live exchange rates. Returns the converted amount, exchange rate, and both currency codes.
+
+interface:
+  inputs:
+    - name: amount
+      type: float
+      description: The amount to convert
+      required: true
+
+    - name: from_currency
+      type: string
+      description: Source currency code (e.g. USD, SGD, EUR, GBP, JPY)
+      required: true
+
+    - name: to_currency
+      type: string
+      description: Target currency code (e.g. USD, SGD, EUR, GBP, JPY)
+      required: true
+
+  output:
+    type: object
+    fields:
+      - name: converted_amount
+        type: float
+        description: The converted amount in the target currency
+      - name: exchange_rate
+        type: float
+        description: The exchange rate used (1 unit of from_currency = X to_currency)
+      - name: from_currency
+        type: string
+      - name: to_currency
+        type: string
+      - name: formatted
+        type: string
+        description: Human-readable result (e.g. "100 USD = 134.20 SGD")
+
+implementation:
+  language: python
+  entry_point: impl.py
+  function: run
+  dependencies:
+    - requests
+
+targets:
+  - ag2
+  - raw_python
+
+testing:
+  fixtures:
+    - description: USD to SGD
+      input:
+        amount: 100.0
+        from_currency: USD
+        to_currency: SGD
+      expect_keys:
+        - converted_amount
+        - exchange_rate
+        - formatted
+
+    - description: EUR to JPY
+      input:
+        amount: 50.0
+        from_currency: EUR
+        to_currency: JPY
+      expect_keys:
+        - converted_amount
+        - formatted
+
+    - description: Same currency (GBP to GBP)
+      input:
+        amount: 200.0
+        from_currency: GBP
+        to_currency: GBP
+      expect_keys:
+        - converted_amount
+
+execution:
+  timeout: 10
+  retries: 2
+  async: false
+  error_format:
+    type: object
+    fields:
+      - name: error
+        type: string
+      - name: code
+        type: integer
+
+metadata:
+  author: ARIA Team — E2
+  version: 1.0.0
+  tags: [currency, finance, conversion, real-time]
+  api_keys_required: []

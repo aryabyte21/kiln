@@ -40,9 +40,14 @@ def cmd_compile(args: argparse.Namespace) -> None:
     dist_dir = Path(args.output).resolve() if args.output else Path("dist").resolve()
     target = args.target.lower()
 
+    from babel.compiler.adapters.pydantic_adapter import PydanticAdapter
+    from babel.compiler.adapters.langchain_adapter import LangChainAdapter
+
     adapter_map = {
-        "ag2": AG2Adapter,
-        "raw_python": RawPythonAdapter,
+        "ag2":        AG2Adapter,
+        "raw_python":  RawPythonAdapter,
+        "pydantic":   PydanticAdapter,
+        "langchain":  LangChainAdapter,
     }
     if target not in adapter_map:
         print(f"ERROR: Unknown target '{target}'. Choose from: {list(adapter_map)}", file=sys.stderr)
@@ -264,7 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     # compile
     p_compile = sub.add_parser("compile", help="Compile a Babel spec to a target")
     p_compile.add_argument("spec", help="Path to .babel.yaml spec file")
-    p_compile.add_argument("--target", default="ag2", help="Compilation target: ag2 | raw_python")
+    p_compile.add_argument("--target", default="ag2", help="Compilation target: ag2 | raw_python | pydantic | langchain")
     p_compile.add_argument("--output", default=None, help="Output dist/ directory (default: ./dist)")
     p_compile.set_defaults(func=cmd_compile)
 

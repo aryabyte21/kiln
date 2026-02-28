@@ -1,27 +1,31 @@
 """
 babel.runtime.babel_runtime
 -----------------------------
-BabelRuntime: compile-on-demand + LRU cache for AG2 tool loading.
+BabelRuntime: compile-on-demand + LRU cache for tool loading.
 
-Public API consumed by E3 (AG2 GraphFlow):
+Supports all four Babel targets:
+    "ag2"        → AG2Adapter        → TOOL_FUNCTION + TOOL_SCHEMA
+    "raw_python" → RawPythonAdapter  → TOOL_FUNCTION
+    "pydantic"   → PydanticAdapter   → TOOL_FUNCTION + TOOL_OBJECT (pydantic_ai.Tool)
+    "langchain"  → LangChainAdapter  → TOOL_FUNCTION + TOOL_OBJECT (StructuredTool)
+
+Public API:
 
     runtime = BabelRuntime()
+
+    # AG2 (default)
     tool = runtime.load("com.aria.tools.weather")
-    # tool = {
-    #     "name":        "weather",
-    #     "description": "Get current weather...",
-    #     "function":    <callable>,
-    #     "schema":      {...}   # OpenAI-compatible tool schema
-    # }
+    # {"name", "description", "function", "schema", "tool_id"}
 
-Loading a cached compiled tool takes < 5ms.
-First compile (cache miss) takes ~50–200ms.
+    # Pydantic-AI — includes tool_object ready for Agent(tools=[...])
+    tool = runtime.load("com.aria.tools.weather", target="pydantic")
+    # {"name", "description", "function", "schema", "tool_id", "tool_object"}
 
-Design:
-- On load(tool_id): look in LRU cache → if miss, fetch from registry, compile
-  with AG2Adapter, write to dist/, import tool.py, cache result.
-- Cache is in-memory only (process lifetime). The compiled dist/ files persist
-  on disk between runs for fast reload.
+    # LangChain — includes tool_object ready for llm.bind_tools([...])
+    tool = runtime.load("com.aria.tools.weather", target="langchain")
+    # {"name", "description", "function", "schema", "tool_id", "tool_object"}
+
+Cache is keyed by (tool_id, target) so each framework gets its own entry.
 """
 
 from __future__ import annotations
@@ -36,21 +40,32 @@ from typing import Any, Callable, Optional
 import yaml
 
 from babel.compiler.adapters.ag2_adapter import AG2Adapter
+from babel.compiler.adapters.raw_python_adapter import RawPythonAdapter
+from babel.compiler.adapters.pydantic_adapter import PydanticAdapter
+from babel.compiler.adapters.langchain_adapter import LangChainAdapter
+from babel.compiler.base import BabelAdapter
 from babel.registry.local_registry import LocalRegistry
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIST_DIR = Path(__file__).parent.parent.parent / "dist"
-_CACHE_MAX_SIZE = 64  # max compiled tools held in memory
+_CACHE_MAX_SIZE = 64
+
+_ADAPTER_MAP: dict[str, type[BabelAdapter]] = {
+    "ag2":        AG2Adapter,
+    "raw_python":  RawPythonAdapter,
+    "pydantic":   PydanticAdapter,
+    "langchain":  LangChainAdapter,
+}
 
 
 class BabelRuntime:
     """Compile-on-demand tool loader with in-memory LRU cache.
 
     Args:
-        registry:  LocalRegistry instance (default: new instance at default db path).
-        dist_dir:  Root directory for compiled tool artifacts.
-        cache_size: Max number of compiled tools to hold in memory.
+        registry:   LocalRegistry instance (default: new instance at default db path).
+        dist_dir:   Root directory for compiled tool artifacts.
+        cache_size: Max number of (tool_id, target) entries to hold in memory.
     """
 
     def __init__(
@@ -62,8 +77,7 @@ class BabelRuntime:
         self.registry = registry or LocalRegistry()
         self.dist_dir = Path(dist_dir)
         self.dist_dir.mkdir(parents=True, exist_ok=True)
-        self._adapter = AG2Adapter()
-        self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
         self._cache_size = cache_size
 
     # ------------------------------------------------------------------
@@ -71,86 +85,91 @@ class BabelRuntime:
     # ------------------------------------------------------------------
 
     def load(self, tool_id: str, target: str = "ag2") -> dict[str, Any]:
-        """Load a compiled tool object ready for AG2 registration.
+        """Load a compiled tool object for the specified framework target.
 
         Args:
             tool_id: Full tool ID (e.g. "com.aria.tools.weather").
-            target:  Compilation target. Only "ag2" is supported in v1.0.
+            target:  "ag2" | "raw_python" | "pydantic" | "langchain"
 
         Returns:
             Dict with keys:
-              - name        (str)  — short function name
-              - description (str)  — used by LLM to select the tool
-              - function    (callable) — the actual Python function
-              - schema      (dict) — OpenAI-compatible tool schema
+              - name        (str)
+              - description (str)
+              - function    (callable)
+              - schema      (dict)  — OpenAI-compatible tool schema
+              - tool_id     (str)
+              - tool_object (framework-native object | None)
+                            pydantic_ai.Tool for target="pydantic"
+                            StructuredTool   for target="langchain"
+                            None             for target="ag2" / "raw_python"
 
         Raises:
-            KeyError: if tool_id is not found in the registry.
-            RuntimeError: if compilation fails.
+            KeyError:   if tool_id not found in the registry.
+            ValueError: if target is not a known compilation target.
         """
-        # 1. Check in-memory LRU cache
-        if tool_id in self._cache:
-            self._cache.move_to_end(tool_id)
-            logger.debug("Cache HIT: %s", tool_id)
-            return self._cache[tool_id]
+        if target not in _ADAPTER_MAP:
+            raise ValueError(f"Unknown target {target!r}. Choose from: {list(_ADAPTER_MAP)}")
 
-        logger.debug("Cache MISS: %s — compiling", tool_id)
+        cache_key = (tool_id, target)
+
+        # 1. LRU cache hit
+        if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
+            logger.debug("Cache HIT: %s [%s]", tool_id, target)
+            return self._cache[cache_key]
+
+        logger.debug("Cache MISS: %s [%s] — compiling", tool_id, target)
         t0 = time.monotonic()
 
         # 2. Check if compiled artifact already exists on disk
-        out_dir = self.dist_dir / "ag2" / tool_id
-        tool_py_path = out_dir / "tool.py"
-
+        tool_py_path = self.dist_dir / target / tool_id / "tool.py"
         if not tool_py_path.exists():
-            # Need to compile
-            self._compile(tool_id)
+            self._compile(tool_id, target)
 
-        # 3. Import the compiled tool.py
+        # 3. Import and extract exports
         tool_obj = self._import_tool_module(tool_py_path)
 
         elapsed_ms = (time.monotonic() - t0) * 1000
-        logger.info("Loaded %s in %.1fms", tool_id, elapsed_ms)
+        logger.info("Loaded %s [%s] in %.1fms", tool_id, target, elapsed_ms)
 
-        # 4. Cache and return
-        self._cache_put(tool_id, tool_obj)
+        self._cache_put(cache_key, tool_obj)
         return tool_obj
 
-    def precompile_all(self) -> list[str]:
-        """Compile every tool in the registry to dist/. Call at startup.
+    def precompile_all(self, target: str = "ag2") -> list[str]:
+        """Compile every tool in the registry to dist/ for a given target.
 
         Returns:
             List of tool_ids that were compiled (skips already-compiled ones).
         """
         compiled = []
         for entry in self.registry.list():
-            tool_id = entry["tool_id"]
-            out_dir = self.dist_dir / "ag2" / tool_id
-            if not (out_dir / "tool.py").exists():
+            tid = entry["tool_id"]
+            if not (self.dist_dir / target / tid / "tool.py").exists():
                 try:
-                    self._compile(tool_id)
-                    compiled.append(tool_id)
+                    self._compile(tid, target)
+                    compiled.append(tid)
                 except Exception as exc:
-                    logger.error("Failed to precompile %s: %s", tool_id, exc)
+                    logger.error("Failed to precompile %s [%s]: %s", tid, target, exc)
         return compiled
 
-    def invalidate(self, tool_id: str) -> None:
-        """Evict a tool from the in-memory cache (force recompile on next load)."""
-        self._cache.pop(tool_id, None)
+    def invalidate(self, tool_id: str, target: str = "ag2") -> None:
+        """Evict a specific (tool_id, target) entry from the cache."""
+        self._cache.pop((tool_id, target), None)
 
     def cache_info(self) -> dict[str, Any]:
         """Return cache stats."""
         return {
             "size": len(self._cache),
             "max_size": self._cache_size,
-            "cached_tools": list(self._cache.keys()),
+            "cached_tools": [f"{tid}[{tgt}]" for (tid, tgt) in self._cache.keys()],
         }
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _compile(self, tool_id: str) -> Path:
-        """Fetch spec+impl from registry and compile to dist/."""
+    def _compile(self, tool_id: str, target: str) -> Path:
+        """Fetch spec+impl from registry and compile to dist/<target>/."""
         row = self.registry.get(tool_id)
         if not row:
             raise KeyError(f"Tool not found in registry: {tool_id!r}")
@@ -159,38 +178,42 @@ class BabelRuntime:
         impl_path = Path(row["impl_path"])
 
         if not impl_path.exists():
-            raise RuntimeError(
-                f"Implementation file not found for {tool_id}: {impl_path}"
-            )
+            raise RuntimeError(f"Implementation file not found for {tool_id}: {impl_path}")
 
-        out_dir = self._adapter.compile(spec, impl_path, self.dist_dir)
-        logger.info("Compiled %s → %s", tool_id, out_dir)
+        adapter = _ADAPTER_MAP[target]()
+        out_dir = adapter.compile(spec, impl_path, self.dist_dir)
+        logger.info("Compiled %s [%s] → %s", tool_id, target, out_dir)
         return out_dir
 
     def _import_tool_module(self, tool_py_path: Path) -> dict[str, Any]:
-        """Dynamically import a compiled tool.py and extract exports."""
-        module_name = f"_babel_compiled_{tool_py_path.parent.name.replace('.', '_')}"
-        spec = importlib.util.spec_from_file_location(module_name, tool_py_path)
+        """Dynamically import a compiled tool.py and extract all exports."""
+        # Use a unique module name to avoid collisions across targets
+        parent = tool_py_path.parent
+        unique_name = f"_babel_{parent.parent.name}_{parent.name.replace('.', '_')}"
+        spec = importlib.util.spec_from_file_location(unique_name, tool_py_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
         fn: Callable = mod.TOOL_FUNCTION
         tool_id: str = mod.TOOL_ID
         schema: dict = mod.TOOL_SCHEMA
+        # TOOL_OBJECT is present in pydantic + langchain targets; None otherwise
+        tool_object = getattr(mod, "TOOL_OBJECT", None)
 
         return {
-            "name": schema["function"]["name"],
+            "name":        schema["function"]["name"],
             "description": schema["function"]["description"],
-            "function": fn,
-            "schema": schema,
-            "tool_id": tool_id,
+            "function":    fn,
+            "schema":      schema,
+            "tool_id":     tool_id,
+            "tool_object": tool_object,
         }
 
-    def _cache_put(self, tool_id: str, tool_obj: dict[str, Any]) -> None:
-        """Insert into LRU cache, evicting LRU entry if at capacity."""
+    def _cache_put(self, cache_key: tuple[str, str], tool_obj: dict[str, Any]) -> None:
+        """Insert into LRU cache, evicting oldest entry if at capacity."""
         if len(self._cache) >= self._cache_size:
             evicted = next(iter(self._cache))
             del self._cache[evicted]
-            logger.debug("Cache evicted: %s", evicted)
-        self._cache[tool_id] = tool_obj
-        self._cache.move_to_end(tool_id)
+            logger.debug("Cache evicted: %s[%s]", *evicted)
+        self._cache[cache_key] = tool_obj
+        self._cache.move_to_end(cache_key)
