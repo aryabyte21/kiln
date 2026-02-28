@@ -18,6 +18,9 @@ Endpoints
   POST /tools/{tool_id}/test        → run spec.yaml fixtures, return report
   DELETE /tools/{tool_id}           → unregister a tool
 
+  POST /aria/start                  → {"request": "..."} → {"run_id": "..."}
+  GET  /aria/stream/{run_id}        → SSE stream of ARIA execution events
+
 Usage:
     conda run -n shekhar python run_server.py
     # or:
@@ -26,14 +29,21 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import shutil
 import tempfile
+import threading
+import uuid
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Any
 
 import yaml
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .loader import BabelLoader
 from .registry import get_global_registry
@@ -51,6 +61,18 @@ app = FastAPI(
     ),
     version="1.0.0",
 )
+
+# Allow requests from the React dev server (localhost:5173) and any local origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── ARIA run queue registry ────────────────────────────────────────────────────
+# run_id → Queue of event dicts; None sentinel = stream finished
+_run_queues: dict[str, Queue] = {}
 
 # ── Startup: hydrate registry from disk ───────────────────────────────────────
 
@@ -325,3 +347,114 @@ def delete_tool(tool_id: str):
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
     registry.unregister(tool_id)
     return {"success": True, "tool_id": tool_id}
+
+
+# ── ARIA Endpoints ─────────────────────────────────────────────────────────────
+
+@app.post("/aria/start", summary="Start an ARIA multi-agent run")
+async def aria_start(body: dict):
+    """
+    Begin planning + execution of a user request via ARIA.
+
+    Body:
+        {"request": "What's the weather in Singapore and 500 SGD in EUR?"}
+
+    Returns:
+        {"run_id": "<uuid>"}
+
+    Then stream events from GET /aria/stream/{run_id}.
+    """
+    api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="MISTRAL_API_KEY not set on server")
+
+    user_request = body.get("request", "").strip()
+    if not user_request:
+        raise HTTPException(status_code=422, detail="'request' field is required")
+
+    run_id = str(uuid.uuid4())
+    q: Queue = Queue()
+    _run_queues[run_id] = q
+
+    def _run() -> None:
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from aria import ARIAPlanner, ARIAGraphFlow
+
+            planner = ARIAPlanner(
+                babel_server_url="http://localhost:8765",
+                api_key=api_key,
+            )
+            graph = planner.plan(user_request)
+            q.put({"type": "plan_ready", **graph})
+
+            llm_config = {
+                "config_list": [{
+                    "model":    "mistral-large-latest",
+                    "api_key":  api_key,
+                    "api_type": "mistral",
+                }],
+                "cache_seed": None,
+            }
+            flow = ARIAGraphFlow(
+                babel_server_url="http://localhost:8765",
+                llm_config=llm_config,
+                on_event=q.put,
+            )
+            final_answer = flow.run(graph, verbose=False)
+            q.put({"type": "flow_complete", "final_answer": final_answer})
+
+        except Exception as exc:
+            q.put({"type": "error", "message": str(exc)})
+        finally:
+            q.put(None)  # sentinel — stream is done
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"run_id": run_id}
+
+
+@app.get("/aria/stream/{run_id}", summary="SSE stream of ARIA execution events")
+async def aria_stream(run_id: str):
+    """
+    Server-Sent Events stream for an ARIA run started via POST /aria/start.
+
+    Event types:
+        plan_ready    — task graph is ready (nodes, edges, order, exit_node)
+        node_start    — a node has started executing
+        tool_call     — a tool is being called (node_id, tool, args)
+        tool_result   — tool returned a result (node_id, tool, result)
+        node_complete — a node finished (node_id, result)
+        flow_complete — all nodes done (final_answer)
+        error         — something went wrong (message)
+
+    Connect with:
+        const src = new EventSource('/aria/stream/<run_id>')
+        src.onmessage = (e) => handleEvent(JSON.parse(e.data))
+    """
+    q = _run_queues.get(run_id)
+    if q is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    async def _generate():
+        loop = asyncio.get_event_loop()
+        try:
+            while True:
+                # Run blocking q.get in thread pool so the event loop stays free
+                event = await loop.run_in_executor(None, lambda: q.get(timeout=180))
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        except Empty:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Timed out'})}\n\n"
+        finally:
+            _run_queues.pop(run_id, None)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
