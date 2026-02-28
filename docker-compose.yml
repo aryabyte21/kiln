@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  vibe_tool:
+    build:
+      context: .
+      dockerfile: vibe_tool/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - VIBE_ARIA_WEBHOOK_URL=http://tool_server:8000/tools/register
+      - VIBE_WORKSPACE_DIR=/tmp/vibe_workspace
+    volumes:
+      - vibe_workspace:/tmp/vibe_workspace
+    depends_on:
+      - tool_server
+
+  tool_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.tool_server
+    ports:
+      - "8000:8000"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+    volumes:
+      - ./tools:/app/tools
+      - ./dist:/app/dist
+      - ./babel_registry.db:/app/babel_registry.db
+
+volumes:
+  vibe_workspace:

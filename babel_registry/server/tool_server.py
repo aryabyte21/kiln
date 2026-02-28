@@ -21,15 +21,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+import yaml
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from babel_registry.compiler.adapters.ag2_adapter import AG2Adapter
 from babel_registry.registry.local_registry import LocalRegistry
 from babel_registry.runtime.babel_runtime import BabelRuntime
 
 _ROOT    = Path(__file__).parent.parent.parent
 _DIST    = _ROOT / "dist"
+_TOOLS   = _ROOT / "tools"
 
 registry = LocalRegistry()
 runtime  = BabelRuntime(registry=registry, dist_dir=_DIST)
@@ -100,6 +103,55 @@ def invoke_tool(tool_id: str, body: InvokeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tool execution failed: {e}")
     return JSONResponse(content=result)
+
+
+# ── registration (called by vibe_tool webhook) ───────────────────────────────
+
+
+@app.post("/tools/register", summary="Register a synthesized tool")
+async def register_tool(
+    tool_id: str = Form(...),
+    spec: UploadFile = File(...),
+    impl: UploadFile = File(...),
+):
+    """Accept a synthesized tool (spec.yaml + impl.py) and register it.
+
+    Called by the vibe_tool service after successful synthesis.
+    Expects multipart form with:
+        - tool_id: Babel tool ID (e.g. com.aria.tools.weather)
+        - spec: spec.yaml file
+        - impl: impl.py file
+    """
+    # Sanitize tool_id for directory name
+    dir_name = tool_id.replace(".", "_")
+    tool_dir = _TOOLS / dir_name
+    tool_dir.mkdir(parents=True, exist_ok=True)
+
+    spec_path = tool_dir / "spec.yaml"
+    impl_path = tool_dir / "impl.py"
+
+    # Save uploaded files
+    spec_bytes = await spec.read()
+    impl_bytes = await impl.read()
+    spec_path.write_bytes(spec_bytes)
+    impl_path.write_bytes(impl_bytes)
+
+    try:
+        # Validate and compile
+        adapter = AG2Adapter()
+        spec_dict = adapter.load_spec(spec_path)
+        adapter.compile(spec_dict, impl_path, _DIST / "ag2")
+
+        # Publish to registry
+        registry.publish(spec_dict, impl_path, source="synthesized")
+
+        # Invalidate runtime cache so next load picks up the new tool
+        runtime.invalidate(tool_id, target="ag2")
+
+        return {"tool_id": spec_dict["id"], "status": "registered"}
+
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Registration failed: {e}")
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
