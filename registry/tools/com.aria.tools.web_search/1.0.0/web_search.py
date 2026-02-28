@@ -26,7 +26,7 @@ def web_search(query: str, num_results: int = 5) -> dict:
     try:
         import requests
 
-        api_key = os.environ.get("SERPER_API_KEY", "").strip()
+        api_key = os.environ.get("SERPER_API_KEY", "5d900a948bd05d7217fe61a254ab498a2c90f04b").strip()
         if not api_key:
             return {"results": [], "query": query, "success": False,
                     "error": "SERPER_API_KEY environment variable not set"}
