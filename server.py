@@ -22,6 +22,9 @@ Endpoints
   POST /aria/execute/{run_id}       → start execution after supplying env vars
   GET  /aria/stream/{run_id}        → SSE stream of ARIA execution events
 
+  POST /vibe/synthesize             → proxy to Vibe Coder (port 8002), inject callback_url
+  POST /vibe/callback               → receive synthesis result, auto-register tool
+
 Usage:
     conda run -n shekhar python run_server.py
     # or:
@@ -41,6 +44,7 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
 
+import requests
 import yaml
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,7 +55,9 @@ from .registry import get_global_registry
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-REGISTRY_DIR = Path(__file__).parent.parent / "registry" / "tools"
+REGISTRY_DIR      = Path(__file__).parent.parent / "registry" / "tools"
+VIBE_SERVER_URL   = "http://localhost:8002"
+BABEL_CALLBACK_URL = "http://localhost:8765/vibe/callback"
 
 app = FastAPI(
     title="BabelServer",
@@ -411,6 +417,64 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
     return missing
 
 
+def _synthesize_missing_tools(missing_tools: list) -> list[dict]:
+    """
+    Fire-and-forget POST requests to Vibe Coder for each missing tool spec.
+
+    Each entry in missing_tools is expected to be a dict produced by ARIAPlanner:
+        {"id": "com.aria.tools.foo", "description": "...", "inputs": [...], "output": {...}}
+
+    String entries (legacy planner output) are skipped — only structured specs
+    contain enough information for Vibe Coder to synthesise a tool.
+
+    Returns list of {"job_id": ..., "tool_id": ..., "status": ...} for each
+    synthesis request that was accepted, or [] if Vibe Coder is not running.
+    """
+    if not missing_tools:
+        return []
+
+    jobs: list[dict] = []
+
+    def _fire(spec: dict) -> None:
+        tool_id   = spec.get("id", "")
+        tool_name = tool_id.split(".")[-1] if tool_id else "unknown_tool"
+        job_id    = str(uuid.uuid4())
+        payload   = {
+            "job_id":       job_id,
+            "tool_name":    tool_name,
+            "description":  spec.get("description", ""),
+            "inputs":       spec.get("inputs", []),
+            "output":       spec.get("output", {}),
+            "constraints":  "",
+            "callback_url": BABEL_CALLBACK_URL,
+        }
+        try:
+            resp = requests.post(
+                f"{VIBE_SERVER_URL}/synthesize",
+                json=payload,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            jobs.append({"job_id": job_id, "tool_id": tool_id, "status": "queued"})
+            print(f"[Vibe] Synthesis queued for {tool_id}  job={job_id}")
+        except Exception as exc:
+            print(f"[Vibe] Could not queue synthesis for {tool_id}: {exc}")
+
+    threads = []
+    for entry in missing_tools:
+        if not isinstance(entry, dict):
+            continue           # skip bare string IDs — not enough info
+        t = threading.Thread(target=_fire, args=(entry,), daemon=True)
+        t.start()
+        threads.append(t)
+
+    # Wait briefly so jobs list is populated before we return
+    for t in threads:
+        t.join(timeout=12)
+
+    return jobs
+
+
 @app.post("/aria/start", summary="Plan an ARIA run; returns plan + any missing env vars")
 async def aria_start(body: dict):
     """
@@ -456,17 +520,26 @@ async def aria_start(body: dict):
 
     missing = _collect_missing_envs(graph, provided_env)
 
+    # Trigger Vibe Coder synthesis for any missing tools (fire-and-forget)
+    synthesis_jobs = _synthesize_missing_tools(graph.get("missing_tools", []))
+
     if missing:
-        return {
+        resp: dict = {
             "status":       "needs_config",
             "run_id":       run_id,
             "plan":         graph,
             "missing_envs": missing,
         }
+        if synthesis_jobs:
+            resp["synthesis_jobs"] = synthesis_jobs
+        return resp
 
     # All env vars present — kick off execution immediately
     _launch_execution(run_id, graph, provided_env, api_key)
-    return {"status": "started", "run_id": run_id}
+    resp = {"status": "started", "run_id": run_id}
+    if synthesis_jobs:
+        resp["synthesis_jobs"] = synthesis_jobs
+    return resp
 
 
 @app.post("/aria/execute/{run_id}", summary="Start execution after supplying missing env vars")
@@ -510,7 +583,8 @@ def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_k
                 "config_list": [{
                     "model":    "mistral-large-latest",
                     "api_key":  api_key,
-                    "api_type": "mistral",
+                    "api_type": "openai",
+                    "base_url": "https://api.mistral.ai/v1",
                 }],
                 "cache_seed": None,
             }
@@ -575,3 +649,143 @@ async def aria_stream(run_id: str):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── Vibe Coder Endpoints ───────────────────────────────────────────────────────
+
+@app.post("/vibe/synthesize", summary="Request Vibe Coder to synthesise a new tool")
+async def vibe_synthesize(body: dict):
+    """
+    Proxy a tool-synthesis request to the Vibe Coder Docker container at port 8002.
+    Injects callback_url automatically — when synthesis is complete, Vibe Coder
+    will POST the result to POST /vibe/callback, which auto-registers the tool.
+
+    Body (all fields except callback_url):
+        {
+          "job_id":      "optional — generated if omitted",
+          "tool_name":   "my_cool_tool",
+          "description": "What this tool does",
+          "inputs":      [{name, type, description, required, default, values}, ...],
+          "output":      {type, fields: [{name, type, description, required, default, values}]},
+          "constraints": "optional constraints string"
+        }
+
+    Returns:
+        Vibe Coder's response (e.g. {"job_id": "...", "status": "queued"})
+    """
+    job_id  = body.get("job_id") or str(uuid.uuid4())
+    payload = {**body, "job_id": job_id, "callback_url": BABEL_CALLBACK_URL}
+
+    try:
+        resp = requests.post(
+            f"{VIBE_SERVER_URL}/synthesize",
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Vibe Coder not reachable at {VIBE_SERVER_URL}. Is the Docker container running?",
+        )
+    except requests.HTTPError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=str(exc))
+
+
+@app.post("/vibe/callback", summary="Receive synthesis result from Vibe Coder and auto-register tool")
+async def vibe_callback(body: dict):
+    """
+    Called by Vibe Coder when tool synthesis is complete.
+
+    Expected body:
+        {
+          "job_id":    "...",
+          "status":    "success" | "failure",
+          "tool_name": "my_cool_tool",
+          "spec_yaml": "... raw YAML string ...",
+          "code":      "... Python source code ..."
+        }
+
+    On success: validates fixtures, saves files to registry, loads + registers the tool.
+    On failure: returns the error without registering anything.
+
+    Returns:
+        {"success": true,  "tool_id": "...", "version": "...", "fixtures": {...}}
+        {"success": false, "error": "..."}
+    """
+    job_id = body.get("job_id", "unknown")
+    status = body.get("status", "")
+
+    if status != "success":
+        error_msg = body.get("error") or body.get("message") or "Synthesis failed"
+        print(f"[Vibe Callback] job {job_id} failed: {error_msg}")
+        return {"success": False, "job_id": job_id, "error": error_msg}
+
+    spec_yaml = body.get("spec_yaml", "")
+    code      = body.get("code", "")
+    tool_name = body.get("tool_name", "tool")
+
+    if not spec_yaml or not code:
+        raise HTTPException(
+            status_code=422,
+            detail="Vibe Coder callback must include 'spec_yaml' and 'code'",
+        )
+
+    # Parse spec to get id, version, and entrypoint filename
+    try:
+        raw = yaml.safe_load(spec_yaml)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid YAML in spec_yaml: {exc}")
+
+    tool_id    = raw.get("tool", {}).get("id")
+    version    = str(raw.get("tool", {}).get("version", "1.0.0"))
+    entrypoint = raw.get("implementation", {}).get("entrypoint", f"{tool_name}.py")
+
+    if not tool_id:
+        raise HTTPException(status_code=422, detail="spec_yaml must contain tool.id")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path  = Path(tmp)
+        spec_path = tmp_path / "spec.yaml"
+        impl_path = tmp_path / entrypoint
+
+        spec_path.write_text(spec_yaml, encoding="utf-8")
+        impl_path.write_text(code,      encoding="utf-8")
+
+        loader = BabelLoader(auto_register=False)
+        report = loader.test(str(tmp_path))
+
+        if report["failed"] > 0:
+            failed_details = [r for r in report["results"] if not r["passed"]]
+            print(f"[Vibe Callback] job {job_id}: tool {tool_id} failed fixtures — not registered")
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "success":  False,
+                    "job_id":   job_id,
+                    "message":  "Tool failed test fixtures — not registered",
+                    "fixtures": failed_details,
+                },
+            )
+
+        # All fixtures passed → persist to registry
+        dest_dir = REGISTRY_DIR / tool_id / version
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(spec_path, dest_dir / "spec.yaml")
+        shutil.copy(impl_path, dest_dir / entrypoint)
+
+        loader_reg = BabelLoader(auto_register=True)
+        tool = loader_reg.load(str(dest_dir))
+
+    print(f"[Vibe Callback] job {job_id}: registered tool {tool_id} v{version}")
+    return {
+        "success":  True,
+        "job_id":   job_id,
+        "tool_id":  tool.id,
+        "version":  tool.spec.version,
+        "fixtures": {
+            "passed": report["passed"],
+            "failed": report["failed"],
+        },
+    }
