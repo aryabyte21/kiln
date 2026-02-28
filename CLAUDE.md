@@ -8,7 +8,7 @@ Built for the Mistral Worldwide Hackathon 2026 (Singapore).
 
 Babel is an end-to-end agentic system. User speaks a complex request → Babel understands intent (Voxtral STT), plans a task graph (Mistral Large), identifies tool gaps, synthesizes missing tools via Mistral Vibe, executes the graph (AG2), streams everything live (AG-UI), and responds in voice (11 Labs TTS).
 
-**ARIA** is the Toolsmith agent — the one that identifies tool gaps, synthesizes missing tools via Vibe, and resolves them. **Babel Registry** is where tools are stored, versioned, and served from. Think "npm for agent tools."
+**ARIA** is the Toolsmith agent — checks whether required tools exist in the registry, and calls the **vibe_tool** service (a separate Docker service) to synthesize any missing ones on the fly. **Babel Registry** is where tools are stored, versioned, and served from. Think "npm for agent tools."
 
 ## Core Agent Architecture
 
@@ -18,6 +18,8 @@ The system runs 4 agents in a linear pipeline:
 Interpreter → Planner → ARIA (Toolsmith) → Executor
                               ↕
                         Babel Registry
+                              ↕
+                    vibe_tool (Docker service)
 ```
 
 ### 1. Interpreter Agent
@@ -35,10 +37,12 @@ Interpreter → Planner → ARIA (Toolsmith) → Executor
 
 ### 3. ARIA Agent (Toolsmith)
 - Input: task graph with tool requirements
-- For each required tool:
-  - Query Babel Registry → **hit**: load compiled tool
-  - **Miss**: invoke Mistral Vibe synthesis loop
-    - Fetch API docs → generate Babel spec + implementation → run test fixtures → fix errors → validate → compile for AG2 → publish to Babel Registry
+- For each required tool in the graph:
+  - Query Babel Registry → **hit**: tool exists, load compiled tool — done
+  - **Miss**: tool does not exist → call `vibe_tool` service (separate Docker service)
+    - `vibe_tool` synthesizes the tool (spec + implementation) using Mistral Vibe
+    - `vibe_tool` validates, compiles, and registers the tool in Babel Registry
+    - ARIA loads the newly registered tool from the registry
 - Output: fully-resolved graph with all tools loaded and ready
 
 ### 4. Executor Agent
@@ -60,7 +64,7 @@ babel/
 │   ├── agents/
 │   │   ├── interpreter.py             # Agent 1: voice/text → structured intent
 │   │   ├── planner.py                 # Agent 2: intent → task graph
-│   │   ├── aria.py                     # Agent 3 (ARIA): resolve tools (registry + synthesis)
+│   │   ├── aria.py                     # Agent 3 (ARIA): check tools, call vibe_tool service if missing
 │   │   ├── executor.py                # Agent 4: run graph, stream events, respond
 │   │   └── prompts/                   # YAML prompt files for each agent
 │   │       ├── interpreter.yml        # Interpreter system prompt
@@ -70,18 +74,13 @@ babel/
 │   ├── voice/
 │   │   ├── voxtral_stt.py             # Voxtral Mini STT client
 │   │   └── elevenlabs_tts.py          # 11 Labs TTS client
-│   ├── synthesis/
-│   │   ├── vibe_wrapper.py            # Mistral Vibe subprocess (generate + test loop)
-│   │   ├── synthesis_prompt.py        # Prompt templates for tool generation
-│   │   └── api_docs_store/            # Pre-fetched API docs for common services
 │   ├── streaming/
 │   │   ├── agui_emitter.py            # AG-UI event emitter
 │   │   └── event_types.py             # Custom event type definitions
 │   └── response/
 │       └── response_synthesizer.py    # Natural language summary from graph results
 ├── aria/                              # ARIA — the toolsmith agent
-│   ├── aria_agent.py                  # ARIA toolsmith logic (resolve, synthesize, register)
-│   ├── vibe_synthesis.py              # Mistral Vibe integration for tool generation
+│   ├── aria_agent.py                  # ARIA toolsmith logic (check registry, call vibe_tool if missing)
 │   └── tool_resolver.py              # Registry lookup + gap detection
 ├── registry/                          # Babel Registry — tool storage & standard
 │   ├── spec/
@@ -130,7 +129,8 @@ babel/
 ## Naming Conventions
 
 - **Babel** = the overall system/project AND the tool registry (`registry/` directory)
-- **ARIA** = the Toolsmith agent — resolves tools, synthesizes missing ones (`aria/` directory)
+- **ARIA** = the Toolsmith agent — checks registry for tools, calls `vibe_tool` service for missing ones (`aria/` directory)
+- **vibe_tool** = separate Docker service that synthesizes missing tools via Mistral Vibe and registers them in Babel Registry
 - **Babel tool spec** = the YAML format for framework-agnostic tool definitions
 - Tool IDs: `com.babel.tools.<name>`
 - Agent archetypes (used by Planner): `finder`, `executor`, `communicator`, `scheduler`, `resolver`, `validator`
@@ -163,8 +163,8 @@ runtime = BabelRuntime(target="ag2")
 tool = runtime.load("com.babel.tools.weather@1.0.0")  # compile + cache
 ```
 
-### ARIA Synthesis Loop
-Tool gap found → ARIA queries Babel Registry → miss → invoke Mistral Vibe → generate spec + implementation → run test fixtures → fix errors → validate → compile for AG2 → publish to Babel Registry. Only returns when tests pass.
+### ARIA Tool Resolution Flow
+For each tool in the planner's graph, ARIA queries Babel Registry → **hit**: load tool, done → **miss**: call `vibe_tool` service (separate Docker service) → `vibe_tool` synthesizes spec + implementation via Mistral Vibe, validates, compiles, and registers the tool in Babel Registry → ARIA loads the newly registered tool. Only returns when all tools are resolved.
 
 ### AG-UI Events
 All agent activity streams as typed events: `GRAPH_BUILT`, `NODE_START`, `TOOL_CALL`, `ARIA_SYNTHESIS_START`, `CODE_DELTA`, `BABEL_REGISTRY_QUERY`, `BABEL_REGISTRY_MISS`, `BABEL_PUBLISH`, `GRAPH_COMPLETE`, etc.
@@ -207,7 +207,7 @@ python babel/test_request.py --request "Book a table for two..."
 - Each pre-built tool must have a complete Babel spec, verified implementation, passing test fixtures, and be published to Babel Registry
 - Planner output is always a JSON graph with `nodes`, `edges`, and `gaps` arrays
 - Interpreter always outputs structured JSON intent — never raw transcript
-- ARIA must pass all test fixtures before registering a tool — no one-shot generation
+- `vibe_tool` service must validate and pass all test fixtures before registering a tool — no one-shot generation
 - AG-UI events stream to frontend in real-time; the agent's reasoning IS the UI
 - Pre-built tools cover common demo scenarios so the system works even if synthesis fails
 - The 4-agent pipeline is strictly linear: Interpreter → Planner → ARIA → Executor
