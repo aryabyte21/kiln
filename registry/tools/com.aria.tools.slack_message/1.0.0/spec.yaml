@@ -1,0 +1,43 @@
+babel_version: "1.0"
+tool:
+  id: com.aria.tools.slack_message
+  name: slack_message
+  version: "1.0.0"
+  description: "Send a message to a Slack channel via an Incoming Webhook URL."
+  author: aria
+interface:
+  inputs:
+    - name: text
+      type: string
+      description: "Message text to send to Slack (supports Slack markdown)"
+      required: true
+    - name: username
+      type: string
+      description: "Display name for the bot (default: ARIA)"
+      required: false
+      default: "ARIA"
+    - name: icon_emoji
+      type: string
+      description: "Emoji for the bot icon (default: :robot_face:)"
+      required: false
+      default: ":robot_face:"
+  outputs:
+    - name: text
+      type: string
+    - name: success
+      type: boolean
+    - name: status_code
+      type: integer
+implementation:
+  runtime: python3.10
+  entrypoint: slack_message.py
+  dependencies:
+    - requests>=2.28
+testing:
+  fixtures:
+    - input:
+        text: "Hello from ARIA!"
+      expected_output_contains: [success]
+metadata:
+  tags: [slack, communication, notification]
+  category: communication

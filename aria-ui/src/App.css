@@ -1,0 +1,300 @@
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* ── App shell ────────────────────────────────────────────────────────────── */
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  background: #161b27;
+  border-bottom: 1px solid #2d3748;
+}
+
+.header-title { display: flex; align-items: baseline; gap: 12px; }
+
+.aria-logo {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header-sub { font-size: 13px; color: #718096; }
+.header-powered { font-size: 12px; color: #4a5568; }
+
+.app-main {
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── Query form ───────────────────────────────────────────────────────────── */
+.query-form { display: flex; gap: 12px; }
+
+.query-input {
+  flex: 1;
+  padding: 14px 18px;
+  background: #1a202c;
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  color: #e2e8f0;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.query-input:focus { border-color: #667eea; }
+.query-input::placeholder { color: #4a5568; }
+.query-input:disabled { opacity: 0.5; }
+
+.query-btn {
+  padding: 14px 28px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+  min-width: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.query-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+.query-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Spinner ──────────────────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Banners ──────────────────────────────────────────────────────────────── */
+.banner {
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.banner-planning { background: #1a2340; border: 1px solid #3b4f8a; color: #a3b8ef; }
+.banner-warn     { background: #2d1f00; border: 1px solid #7a4f00; color: #f6ad55; flex-wrap: wrap; }
+.synth-status    { font-size: 12px; opacity: 0.8; margin-left: 4px; }
+
+/* ── Section headings ─────────────────────────────────────────────────────── */
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #718096;
+  margin-bottom: 12px;
+}
+
+/* ── Graph section ────────────────────────────────────────────────────────── */
+.graph-layout {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.graph-entries { display: flex; flex-direction: column; gap: 12px; }
+
+.graph-arrow {
+  font-size: 28px;
+  color: #4a5568;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+/* ── Node card ────────────────────────────────────────────────────────────── */
+.node-card {
+  width: 220px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid #2d3748;
+  background: #1a202c;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.node-pending  { border-color: #2d3748; }
+.node-running  { border-color: #667eea; box-shadow: 0 0 12px rgba(102,126,234,0.25); }
+.node-complete { border-color: #48bb78; }
+.node-exit     { border-style: dashed; }
+
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.node-icon { font-size: 14px; width: 18px; flex-shrink: 0; }
+.node-running .node-icon { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.node-role  { font-size: 13px; font-weight: 600; color: #a0aec0; flex: 1; }
+.node-badge { font-size: 10px; font-weight: 700; color: #9f7aea; background: #2d1f4a; padding: 2px 6px; border-radius: 4px; }
+.node-id    { font-size: 11px; color: #4a5568; margin-bottom: 8px; font-family: monospace; }
+
+.node-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.tool-chip  { font-size: 10px; background: #2d3748; color: #90cdf4; padding: 2px 7px; border-radius: 4px; font-family: monospace; }
+
+.tool-call-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #718096; margin-top: 4px; }
+.call-arrow    { color: #667eea; }
+.call-name     { font-family: monospace; flex: 1; }
+.call-done     { color: #48bb78; }
+
+.node-result {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #68d391;
+  line-height: 1.4;
+  border-top: 1px solid #2d3748;
+  padding-top: 8px;
+}
+
+/* ── Bottom row ───────────────────────────────────────────────────────────── */
+.bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 768px) { .bottom-row { grid-template-columns: 1fr; } }
+
+/* ── Stream log ───────────────────────────────────────────────────────────── */
+.log-scroll {
+  background: #0d1117;
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 340px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.log-entry  { display: flex; gap: 8px; padding: 2px 0; }
+.log-tag    { flex-shrink: 0; width: 96px; font-weight: 600; }
+.log-node   { flex-shrink: 0; color: #667eea; }
+.log-text   { color: #a0aec0; word-break: break-all; }
+
+.log-plan          .log-tag { color: #9f7aea; }
+.log-node_start    .log-tag { color: #667eea; }
+.log-node_retry    .log-tag { color: #ed8936; }
+.log-tool_call     .log-tag { color: #f6ad55; }
+.log-tool_result   .log-tag { color: #68d391; }
+.log-node_complete .log-tag { color: #48bb78; }
+.log-flow_complete .log-tag { color: #9f7aea; }
+.log-error         .log-tag { color: #fc8181; }
+
+/* ── Final answer ─────────────────────────────────────────────────────────── */
+.answer-box {
+  background: #0d1117;
+  border: 1px solid #48bb78;
+  border-radius: 10px;
+  padding: 20px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+}
+.answer-error { border-color: #fc8181; color: #fc8181; }
+
+/* ── Env config panel ─────────────────────────────────────────────────────── */
+.env-config {
+  background: #161b27;
+  border: 1px solid #3b4f8a;
+  border-radius: 10px;
+  padding: 20px 24px;
+}
+
+.env-config-hint {
+  font-size: 13px;
+  color: #718096;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.env-fields { display: flex; flex-direction: column; gap: 16px; }
+
+.env-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.env-var-name {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #a3b8ef;
+}
+
+.env-tool-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #f6ad55;
+  background: #2d1f00;
+  border: 1px solid #7a4f00;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.env-desc {
+  font-size: 12px;
+  color: #4a5568;
+  margin: 0;
+}
+
+.env-input {
+  padding: 10px 14px;
+  background: #0d1117;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.env-input:focus { border-color: #667eea; }
+.env-input::placeholder { color: #2d3748; }
+
+.env-submit-btn {
+  margin-top: 8px;
+  align-self: flex-end;
+}

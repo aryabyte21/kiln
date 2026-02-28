@@ -1,0 +1,48 @@
+babel_version: "1.0"
+tool:
+  id: com.aria.tools.news_headlines
+  name: news_headlines
+  version: "1.0.0"
+  description: "Fetch top news headlines for a topic or country using NewsAPI.org."
+  author: aria
+interface:
+  inputs:
+    - name: topic
+      type: string
+      description: "Topic or keyword to search headlines for (e.g. 'AI', 'climate')"
+      required: false
+      default: ""
+    - name: country
+      type: string
+      description: "Two-letter country code for top headlines (e.g. 'us', 'sg', 'gb'). Used when topic is empty."
+      required: false
+      default: "us"
+    - name: num_results
+      type: integer
+      description: "Number of headlines to return (default 5, max 20)"
+      required: false
+      default: 5
+  outputs:
+    - name: articles
+      type: array
+      description: "List of {title, source, url, publishedAt, description} objects"
+    - name: total_results
+      type: integer
+    - name: success
+      type: boolean
+implementation:
+  runtime: python3.10
+  entrypoint: news_headlines.py
+  dependencies:
+    - requests>=2.28
+testing:
+  fixtures:
+    - input:
+        topic: "artificial intelligence"
+      expected_output_contains: [articles, success]
+    - input:
+        country: "sg"
+      expected_output_contains: [articles, success]
+metadata:
+  tags: [news, search, utility]
+  category: news
