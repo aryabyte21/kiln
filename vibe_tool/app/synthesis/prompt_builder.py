@@ -16,61 +16,44 @@ from app.models import SynthesizeRequest
 
 _SPEC_FORMAT = """\
 babel_version: "1.0"
-id: com.aria.tools.<tool_name>
-name: <Human Readable Name>
-description: <What the tool does — this becomes the LLM function description>
+
+tool:
+  id: com.aria.tools.<tool_name>
+  name: <tool_name>          # MUST match the Python function name exactly
+  version: 1.0.0
+  description: <What the tool does — this becomes the LLM function description>
+  author: vibe_tool
 
 interface:
   inputs:
     - name: <param_name>
-      type: <string|integer|float|boolean|enum|array|object>
+      type: <string|integer|float|boolean|array|object>
       description: <what it is>
       required: <true|false>
       default: <optional default value>
-      values: [<for enum type only>]
-  output:
-    type: object
-    fields:
-      - name: <field_name>
-        type: <type>
-        description: <what it returns>
+      enum: [<for enum type only — omit this line if not an enum>]
+  outputs:
+    - name: <output_field_name>
+      type: <string|integer|float|boolean|array|object>
+      description: <what this field contains>
 
 implementation:
-  language: python
-  entry_point: impl.py
-  function: run
-  dependencies:
-    - <pip package if needed, e.g. requests>
-
-targets:
-  - ag2
-  - raw_python
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
 
 testing:
   fixtures:
-    - description: <test case description>
-      input:
+    - input:
         <param>: <value>
-      expect_keys:
+      expected_output_contains:
         - <expected_key_1>
         - <expected_key_2>
 
-execution:
-  timeout: 10
-  retries: 2
-  async: false
-  error_format:
-    type: object
-    fields:
-      - name: error
-        type: string
-      - name: code
-        type: integer
-
 metadata:
-  author: vibe_tool
-  version: 1.0.0
   tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
 """
 
 _IMPL_RULES = """\
@@ -84,9 +67,10 @@ _IMPL_RULES = """\
   ]
   ```
   If the tool needs no env vars, set it to an empty list: `REQUIRED_ENV_VARS = []`
-- MUST define exactly one function: `def run(**kwargs) -> dict`
-- Accept all inputs defined in spec as keyword arguments with appropriate defaults
-- Return a dict whose keys match the output fields in the spec
+- MUST define exactly one function whose name matches `tool.name` in spec.yaml exactly
+  Example: if `tool.name: geopolitical_analysis` then `def geopolitical_analysis(**kwargs) -> dict`
+- Accept all inputs defined in spec as keyword arguments with appropriate type hints and defaults
+- Return a dict whose keys match the `expected_output_contains` keys in the test fixtures
 - On error, return `{"error": "<message>"}` — NEVER raise exceptions to the caller
 - Include mock/fallback behavior so tests pass even without live API keys
   (check `os.environ.get("API_KEY")` and return realistic mock data if missing)
@@ -227,6 +211,6 @@ def build_prompt(workspace: Path, request: SynthesizeRequest) -> str:
         f"Create two files in this directory: spec.yaml and impl.py. "
         f"Follow the Babel spec format exactly as described in CONTEXT.md. "
         f"After creating both files, test the tool by running: "
-        f'python -c "from impl import run; import json; print(json.dumps(run({test_input}), indent=2))" '
+        f'python -c "from impl import {request.tool_name}; import json; print(json.dumps({request.tool_name}({test_input}), indent=2))" '
         f"Fix any issues until the tool runs successfully and returns valid output."
     )
