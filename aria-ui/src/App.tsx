@@ -277,6 +277,72 @@ function StreamLog({ logs }: { logs: LogEntry[] }) {
   )
 }
 
+// ── VibeStreamPanel ───────────────────────────────────────────────────────────
+
+interface VibeLine {
+  id: number
+  stage: string
+  message?: string
+}
+
+let _vibeLineId = 0
+
+function VibeStreamPanel({ job }: { job: SynthesisJob }) {
+  const [lines, setLines] = useState<VibeLine[]>([])
+  const [done, setDone]   = useState(false)
+  const endRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const src = new EventSource(`/vibe-events/synthesize/${job.job_id}/events`)
+
+    src.onmessage = (e) => {
+      const ev = JSON.parse(e.data)
+      if (ev.stage === 'stream_closed') {
+        setDone(true)
+        src.close()
+        return
+      }
+      setLines(prev => [...prev, {
+        id:      ++_vibeLineId,
+        stage:   ev.stage || ev.type || '',
+        message: ev.message || '',
+      }])
+    }
+
+    src.onerror = () => { setDone(true); src.close() }
+
+    return () => src.close()
+  }, [job.job_id])
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lines.length])
+
+  const toolName = job.tool_id.split('.').pop() ?? job.tool_id
+
+  return (
+    <div className={`vibe-panel${done ? ' vibe-panel-done' : ''}`}>
+      <div className="vibe-panel-header">
+        <span className="vibe-panel-title">
+          Synthesizing <span className="vibe-tool-name">{toolName}</span>
+        </span>
+        <span className={`vibe-status-badge${done ? ' vibe-status-done' : ' vibe-status-active'}`}>
+          {done ? 'done' : <><span className="spinner vibe-spinner" /> building</>}
+        </span>
+      </div>
+      <div className="vibe-log">
+        {lines.map(l => (
+          <div key={l.id} className="vibe-log-entry">
+            <span className="vibe-stage">{l.stage}</span>
+            {l.message && <span className="vibe-msg">{l.message}</span>}
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  )
+}
+
 // ── ToolsPage ─────────────────────────────────────────────────────────────────
 
 interface ToolParam {
@@ -531,12 +597,15 @@ export default function App() {
             {state.missingTools.map(t => (
               <span key={t.id} className="tool-chip" title={t.description}>{t.id.split('.').pop()}</span>
             ))}
-            {synthesisJobs.length > 0
-              ? <span className="synth-status">⟳ Synthesizing {synthesisJobs.length} tool{synthesisJobs.length > 1 ? 's' : ''} via Vibe Coder — will be available on next run</span>
-              : <span className="synth-status">Start Vibe Coder to auto-build these tools</span>
-            }
+            {synthesisJobs.length === 0 && (
+              <span className="synth-status">Start Vibe Coder to auto-build these tools</span>
+            )}
           </div>
         )}
+
+        {synthesisJobs.map(job => (
+          <VibeStreamPanel key={job.job_id} job={job} />
+        ))}
 
         {/* Plan graph visible immediately after planning, even during config */}
         <GraphView state={state} />

@@ -452,3 +452,71 @@ h2 {
 
 .tag-chip  { font-size: 10px; background: #1a2340; color: #a3b8ef; border: 1px solid #3b4f8a; padding: 2px 7px; border-radius: 4px; }
 .meta-chip { font-size: 10px; background: #2d3748; color: #718096; padding: 2px 7px; border-radius: 4px; }
+
+/* ── Vibe synthesis panel ─────────────────────────────────────────────────── */
+.vibe-panel {
+  background: #0d1117;
+  border: 1px solid #4a2d7a;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.vibe-panel-done { border-color: #48bb78; }
+
+.vibe-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #160d2a;
+  border-bottom: 1px solid #4a2d7a;
+}
+.vibe-panel-done .vibe-panel-header { background: #0d1f14; border-bottom-color: #48bb78; }
+
+.vibe-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a0aec0;
+}
+.vibe-tool-name {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: #b794f4;
+}
+
+.vibe-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.vibe-status-active { color: #b794f4; background: #2d1f4a; }
+.vibe-status-done   { color: #48bb78; background: #0d1f14; }
+
+.vibe-spinner {
+  width: 10px;
+  height: 10px;
+  border-color: rgba(183,148,244,0.3);
+  border-top-color: #b794f4;
+}
+
+.vibe-log {
+  padding: 10px 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.vibe-log-entry { display: flex; gap: 10px; }
+
+.vibe-stage {
+  flex-shrink: 0;
+  width: 110px;
+  color: #9f7aea;
+  font-weight: 600;
+}
+.vibe-msg { color: #718096; word-break: break-word; }

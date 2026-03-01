@@ -7,9 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/aria':   'http://localhost:8765',
-      '/tools':  'http://localhost:8765',
-      '/health': 'http://localhost:8765',
+      '/aria':        'http://localhost:8765',
+      '/tools':       'http://localhost:8765',
+      '/health':      'http://localhost:8765',
+      '/vibe-events': { target: 'http://localhost:8002', rewrite: (path) => path.replace(/^\/vibe-events/, '') },
     },
   },
 })
