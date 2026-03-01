@@ -1,0 +1,58 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.traffic_data_fetcher
+  name: traffic_data_fetcher
+  version: 1.0.0
+  description: Fetch real-time traffic conditions and congestion data for a specified route or location.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: origin
+      type: string
+      description: The starting location for traffic analysis (e.g., address or coordinates).
+      required: true
+    - name: destination
+      type: string
+      description: The ending location for traffic analysis (e.g., address or coordinates).
+      required: true
+    - name: mode
+      type: string
+      description: The travel mode (e.g., driving, walking, cycling).
+      required: true
+  outputs:
+    - name: traffic_conditions
+      type: string
+      description: Description of current traffic conditions (e.g., light, moderate, heavy).
+    - name: congestion_points
+      type: array
+      description: List of locations with congestion, including coordinates and severity.
+    - name: estimated_delay
+      type: integer
+      description: Estimated delay in minutes due to traffic.
+    - name: alternative_routes
+      type: array
+      description: List of alternative routes with estimated travel times.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        origin: "test"
+        destination: "test"
+        mode: "test"
+      expected_output_contains:
+        - traffic_conditions
+        - congestion_points
+        - estimated_delay
+        - alternative_routes
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

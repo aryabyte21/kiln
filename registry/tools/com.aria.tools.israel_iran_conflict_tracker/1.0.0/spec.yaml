@@ -1,0 +1,54 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.israel_iran_conflict_tracker
+  name: israel_iran_conflict_tracker
+  version: 1.0.0
+  description: Fetch and parse real-time updates and expert analyses on the Israel-Iran conflict from reputable sources.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: time_range
+      type: string
+      description: Time range for fetching updates (e.g., 'last 24 hours', 'last week')
+      required: true
+    - name: sources
+      type: array
+      description: List of preferred news sources or domains to fetch updates from
+      required: false
+      default: null
+  outputs:
+    - name: conflict_summary
+      type: string
+      description: A concise summary of the latest developments in the Israel-Iran conflict.
+    - name: key_events
+      type: array
+      description: List of key events with timestamps and descriptions.
+    - name: expert_analyses
+      type: array
+      description: List of expert analyses or opinions on the conflict's trajectory.
+    - name: source_urls
+      type: array
+      description: List of URLs for the fetched updates and analyses.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        time_range: "last 24 hours"
+        sources: []
+      expected_output_contains:
+        - conflict_summary
+        - key_events
+        - expert_analyses
+        - source_urls
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

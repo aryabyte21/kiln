@@ -1,0 +1,58 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.amazon_job_fetcher
+  name: amazon_job_fetcher
+  version: 1.0.0
+  description: Fetch and parse job postings specifically from Amazon's careers page or job listing platforms for structured details.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: job_title
+      type: string
+      description: The title of the job role to fetch (e.g., 'Head of Marketing')
+      required: true
+    - name: location
+      type: string
+      description: The location of the job (e.g., 'Seattle, WA')
+      required: false
+      default: null
+  outputs:
+    - name: title
+      type: string
+      description: The title of the job posting.
+    - name: responsibilities
+      type: string
+      description: A list of responsibilities for the role.
+    - name: required_skills
+      type: string
+      description: A list of required skills for the role.
+    - name: company_expectations
+      type: string
+      description: The company's expectations for the role.
+    - name: posting_url
+      type: string
+      description: The URL of the job posting.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        job_title: "test"
+        location: "test"
+      expected_output_contains:
+        - title
+        - responsibilities
+        - required_skills
+        - company_expectations
+        - posting_url
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

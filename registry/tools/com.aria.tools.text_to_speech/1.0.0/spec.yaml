@@ -1,0 +1,52 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.text_to_speech
+  name: text_to_speech
+  version: 1.0.0
+  description: Convert a given text string into an audio output format (e.g., WAV or MP3) for playback.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: text
+      type: string
+      description: The text to be converted into speech.
+      required: true
+    - name: language
+      type: string
+      description: The language of the text (e.g., 'en' for English).
+      required: false
+      default: en
+    - name: voice_type
+      type: string
+      description: The type of voice to use (e.g., 'male', 'female').
+      required: false
+      default: neutral
+  outputs:
+    - name: audio_data
+      type: string
+      description: Base64-encoded audio data in the specified format (e.g., WAV or MP3).
+    - name: format
+      type: string
+      description: The format of the audio data (e.g., 'wav' or 'mp3').
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        text: "test"
+        language: "en"
+        voice_type: "neutral"
+      expected_output_contains:
+        - audio_data
+        - format
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

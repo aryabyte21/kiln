@@ -1,0 +1,55 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.stock_recommendation_engine
+  name: stock_recommendation_engine
+  version: 1.0.0
+  description: Recommend US stocks to invest in based on geopolitical risks, market trends, and sector resilience.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: geopolitical_risk_assessment
+      type: object
+      description: Structured assessment of geopolitical risks and their market impact
+      required: true
+    - name: historical_market_data
+      type: object
+      description: Historical market data for commodities and stocks during past crises
+      required: true
+    - name: sectors_of_interest
+      type: array
+      description: List of sectors to focus on (e.g., defense, energy, tech)
+      required: false
+      default: null
+  outputs:
+    - name: recommended_stocks
+      type: array
+      description: List of recommended stocks with ticker symbols, company names, and rationale
+    - name: risk_assessment
+      type: string
+      description: Summary of risks associated with the recommendations
+    - name: sector_analysis
+      type: object
+      description: Analysis of sectors likely to benefit or be resilient during the conflict
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        geopolitical_risk_assessment: {}
+        historical_market_data: {}
+        sectors_of_interest: []
+      expected_output_contains:
+        - recommended_stocks
+        - risk_assessment
+        - sector_analysis
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
