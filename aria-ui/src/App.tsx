@@ -327,7 +327,6 @@ function EnvConfigPanel({ missing, values, onChange, onSubmit }: {
 
 function StreamLog({ logs }: { logs: LogEntry[] }) {
   const endRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs.length])
   if (logs.length === 0) return null
   return (
     <section className="panel">
@@ -1000,9 +999,6 @@ function VibeStreamPanel({ job }: { job: SynthesisJob }) {
     return () => { closed.current = true; src.close() }
   }, [job.job_id])
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [lines.length])
 
   const toolName = job.tool_id.split('.').pop() ?? job.tool_id
 
@@ -1060,6 +1056,7 @@ export default function App() {
   const [missingEnvs, setMissingEnvs]     = useState<MissingEnv[]>([])
   const [envValues, setEnvValues]         = useState<Record<string, string>>({})
   const [synthesisJobs, setSynthesisJobs] = useState<SynthesisJob[]>([])
+  const [audioUrls, setAudioUrls]         = useState<string[]>([])
 
   // Sync theme to <html> so body background also responds to light/dark
   useEffect(() => {
@@ -1080,7 +1077,16 @@ export default function App() {
         dispatch({ type: 'PLAN_READY', payload: { nodes: ev.nodes, order, exit_node: ev.exit_node, missing_tools: ev.missing_tools || [] } })
       } else if (ev.type === 'node_start')    { dispatch({ type: 'NODE_START',    payload: { node_id: ev.node_id } })
       } else if (ev.type === 'tool_call')     { dispatch({ type: 'TOOL_CALL',     payload: { node_id: ev.node_id, tool: ev.tool, args: ev.args } })
-      } else if (ev.type === 'tool_result')   { dispatch({ type: 'TOOL_RESULT',   payload: { node_id: ev.node_id, tool: ev.tool, result: ev.result } })
+      } else if (ev.type === 'tool_result')   {
+        dispatch({ type: 'TOOL_RESULT', payload: { node_id: ev.node_id, tool: ev.tool, result: ev.result } })
+        // Detect audio file paths in tool results
+        const r = ev.result as Record<string, unknown> | undefined
+        if (r && typeof r === 'object') {
+          const fp = (r.file_path || r.audio_path || r.output_path) as string | undefined
+          if (fp && /\.(mp3|wav|ogg|flac)$/i.test(fp)) {
+            setAudioUrls(prev => [...prev, `/audio?path=${encodeURIComponent(fp)}`])
+          }
+        }
       } else if (ev.type === 'node_retry')    { dispatch({ type: 'NODE_RETRY',    payload: { node_id: ev.node_id, reason: ev.reason } })
       } else if (ev.type === 'node_complete') { dispatch({ type: 'NODE_COMPLETE', payload: { node_id: ev.node_id, result: ev.result } })
       } else if (ev.type === 'flow_complete') { dispatch({ type: 'FLOW_COMPLETE', payload: { final_answer: ev.final_answer } }); src.close()
@@ -1097,7 +1103,7 @@ export default function App() {
     if (!query.trim() || isRunning) return
     srcRef.current?.close()
     dispatch({ type: 'RESET' }); dispatch({ type: 'PLANNING' })
-    setMissingEnvs([]); setEnvValues({}); setSynthesisJobs([])
+    setMissingEnvs([]); setEnvValues({}); setSynthesisJobs([]); setAudioUrls([])
     try {
       const res = await fetch('/aria/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: query }) })
       if (!res.ok) { const err = await res.json(); dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } }); return }
@@ -1171,7 +1177,7 @@ export default function App() {
               disabled={isRunning}
             />
             {isActive && (
-              <button type="button" className="btn-ghost" onClick={() => { dispatch({ type: 'RESET' }); setQuery('') }}>
+              <button type="button" className="btn-ghost" onClick={() => { dispatch({ type: 'RESET' }); setQuery(''); setSynthesisJobs([]) }}>
                 Clear
               </button>
             )}
@@ -1221,6 +1227,16 @@ export default function App() {
                   <div className={`answer-box${state.phase === 'error' ? ' answer-error' : ''}`}>
                     {state.phase === 'complete' ? <Markdown text={state.finalAnswer} /> : state.error}
                   </div>
+                  {audioUrls.length > 0 && (
+                    <div className="audio-player-section">
+                      {audioUrls.map((url, i) => (
+                        <div key={i} className="audio-player-row">
+                          <span className="audio-label">Generated Audio {audioUrls.length > 1 ? `#${i + 1}` : ''}</span>
+                          <audio controls src={url} className="audio-player" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
             </div>

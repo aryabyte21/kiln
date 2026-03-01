@@ -418,6 +418,39 @@ body {
 .answer-box h6 { font-size: 12px; color: var(--text-2); }
 .answer-box hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 
+/* ── Audio player ────────────────────────────────────────────────────────── */
+.audio-player-section {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.audio-player-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.audio-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--purple);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.audio-player {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border-radius: var(--radius-sm);
+}
+
 .inline-code {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85em;
