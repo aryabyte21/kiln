@@ -467,24 +467,386 @@ function ToolsPage() {
   )
 }
 
+// ── CodeBlock ──────────────────────────────────────────────────────────────────
+
+function CodeBlock({ code, lang = 'python' }: { code: string; lang?: string }) {
+  return (
+    <div className="code-block">
+      <div className="code-block-header">
+        <span className="code-lang">{lang}</span>
+      </div>
+      <pre className="code-pre"><code>{code}</code></pre>
+    </div>
+  )
+}
+
 // ── HowToUsePage ───────────────────────────────────────────────────────────────
 
 function HowToUsePage() {
+  const [fwTab, setFwTab] = useState<'mistral' | 'ag2' | 'pydantic_ai'>('mistral')
+
+  const SPEC_YAML = `babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.weather
+  name: get_weather
+  version: 1.0.0
+  description: "Get current weather conditions and temperature for any city worldwide."
+  author: shekhar
+  license: MIT
+
+interface:
+  inputs:
+    - name: location
+      type: string
+      required: true
+      description: "City name or coordinates, e.g. 'Singapore'"
+    - name: units
+      type: string
+      required: false
+      default: celsius
+      enum: [celsius, fahrenheit]
+
+  outputs:
+    - name: temperature
+      type: integer
+      description: "Current temperature in the requested unit"
+    - name: conditions
+      type: string
+      description: "Short weather conditions description"
+    - name: success
+      type: boolean
+
+implementation:
+  runtime: python3.10
+  entrypoint: weather.py
+  execution:
+    timeout: 5000ms
+    retries: 1
+
+targets: [ag2, mistral, pydantic_ai, langchain]
+
+testing:
+  fixtures:
+    - input:
+        location: Singapore
+      expected_output_contains: [temperature, conditions, success]
+    - input:
+        location: Tokyo
+        units: fahrenheit
+      expected_output_contains: [temperature, success]
+
+metadata:
+  tags: [weather, real-time]
+  category: data`
+
+  const MISTRAL_CODE = `from babel import BabelRuntime, get_global_registry
+import babel.tools.core_tools  # side-effect: auto-registers pre-built tools
+
+from mistralai import Mistral
+import json
+
+registry       = get_global_registry()
+runtime        = BabelRuntime(target="mistral", registry=registry)
+compiled_tools = runtime.get_all()
+tool_map       = {t.name: t for t in compiled_tools}
+
+client   = Mistral(api_key=api_key)
+messages = [{"role": "user", "content": "What's the weather in Singapore?"}]
+
+# Agentic loop — keeps calling tools until model produces a final answer
+while True:
+    response = client.chat.complete(
+        model="mistral-large-latest",
+        messages=messages,
+        tools=[t.tool_def for t in compiled_tools],
+        tool_choice="auto",
+    )
+    msg = response.choices[0].message
+    messages.append(msg)
+
+    if not msg.tool_calls:
+        print(msg.content)   # Final text answer
+        break
+
+    for tc in msg.tool_calls:
+        args   = json.loads(tc.function.arguments)
+        result = tool_map[tc.function.name].call(args)
+        messages.append({
+            "role": "tool", "tool_call_id": tc.id,
+            "name": tc.function.name, "content": json.dumps(result),
+        })`
+
+  const AG2_CODE = `from babel import BabelRuntime, get_global_registry
+import babel.tools.core_tools  # side-effect: auto-registers pre-built tools
+
+from autogen import AssistantAgent, UserProxyAgent
+
+registry = get_global_registry()
+runtime  = BabelRuntime(target="ag2", registry=registry)
+
+llm_config = {
+    "config_list": [{
+        "model":    "mistral-large-latest",
+        "api_key":  api_key,
+        "api_type": "mistral",
+    }],
+    "cache_seed": None,
+}
+
+assistant = AssistantAgent(
+    name="assistant",
+    llm_config=llm_config,
+    system_message=(
+        "You are a helpful assistant. Use tools to answer. "
+        "Reply TERMINATE when the task is fully complete."
+    ),
+    is_termination_msg=lambda m: "TERMINATE" in m.get("content", ""),
+)
+user_proxy = UserProxyAgent(
+    name="user_proxy",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=10,
+    code_execution_config=False,
+)
+
+# Compile & register ALL Babel tools with AG2 — one loop
+for compiled in runtime.get_all():
+    compiled.register(caller=assistant, executor=user_proxy)
+
+# Run a multi-tool query in parallel (weather + currency)
+user_proxy.initiate_chat(
+    assistant,
+    message="What's the weather in Singapore, and convert 500 SGD to EUR?",
+    max_turns=10,
+)`
+
+  const PYDANTIC_CODE = `from babel import BabelRuntime, get_global_registry
+import babel.tools.core_tools  # side-effect: auto-registers pre-built tools
+
+from pydantic_ai import Agent
+from pydantic_ai.models.mistral import MistralModel
+from pydantic_ai.providers.mistral import MistralProvider
+
+registry       = get_global_registry()
+runtime        = BabelRuntime(target="pydantic_ai", registry=registry)
+compiled_tools = runtime.get_all()
+pai_tools      = [t.as_tool() for t in compiled_tools]
+
+model = MistralModel(
+    "mistral-large-latest",
+    provider=MistralProvider(api_key=api_key),
+)
+agent = Agent(model, tools=pai_tools)
+
+result = agent.run_sync(
+    "Find an Italian restaurant near Marina Bay, then create a calendar event."
+)
+
+# Inspect the full tool-call trace from message history
+for msg in result.all_messages():
+    for part in getattr(msg, "parts", []):
+        kind = getattr(part, "part_kind", None)
+        if kind == "tool-call":
+            args_raw = getattr(getattr(part, "args", ""), "args_dict", part.args)
+            print(f"  → {part.tool_name}({args_raw})")
+        elif kind == "tool-return":
+            print(f"  ← {part.content}")
+
+print(result.output)   # Final answer`
+
+  const REGISTER_CODE = `from babel import babel_tool, register, get_global_registry, BabelRuntime
+
+# Define a new tool using the decorator — no YAML required
+@babel_tool(
+    id="com.myorg.tools.stock_price",
+    description=(
+        "Fetch the current stock price for a given ticker symbol. "
+        "Returns price, currency, and percentage change."
+    ),
+    tags=["finance", "stocks", "real-time"],
+    category="finance",
+    param_descriptions={
+        "ticker":   "Stock ticker symbol, e.g. AAPL, TSLA, NVDA",
+        "currency": "Currency for the returned price (default USD)",
+    },
+)
+def stock_price(ticker: str, currency: str = "USD") -> dict:
+    # Swap this mock for a live API (e.g. Yahoo Finance, Alpha Vantage)
+    return {"ticker": ticker, "price": 182.50, "currency": currency, "success": True}
+
+# One call — instantly available across ALL framework adapters
+register(stock_price)
+
+# Verify it's in the registry
+registry = get_global_registry()
+spec = registry.get("com.myorg.tools.stock_price").spec
+print(f"Registered: {spec.id}  params={[p.name for p in spec.params]}")
+
+# Use immediately — works with target="ag2" or "pydantic_ai" too
+runtime  = BabelRuntime(target="mistral", registry=registry)
+compiled = runtime.get("com.myorg.tools.stock_price")
+result   = compiled.call({"ticker": "AAPL", "currency": "USD"})
+print(result)`
+
+  const LOADER_CODE = `from babel import BabelLoader, BabelRuntime, get_global_registry
+
+loader = BabelLoader(auto_register=True)
+
+# ── Validate spec against JSON Schema before loading ──────────────────────────
+# BabelLoader raises jsonschema.ValidationError if the spec is invalid
+# e.g. tool ID with spaces, description < 10 chars, missing required fields
+
+# ── Run test fixtures (same check Vibe does before publishing) ────────────────
+report = loader.test("registry/tools/com.aria.tools.weather/1.0.0")
+for r in report["results"]:
+    status = "PASS" if r["passed"] else "FAIL"
+    print(f"  Fixture {r['fixture']}: {status}")
+print(f"  {report['passed']}/{report['passed'] + report['failed']} fixtures passed")
+
+# ── Load a single tool from its directory (spec.yaml + impl.py) ──────────────
+loader.load("registry/tools/com.aria.tools.weather/1.0.0")
+
+# ── Or scan and load every tool in the registry at once ──────────────────────
+tools = loader.load_all("registry/tools")
+print(f"Loaded {len(tools)} tools")
+for t in tools:
+    print(f"  {t.spec.id:<45} v{t.spec.version}")
+
+# ── After loading, tools are in the registry — use with any adapter ──────────
+runtime  = BabelRuntime(target="mistral", registry=get_global_registry())
+compiled = runtime.get("com.aria.tools.weather")
+result   = compiled.call({"location": "Singapore"})`
+
+  const FW_TABS: { key: 'mistral' | 'ag2' | 'pydantic_ai'; label: string; badge: string }[] = [
+    { key: 'mistral',     label: 'Mistral',     badge: 'direct'  },
+    { key: 'ag2',         label: 'AG2',          badge: 'autogen' },
+    { key: 'pydantic_ai', label: 'Pydantic AI',  badge: 'agents'  },
+  ]
+  const FW_DESCS: Record<'mistral' | 'ag2' | 'pydantic_ai', string> = {
+    mistral:     'Compile Babel tools into Mistral JSON schema definitions. Inject via tools= in chat.complete() and run the agentic loop manually — full control over each step.',
+    ag2:         'Compile Babel tools into typed AG2 wrapper functions with correct inspect.signature() introspection. Register with register_function so AssistantAgent plans calls and UserProxyAgent executes them.',
+    pydantic_ai: 'Compile Babel tools into pydantic_ai.Tool objects via annotated wrapper functions that Pydantic AI introspects to generate the schema it sends to the model.',
+  }
+  const FW_CODES: Record<'mistral' | 'ag2' | 'pydantic_ai', string> = {
+    mistral: MISTRAL_CODE, ag2: AG2_CODE, pydantic_ai: PYDANTIC_CODE,
+  }
+
+  const LIFECYCLE_STEPS = [
+    { icon: '📝', label: 'spec.yaml', desc: 'Declare tool' },
+    { icon: '✓',  label: 'Validate',  desc: 'JSON Schema' },
+    { icon: '🧪', label: 'Test',      desc: 'Run fixtures' },
+    { icon: '📦', label: 'Register',  desc: 'Into registry' },
+    { icon: '⚡', label: 'Compile',   desc: 'To framework' },
+    { icon: '🤖', label: 'Execute',   desc: 'Agent calls' },
+  ]
+
   return (
     <div className="docs-page">
+
+      {/* ── Hero ── */}
       <div className="docs-hero">
-        <h1 className="docs-title">How to Use ARIA</h1>
-        <p className="docs-sub">ARIA is an AI assistant that builds its own tools on demand. Type any question in plain English — it figures out what tools are needed, runs them in parallel agents, and gives you a clean answer.</p>
+        <h1 className="docs-title">The Babel Tool Standard</h1>
+        <p className="docs-sub">
+          Babel is a universal tool specification layer for AI agents. Write a tool once — a YAML spec plus a Python function — and compile it instantly to any AI framework from a single source of truth.
+        </p>
+        <div className="docs-pills-row">
+          {['Mistral', 'AG2 / AutoGen', 'Pydantic AI', 'LangChain'].map(f => (
+            <span key={f} className="docs-fw-pill">{f}</span>
+          ))}
+        </div>
       </div>
 
+      {/* ── Lifecycle ── */}
       <div className="docs-block">
-        <div className="docs-block-title">Getting Started</div>
+        <div className="docs-block-title">Tool Lifecycle</div>
+        <div className="lifecycle-flow">
+          {LIFECYCLE_STEPS.map((step, i) => (
+            <div key={step.label} className="lifecycle-flow-item">
+              <div className="lifecycle-step">
+                <div className="lifecycle-icon">{step.icon}</div>
+                <div className="lifecycle-label">{step.label}</div>
+                <div className="lifecycle-desc">{step.desc}</div>
+              </div>
+              {i < LIFECYCLE_STEPS.length - 1 && <div className="lifecycle-arrow">›</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Step 1: YAML spec ── */}
+      <div className="docs-block">
+        <div className="docs-block-title">Step 1 — Write a Babel Spec</div>
+        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
+          Every Babel tool starts with a <code className="inline-code">spec.yaml</code>. It declares the tool ID, inputs / outputs, implementation entrypoint, supported framework targets, and test fixtures — everything the compiler needs to generate bindings.
+        </p>
+        <CodeBlock code={SPEC_YAML} lang="yaml" />
+        <div className="docs-note" style={{ marginTop: 12 }}>
+          <strong>Convention:</strong> Tool IDs follow reverse-DNS notation — <code className="inline-code">com.org.tools.name</code>. The <code className="inline-code">targets</code> list controls which framework adapters are compiled. Add or remove targets without touching tool logic.
+        </div>
+      </div>
+
+      {/* ── Step 2: Framework adapters ── */}
+      <div className="docs-block">
+        <div className="docs-block-title">Step 2 — Adapt to Any Framework</div>
+        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
+          <code className="inline-code">BabelRuntime</code> compiles every registered tool into the right bindings for the chosen framework. Change <code className="inline-code">target=</code> and everything else stays the same — same tool IDs, same registry, same one-liner calls.
+        </p>
+        <div className="fw-tabs">
+          {FW_TABS.map(t => (
+            <button
+              key={t.key}
+              className={`fw-tab-btn${fwTab === t.key ? ' fw-tab-active' : ''}`}
+              onClick={() => setFwTab(t.key)}
+            >
+              {t.label}
+              <span className="fw-tab-badge">{t.badge}</span>
+            </button>
+          ))}
+        </div>
+        <p className="docs-step-desc fw-desc">{FW_DESCS[fwTab]}</p>
+        <CodeBlock code={FW_CODES[fwTab]} lang="python" />
+      </div>
+
+      {/* ── Step 3: Register at runtime ── */}
+      <div className="docs-block">
+        <div className="docs-block-title">Step 3 — Register a New Tool at Runtime</div>
+        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
+          Use the <code className="inline-code">@babel_tool</code> decorator to define a tool in pure Python — no YAML required. One <code className="inline-code">register()</code> call makes it immediately available across all framework adapters without restarting the server.
+        </p>
+        <CodeBlock code={REGISTER_CODE} lang="python" />
+        <div className="docs-three-col" style={{ marginTop: 14 }}>
+          {[
+            ['One definition', 'Write the function once — Babel derives the JSON schema automatically from type annotations and param_descriptions.'],
+            ['All adapters', 'After register(), use the same tool with Mistral, AG2, and Pydantic AI — no per-framework boilerplate.'],
+            ['Persistent', 'Registered tools survive across queries. The synthesiser saves them to the registry so future runs skip synthesis entirely.'],
+          ].map(([title, desc]) => (
+            <div key={title} className="docs-feat-card">
+              <div className="docs-feat-title">{title}</div>
+              <div className="docs-feat-desc">{desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Step 4: Load from disk ── */}
+      <div className="docs-block">
+        <div className="docs-block-title">Step 4 — Load Tools from the Registry on Disk</div>
+        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
+          <code className="inline-code">BabelLoader</code> validates a spec against the Babel JSON Schema, runs test fixtures, and registers the tool — replicating exactly what the Vibe synthesiser does before publishing a generated tool.
+        </p>
+        <CodeBlock code={LOADER_CODE} lang="python" />
+      </div>
+
+      {/* ── ARIA end-to-end ── */}
+      <div className="docs-block">
+        <div className="docs-block-title">Using ARIA End-to-End</div>
         {[
-          ['Type your question', 'Go to the Agent tab and type any question. Be specific or vague — ARIA plans accordingly.'],
-          ['ARIA builds a task graph', 'Mistral Large breaks your request into a graph of agents, each with a role and a set of tools. The graph appears in real time.'],
-          ['Agents execute in parallel', 'Nodes without dependencies run concurrently. Watch them light up as agents call tools and pass results downstream.'],
-          ['Missing tools are synthesized', 'If ARIA needs a tool that doesn\'t exist, Mistral Vibe generates the spec + code on the fly, registers it, and uses it — all in the same request.'],
-          ['Read the final answer', 'Once all agents finish, the synthesis node combines their results into a final formatted answer.'],
+          ['Type your question', 'Go to the Agent tab and ask anything. ARIA plans accordingly — simple queries get one agent; complex requests spawn a parallel task graph.'],
+          ['Mistral plans the graph', 'ARIAPlanner uses Mistral Large to decompose the request into a directed acyclic graph of agents, each assigned a role and a set of Babel tools from the registry.'],
+          ['Agents run in parallel', 'ARIAGraphFlow executes the graph with AG2. Nodes without dependencies run concurrently; results flow downstream through edges. Watch the graph light up in real time.'],
+          ['Missing tools are synthesised on the fly', 'If ARIA needs a capability not in the registry, Mistral Codestral Vibe generates the spec + implementation, registers it, and uses it — all within the same request.'],
+          ['Synthesis node delivers the answer', 'The exit node combines all agent results into a final formatted answer rendered with Markdown.'],
         ].map(([title, desc], i) => (
           <div key={i} className="docs-step">
             <div className="docs-step-num">{i + 1}</div>
@@ -496,8 +858,9 @@ function HowToUsePage() {
         ))}
       </div>
 
+      {/* ── Example queries ── */}
       <div className="docs-block">
-        <div className="docs-block-title">Example Queries</div>
+        <div className="docs-block-title">Example Queries to Try</div>
         <div className="docs-examples-grid">
           {EXAMPLES.map(ex => (
             <div key={ex.label} className="docs-example">
@@ -508,26 +871,27 @@ function HowToUsePage() {
         </div>
       </div>
 
+      {/* ── Registry note ── */}
       <div className="docs-block">
-        <div className="docs-block-title">Tools Registry</div>
+        <div className="docs-block-title">The Tool Registry</div>
         <div className="docs-step">
           <div className="docs-step-num">›</div>
           <div>
             <div className="docs-step-title">Browse available tools</div>
-            <div className="docs-step-desc">The Tools Registry tab shows every tool ARIA can use — pre-built and synthesized. Search by name, ID, or description.</div>
+            <div className="docs-step-desc">The Registry tab shows every tool ARIA can use — pre-built and synthesised. Search by name, ID, or description. Each card shows parameter types and metadata.</div>
           </div>
         </div>
         <div className="docs-step">
           <div className="docs-step-num">›</div>
           <div>
             <div className="docs-step-title">Tools grow over time</div>
-            <div className="docs-step-desc">Every synthesized tool is saved and available for all future queries. Re-run the same query after synthesis for faster, more accurate results.</div>
+            <div className="docs-step-desc">Every synthesised tool is saved to disk under <code className="inline-code">registry/tools/</code> and is available for all future queries. Re-run the same query after synthesis for faster, more accurate results.</div>
           </div>
         </div>
       </div>
 
       <div className="docs-note">
-        <strong>Tip:</strong> If a query triggers synthesis, the missing tool will say "will be available on next run". Simply re-run the same query and it executes directly.
+        <strong>Tip:</strong> If a query triggers synthesis, the missing tool banner will say "synthesising via Vibe Coder". Once done, simply re-run the same query — ARIA executes it directly from the registry without synthesis.
       </div>
     </div>
   )
