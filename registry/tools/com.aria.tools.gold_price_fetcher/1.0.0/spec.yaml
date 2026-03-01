@@ -1,0 +1,44 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.gold_price_fetcher
+  name: gold_price_fetcher
+  version: 1.0.0
+  description: Fetch the real-time gold price and 24-hour change from a reliable financial data source.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: currency
+      type: string
+      description: The target currency for the gold price (e.g., USD, EUR).
+      required: true
+  outputs:
+    - name: price
+      type: float
+      description: The current gold price per unit in the specified currency.
+    - name: change_24h
+      type: float
+      description: The percentage change in gold price over the last 24 hours.
+    - name: timestamp
+      type: string
+      description: The timestamp of the fetched price in ISO format.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        currency: USD
+      expected_output_contains:
+        - price
+        - change_24h
+        - timestamp
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
