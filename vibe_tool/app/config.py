@@ -6,8 +6,6 @@ Settings via pydantic-settings, loaded from environment variables.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from pydantic_settings import BaseSettings
 
 
@@ -16,17 +14,18 @@ class Settings(BaseSettings):
     mistral_api_key: str = ""
 
     # Vibe CLI limits
-    max_turns: int = 30
-    max_price: float = 1.00
+    max_turns: int = 50
+    max_price: float = 2.00
 
-    # ARIA callback
-    aria_webhook_url: str = "http://localhost:8765/vibe/callback"
+    # ARIA callback — default uses host.docker.internal for Docker;
+    # override with VIBE_ARIA_WEBHOOK_URL=http://localhost:8765/vibe/callback for local dev
+    aria_webhook_url: str = "http://host.docker.internal:8765/vibe/callback"
 
     # Workspace base directory
     workspace_dir: str = "/tmp/vibe_workspace"
 
     # Log directory — mount this volume for external access
-    log_dir: str = str(Path(__file__).resolve().parent.parent / "logs")
+    log_dir: str = "/app/logs"
 
     model_config = {"env_prefix": "VIBE_"}
 
