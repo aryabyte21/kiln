@@ -62,7 +62,7 @@ load_dotenv()
 
 REGISTRY_DIR      = Path(__file__).parent.parent / "registry" / "tools"
 VIBE_SERVER_URL   = "http://localhost:8002"
-BABEL_CALLBACK_URL = "http://localhost:8765/vibe/callback"
+BABEL_CALLBACK_URL = "http://host.docker.internal:8765/vibe/callback"
 
 app = FastAPI(
     title="BabelServer",

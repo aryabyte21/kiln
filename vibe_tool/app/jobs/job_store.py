@@ -25,7 +25,7 @@ class JobStore:
         self._queues: dict[str, asyncio.Queue] = {}
         self._log_files: dict[str, io.TextIOWrapper] = {}
         self._lock = threading.Lock()
-        self._log_dir: str = str(Path(__file__).resolve().parent.parent.parent / "logs")
+        self._log_dir: str = "/app/logs"
 
     def set_log_dir(self, log_dir: str) -> None:
         self._log_dir = log_dir

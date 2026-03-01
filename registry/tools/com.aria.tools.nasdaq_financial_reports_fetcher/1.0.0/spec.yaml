@@ -1,0 +1,55 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.nasdaq_financial_reports_fetcher
+  name: nasdaq_financial_reports_fetcher
+  version: 1.0.0
+  description: Fetch the latest financial reports (10-K, 10-Q) for a specified company listed on NASDAQ directly from the SEC EDGAR database.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: ticker
+      type: string
+      description: The stock ticker symbol of the company (e.g., AAPL for Apple)
+      required: true
+    - name: report_type
+      type: string
+      description: Type of financial report (e.g., 10-K, 10-Q)
+      required: true
+    - name: limit
+      type: integer
+      description: Maximum number of recent reports to fetch
+      required: false
+      default: null
+  outputs:
+    - name: reports
+      type: array
+      description: List of financial reports with metadata and download URLs
+    - name: report_url
+      type: string
+      description: Direct URL to the latest financial report
+    - name: filing_date
+      type: string
+      description: Date when the report was filed
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        ticker: AAPL
+        report_type: 10-K
+        limit: 1
+      expected_output_contains:
+        - reports
+        - report_url
+        - filing_date
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
