@@ -1,0 +1,45 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.bitcoin_historical_data_fetcher
+  name: bitcoin_historical_data_fetcher
+  version: 1.0.0
+  description: Fetch historical Bitcoin price data for a specified time range from a reliable cryptocurrency data provider.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: days
+      type: integer
+      description: Number of days of historical data to fetch.
+      required: true
+    - name: currency
+      type: string
+      description: Target currency for price data (e.g., USD, INR).
+      required: true
+  outputs:
+    - name: prices
+      type: array
+      description: List of daily price data points, each containing date and price.
+    - name: metadata
+      type: object
+      description: Metadata including currency, time range, and data source.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        days: 1
+        currency: "test"
+      expected_output_contains:
+        - prices
+        - metadata
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

@@ -1,0 +1,49 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.tech_sector_analyzer
+  name: tech_sector_analyzer
+  version: 1.0.0
+  description: Analyze the sensitivity of tech stocks to interest rate changes and Fed policy shifts using historical data and sector-specific metrics.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: stock_symbols
+      type: array
+      description: List of tech stock symbols to analyze (e.g., ['AAPL', 'MSFT'])
+      required: true
+    - name: time_period
+      type: string
+      description: Time period for historical data (e.g., '6mo', '1y')
+      required: true
+  outputs:
+    - name: sensitivity_score
+      type: float
+      description: Quantitative score representing the sensitivity of the stock to interest rate changes (0-100).
+    - name: historical_correlation
+      type: float
+      description: Historical correlation between the stock's performance and Fed policy changes.
+    - name: sector_average
+      type: object
+      description: Average sensitivity and correlation metrics for the tech sector.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        stock_symbols: ['AAPL', 'MSFT']
+        time_period: '1y'
+      expected_output_contains:
+        - sensitivity_score
+        - historical_correlation
+        - sector_average
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

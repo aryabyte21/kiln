@@ -1,0 +1,47 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.places_nearby
+  name: places_nearby
+  version: 1.0.0
+  description: Fetch nearby places (e.g., restaurants, cafes) for a given location with details like name, address, rating, and cuisine type.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: location
+      type: string
+      description: The address or coordinates (latitude, longitude) of the location to search around.
+      required: true
+    - name: place_type
+      type: string
+      description: The type of place to search for (e.g., restaurant, cafe, bar).
+      required: true
+    - name: radius
+      type: integer
+      description: The search radius in meters.
+      required: false
+      default: 1000
+  outputs:
+    - name: places
+      type: array
+      description: List of nearby places with details.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        location: "test"
+        place_type: "test"
+        radius: 1000
+      expected_output_contains:
+        - places
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

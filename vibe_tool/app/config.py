@@ -14,11 +14,12 @@ class Settings(BaseSettings):
     mistral_api_key: str = ""
 
     # Vibe CLI limits
-    max_turns: int = 15
-    max_price: float = 1.00
+    max_turns: int = 50
+    max_price: float = 2.00
 
-    # ARIA callback
-    aria_webhook_url: str = "http://localhost:8000/tools/register"
+    # ARIA callback — default uses host.docker.internal for Docker;
+    # override with VIBE_ARIA_WEBHOOK_URL=http://localhost:8765/vibe/callback for local dev
+    aria_webhook_url: str = "http://host.docker.internal:8765/vibe/callback"
 
     # Workspace base directory
     workspace_dir: str = "/tmp/vibe_workspace"

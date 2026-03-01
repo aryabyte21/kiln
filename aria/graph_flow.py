@@ -339,6 +339,12 @@ class ARIAGraphFlow:
             is_termination_msg=lambda m: "TERMINATE" in (m.get("content") or ""),
         )
 
+        # ── Strip 'name' from messages before LLM call (Mistral rejects it) ────
+        assistant.register_hook(
+            "process_all_messages_before_reply",
+            lambda messages: [{k: v for k, v in m.items() if k != "name"} for m in messages],
+        )
+
         # ── Register Babel tools via HTTP bridge ──────────────────────────────
         for tool_id in tool_ids:
             spec = self._tool_cache.get(tool_id)

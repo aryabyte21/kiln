@@ -1,0 +1,60 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.historical_market_data
+  name: historical_market_data
+  version: 1.0.0
+  description: Fetch historical market data for commodities, stocks, or indices based on specified date ranges and events.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: symbol
+      type: string
+      description: The ticker symbol or identifier for the commodity, stock, or index
+      required: true
+    - name: start_date
+      type: string
+      description: The start date for the historical data in YYYY-MM-DD format
+      required: true
+    - name: end_date
+      type: string
+      description: The end date for the historical data in YYYY-MM-DD format
+      required: true
+    - name: event_keywords
+      type: string
+      description: Keywords to filter historical data based on geopolitical or economic events
+      required: false
+      default: null
+  outputs:
+    - name: symbol
+      type: string
+      description: The ticker symbol or identifier for the fetched data
+    - name: historical_data
+      type: array
+      description: A list of dictionaries containing date, open, high, low, close, and volume for each data point
+    - name: event_correlation
+      type: object
+      description: A dictionary summarizing the correlation between specified events and market movements
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        symbol: "AAPL"
+        start_date: "2023-01-01"
+        end_date: "2023-01-31"
+        event_keywords: "earnings"
+      expected_output_contains:
+        - symbol
+        - historical_data
+        - event_correlation
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

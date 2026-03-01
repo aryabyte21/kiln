@@ -34,7 +34,7 @@ if __name__ == "__main__":
     print(f"  Health: http://{args.host}:{args.port}/health\n")
 
     uvicorn.run(
-        "babel.server:app",
+        "babel_registry.server:app",
         host=args.host,
         port=args.port,
         reload=args.reload,
