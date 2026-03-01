@@ -16,61 +16,44 @@ from app.models import SynthesizeRequest
 
 _SPEC_FORMAT = """\
 babel_version: "1.0"
-id: com.aria.tools.<tool_name>
-name: <Human Readable Name>
-description: <What the tool does — this becomes the LLM function description>
+
+tool:
+  id: com.aria.tools.<tool_name>
+  name: <tool_name>          # MUST match the Python function name exactly
+  version: 1.0.0
+  description: <What the tool does — this becomes the LLM function description>
+  author: vibe_tool
 
 interface:
   inputs:
     - name: <param_name>
-      type: <string|integer|float|boolean|enum|array|object>
+      type: <string|integer|float|boolean|array|object>
       description: <what it is>
       required: <true|false>
       default: <optional default value>
-      values: [<for enum type only>]
-  output:
-    type: object
-    fields:
-      - name: <field_name>
-        type: <type>
-        description: <what it returns>
+      enum: [<for enum type only — omit this line if not an enum>]
+  outputs:
+    - name: <output_field_name>
+      type: <string|integer|float|boolean|array|object>
+      description: <what this field contains>
 
 implementation:
-  language: python
-  entry_point: impl.py
-  function: run
-  dependencies:
-    - <pip package if needed, e.g. requests>
-
-targets:
-  - ag2
-  - raw_python
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
 
 testing:
   fixtures:
-    - description: <test case description>
-      input:
+    - input:
         <param>: <value>
-      expect_keys:
+      expected_output_contains:
         - <expected_key_1>
         - <expected_key_2>
 
-execution:
-  timeout: 10
-  retries: 2
-  async: false
-  error_format:
-    type: object
-    fields:
-      - name: error
-        type: string
-      - name: code
-        type: integer
-
 metadata:
-  author: vibe_tool
-  version: 1.0.0
   tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
 """
 
 _IMPL_RULES = """\
@@ -84,14 +67,18 @@ _IMPL_RULES = """\
   ]
   ```
   If the tool needs no env vars, set it to an empty list: `REQUIRED_ENV_VARS = []`
-- MUST define exactly one function: `def run(**kwargs) -> dict`
-- Accept all inputs defined in spec as keyword arguments with appropriate defaults
-- Return a dict whose keys match the output fields in the spec
+- MUST define exactly one function whose name matches `tool.name` in spec.yaml exactly
+  Example: if `tool.name: geopolitical_analysis` then `def geopolitical_analysis(**kwargs) -> dict`
+- Accept all inputs defined in spec as keyword arguments with appropriate type hints and defaults
+- Return a dict whose keys match the `expected_output_contains` keys in the test fixtures
 - On error, return `{"error": "<message>"}` — NEVER raise exceptions to the caller
-- Include mock/fallback behavior so tests pass even without live API keys
-  (check `os.environ.get("API_KEY")` and return realistic mock data if missing)
+- NEVER include mock or fallback data — always make real API calls
 - Only import stdlib modules + dependencies declared in spec.implementation.dependencies
 - Keep the implementation concise and production-quality
+- **STRONGLY prefer free, open APIs that require no API key.** Use paid/key-gated APIs only when
+  there is absolutely no free alternative. If a free API is used, `REQUIRED_ENV_VARS` MUST be `[]`.
+  If a key-gated API is unavoidable, declare its env var in `REQUIRED_ENV_VARS` and return
+  `{"error": "Missing required env var: <VAR>"}` if it is absent.
 """
 
 
@@ -126,15 +113,20 @@ def _build_test_input(request: SynthesizeRequest) -> str:
     for inp in request.inputs:
         if not inp.required and inp.default is not None:
             continue
-        if inp.type == "string":
+        t = inp.type.lower()
+        if t in ("string", "str"):
             sample[inp.name] = "test"
-        elif inp.type == "integer":
+        elif t in ("integer", "int"):
             sample[inp.name] = 1
-        elif inp.type == "float":
+        elif t in ("float", "number"):
             sample[inp.name] = 1.0
-        elif inp.type == "boolean":
+        elif t in ("boolean", "bool"):
             sample[inp.name] = True
-        elif inp.type == "enum" and inp.values:
+        elif t in ("array", "list"):
+            sample[inp.name] = []
+        elif t in ("object", "dict"):
+            sample[inp.name] = {}
+        elif t == "enum" and inp.values:
             sample[inp.name] = inp.values[0]
         else:
             sample[inp.name] = "test"
@@ -168,7 +160,7 @@ Generate a Babel tool with the following requirements:
         context += f"""
 ### Required Environment Variables
 
-The implementation MUST read these from `os.environ.get()` and return mock/fallback data if they are not set:
+The implementation MUST read these from `os.environ.get()`. If a required env var is missing, return `{"error": "Missing required env var: <VAR_NAME>"}` — do NOT return mock or fallback data:
 
 {env_lines}
 """
@@ -190,21 +182,34 @@ Every tool is defined as a YAML spec with this exact structure:
 
 {_IMPL_RULES}
 
-## Testing
+## Testing — CRITICAL
 
-After generating both files, you MUST test the tool by running:
+After generating both files, you MUST test the tool thoroughly:
 
+### Step 1: Import test
 ```bash
 cd {workspace}
-python -c "from impl import run; import json; result = run({_build_test_input(request)}); print(json.dumps(result, indent=2))"
+python -c "from impl import {request.tool_name}; print('Import OK')"
+```
+If this fails, fix syntax errors in impl.py before proceeding.
+
+### Step 2: Functional test
+```bash
+cd {workspace}
+python -c "from impl import {request.tool_name}; import json; result = {request.tool_name}(**{_build_test_input(request)}); print(json.dumps(result, indent=2))"
 ```
 
-Verify:
-1. The command runs without errors
-2. The output is a valid dict (not an error dict)
+### Verification checklist
+1. The command runs **without any Python errors or tracebacks**
+2. The output is a valid dict — NOT an error dict like `{{"error": "..."}}`
 3. The output contains the expected keys from the spec
+4. If an API call fails (network error, timeout), add a local fallback so the tool always returns useful output
 
-If the test fails, fix the implementation and re-test until it passes.
+### Important testing rules
+- Do NOT consider the tool done until the test command above succeeds
+- If an external API is unreachable, switch to a **free API that works** or use a **local computation** (e.g. stdlib `datetime` for dates, stdlib `math` for calculations)
+- Do NOT waste turns retrying the same failing approach — if an API doesn't work after one attempt, switch strategy immediately
+- The test input may use placeholder values like "test" — make sure your implementation handles these gracefully without crashing
 
 ## Files to Create
 
@@ -226,7 +231,9 @@ def build_prompt(workspace: Path, request: SynthesizeRequest) -> str:
         f"Generate a Babel tool called '{request.tool_name}' that: {request.description}. "
         f"Create two files in this directory: spec.yaml and impl.py. "
         f"Follow the Babel spec format exactly as described in CONTEXT.md. "
-        f"After creating both files, test the tool by running: "
-        f'python -c "from impl import run; import json; print(json.dumps(run({test_input}), indent=2))" '
-        f"Fix any issues until the tool runs successfully and returns valid output."
+        f"IMPORTANT: First test the import works: python -c \"from impl import {request.tool_name}; print('OK')\". "
+        f"Then test the full tool: "
+        f'python -c "from impl import {request.tool_name}; import json; print(json.dumps({request.tool_name}(**{test_input}), indent=2))" '
+        f"If an external API fails, switch to a free alternative or local computation immediately — do not retry the same failing API. "
+        f"Fix any issues until the tool runs successfully and returns valid output (not an error dict)."
     )

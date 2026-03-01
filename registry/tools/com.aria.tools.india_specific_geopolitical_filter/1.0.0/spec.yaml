@@ -1,0 +1,45 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.india_specific_geopolitical_filter
+  name: india_specific_geopolitical_filter
+  version: 1.0.0
+  description: Filter and rank geopolitical events specifically relevant to India based on regional impact and historical context.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: events_list
+      type: array
+      description: A list of geopolitical events with descriptions and metadata
+      required: true
+    - name: country
+      type: string
+      description: The country of interest (e.g., 'India')
+      required: true
+  outputs:
+    - name: ranked_events
+      type: array
+      description: A ranked list of geopolitical events affecting the specified country, ordered by impact and relevance
+    - name: summary
+      type: string
+      description: A brief summary of the top events and their potential impact on the country
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        events_list: []
+        country: "test"
+      expected_output_contains:
+        - ranked_events
+        - summary
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

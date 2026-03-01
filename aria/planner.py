@@ -71,8 +71,8 @@ Produce a JSON object with EXACTLY these fields — no extras:
     {
       "id":          "<com.aria.tools.tool_name>",
       "description": "<one sentence: what this tool does>",
-      "inputs":      [{"name": "<param>", "type": "<str|int|float|bool>", "description": "<desc>", "required": true}],
-      "output":      {"type": "dict", "fields": [{"name": "<field>", "type": "<str|int|float|bool>", "description": "<desc>"}]}
+      "inputs":      [{"name": "<param>", "type": "<string|integer|float|boolean>", "description": "<desc>", "required": true}],
+      "output":      {"type": "dict", "fields": [{"name": "<field>", "type": "<string|integer|float|boolean>", "description": "<desc>"}]}
     }
   ]
 }

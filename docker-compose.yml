@@ -1,0 +1,18 @@
+services:
+  vibe_tool:
+    build:
+      context: ./vibe_tool
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - VIBE_ARIA_WEBHOOK_URL=http://host.docker.internal:8765/vibe/callback
+    volumes:
+      - ./vibe_tool/logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
