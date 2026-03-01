@@ -51,14 +51,18 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from dotenv import load_dotenv
+
 from .loader import BabelLoader
 from .registry import get_global_registry
+
+load_dotenv()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REGISTRY_DIR      = Path(__file__).parent.parent / "registry" / "tools"
 VIBE_SERVER_URL   = "http://localhost:8002"
-BABEL_CALLBACK_URL = "http://host.docker.internal:8765/vibe/callback"
+BABEL_CALLBACK_URL = "http://localhost:8765/vibe/callback"
 
 app = FastAPI(
     title="BabelServer",

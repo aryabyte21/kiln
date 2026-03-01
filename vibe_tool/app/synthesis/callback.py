@@ -65,8 +65,11 @@ async def notify_failure(
     logger.warning("Notifying failure for %s: %s", tool_id, error)
 
     async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.post(
-            callback_url,
-            json={"tool_id": tool_id, "status": "failed", "error": error},
-        )
-        response.raise_for_status()
+        try:
+            response = await client.post(
+                callback_url,
+                json={"tool_id": tool_id, "status": "failed", "error": error},
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            logger.warning("Callback endpoint rejected failure notification (expected for multipart-only endpoints)")
