@@ -277,9 +277,102 @@ function StreamLog({ logs }: { logs: LogEntry[] }) {
   )
 }
 
+// ── ToolsPage ─────────────────────────────────────────────────────────────────
+
+interface ToolParam {
+  name: string
+  type: string
+  description: string
+  required: boolean
+  default?: unknown
+  enum?: string[]
+}
+
+interface Tool {
+  id: string
+  name: string
+  version: string
+  description: string
+  author: string
+  category: string
+  tags: string[]
+  params: ToolParam[]
+}
+
+function ToolsPage() {
+  const [tools, setTools]   = useState<Tool[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]   = useState('')
+
+  async function fetchTools() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/tools')
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      setTools(await res.json())
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchTools() }, [])
+
+  if (loading) return (
+    <div className="tools-loading"><span className="spinner" />&nbsp;Loading tools…</div>
+  )
+  if (error) return (
+    <div className="tools-error">{error}</div>
+  )
+
+  return (
+    <div className="tools-page">
+      <div className="tools-toolbar">
+        <span className="tools-count">{tools.length} tool{tools.length !== 1 ? 's' : ''} registered</span>
+        <button className="refresh-btn" onClick={fetchTools}>↻ Refresh</button>
+      </div>
+      <div className="tools-grid">
+        {tools.map(tool => (
+          <div key={tool.id} className="tool-card">
+            <div className="tool-card-header">
+              <span className="tool-card-name">{tool.name}</span>
+              <span className="tool-version">v{tool.version}</span>
+            </div>
+            <div className="tool-card-id">{tool.id}</div>
+            <p className="tool-card-desc">{tool.description}</p>
+
+            {tool.params.length > 0 && (
+              <div className="tool-card-params">
+                <div className="params-label">Inputs</div>
+                {tool.params.map(p => (
+                  <div key={p.name} className="param-row">
+                    <span className="param-name">{p.name}</span>
+                    <span className="param-type">{p.type}</span>
+                    {!p.required && <span className="param-optional">optional</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="tool-card-footer">
+              {tool.category && <span className="meta-chip">{tool.category}</span>}
+              {tool.author   && <span className="meta-chip">{tool.author}</span>}
+              {tool.tags.map(tag => <span key={tag} className="tag-chip">{tag}</span>)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const [view, setView] = useState<'aria' | 'tools'>('aria')
+
   const [state, dispatch] = useReducer(reducer, initial)
   const [query, setQuery] = useReducer((_: string, v: string) => v, '')
   const srcRef   = useRef<EventSource | null>(null)
@@ -299,9 +392,9 @@ export default function App() {
 
     src.onmessage = (e) => {
       const ev = JSON.parse(e.data)
-      if (ev.type === 'plan_ready') {
+      if (ev.type === 'plan_ready' || ev.type === 'plan_updated') {
         const order = [
-          ...(ev.entry_nodes || ev.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== ev.exit_node)),
+          ...ev.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== ev.exit_node),
           ev.exit_node,
         ]
         dispatch({ type: 'PLAN_READY', payload: { nodes: ev.nodes, order, exit_node: ev.exit_node, missing_tools: ev.missing_tools || [] } })
@@ -362,7 +455,7 @@ export default function App() {
         // Show plan graph in pending state + config panel
         const plan = data.plan
         const order = [
-          ...(plan.entry_nodes || plan.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== plan.exit_node)),
+          ...plan.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== plan.exit_node),
           plan.exit_node,
         ]
         dispatch({ type: 'PLAN_READY', payload: { nodes: plan.nodes, order, exit_node: plan.exit_node, missing_tools: plan.missing_tools || [] } })
@@ -407,10 +500,18 @@ export default function App() {
           <span className="aria-logo">ARIA</span>
           <span className="header-sub">Adaptive Runtime Intelligence Architecture</span>
         </div>
+        <nav className="header-nav">
+          <button className={`nav-tab${view === 'aria'  ? ' nav-tab-active' : ''}`} onClick={() => setView('aria')}>Agent</button>
+          <button className={`nav-tab${view === 'tools' ? ' nav-tab-active' : ''}`} onClick={() => setView('tools')}>Tools Registry</button>
+        </nav>
         <div className="header-powered">Powered by Babel + Mistral + AG2</div>
       </header>
 
-      <main className="app-main">
+      {view === 'tools' && (
+        <main className="app-main"><ToolsPage /></main>
+      )}
+
+      {view === 'aria' && <main className="app-main">
         <form onSubmit={submit} className="query-form">
           <input
             className="query-input"
@@ -461,7 +562,7 @@ export default function App() {
             </section>
           )}
         </div>
-      </main>
+      </main>}
     </div>
   )
 }

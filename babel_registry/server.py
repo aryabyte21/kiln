@@ -420,7 +420,45 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
     return missing
 
 
-def _synthesize_missing_tools(missing_tools: list) -> list[dict]:
+def _research_api(tool_description: str, api_key: str) -> str:
+    """
+    Ask Mistral to recommend the best free/open API for a given tool description.
+    Returns a short constraints string that is injected into the Vibe synthesis request.
+    Falls back to an empty string if the call fails.
+    """
+    try:
+        from mistralai import Mistral
+        client = Mistral(api_key=api_key)
+        resp = client.chat.complete(
+            model="mistral-small-latest",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an API research assistant. "
+                        "Given a tool description, recommend the single best free/open HTTP API "
+                        "that requires NO API key. Reply in 3-5 lines only:\n"
+                        "1. API name and base URL\n"
+                        "2. Exact endpoint and query parameters to use\n"
+                        "3. Response format (JSON/XML) and the key fields to extract\n"
+                        "4. Any required HTTP headers (e.g. User-Agent)\n"
+                        "If no completely free option exists, name the cheapest option and its "
+                        "required env var name. Be concrete and brief — no prose."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Tool to implement: {tool_description}",
+                },
+            ],
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as exc:
+        print(f"[API Research] Could not research API: {exc}")
+        return ""
+
+
+def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[dict]:
     """
     Fire-and-forget POST requests to Vibe Coder for each missing tool spec.
 
@@ -439,16 +477,23 @@ def _synthesize_missing_tools(missing_tools: list) -> list[dict]:
     jobs: list[dict] = []
 
     def _fire(spec: dict) -> None:
-        tool_id   = spec.get("id", "")
-        tool_name = tool_id.split(".")[-1] if tool_id else "unknown_tool"
-        job_id    = str(uuid.uuid4())
+        tool_id     = spec.get("id", "")
+        tool_name   = tool_id.split(".")[-1] if tool_id else "unknown_tool"
+        description = spec.get("description", "")
+        job_id      = str(uuid.uuid4())
+
+        # Ask Mistral to research the best free API for this tool before sending to Vibe
+        api_hint = _research_api(description, api_key) if api_key else ""
+        if api_hint:
+            print(f"[API Research] {tool_id}: {api_hint[:120]}...")
+
         payload   = {
             "job_id":       job_id,
             "tool_name":    tool_name,
-            "description":  spec.get("description", ""),
+            "description":  description,
             "inputs":       spec.get("inputs", []),
             "output":       spec.get("output", {}),
-            "constraints":  "",
+            "constraints":  api_hint,
             "callback_url": BABEL_CALLBACK_URL,
         }
         try:
@@ -524,7 +569,7 @@ async def aria_start(body: dict):
     missing = _collect_missing_envs(graph, provided_env)
 
     # Trigger Vibe Coder synthesis for any missing tools
-    synthesis_jobs = _synthesize_missing_tools(graph.get("missing_tools", []))
+    synthesis_jobs = _synthesize_missing_tools(graph.get("missing_tools", []), api_key=api_key)
     awaited_tool_ids = [j["tool_id"] for j in synthesis_jobs]
     _run_awaited_tools[run_id] = awaited_tool_ids
 
