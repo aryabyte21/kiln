@@ -49,7 +49,7 @@ import requests
 import yaml
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from dotenv import load_dotenv
 
@@ -177,6 +177,17 @@ def _tool_def(tool) -> dict:
 def health():
     registry = get_global_registry()
     return {"status": "ok", "tool_count": len(registry)}
+
+
+@app.get("/audio", summary="Serve a generated audio file by absolute path")
+def serve_audio(path: str):
+    """Serve an audio file produced by a tool (e.g. ElevenLabs TTS)."""
+    file = Path(path)
+    if not file.is_file():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    suffix = file.suffix.lower()
+    media_types = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac"}
+    return FileResponse(file, media_type=media_types.get(suffix, "application/octet-stream"))
 
 
 @app.get("/tools", summary="List all registered tools")

@@ -1,0 +1,45 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.best_fit_analyzer
+  name: best_fit_analyzer
+  version: 1.0.0
+  description: Analyze job postings to identify the best-fit role based on user profile and job requirements.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: job_postings
+      type: array
+      description: List of job postings in structured format
+      required: true
+    - name: user_profile
+      type: object
+      description: User's skills, experience, and preferences for job matching
+      required: true
+  outputs:
+    - name: best_fit_job
+      type: object
+      description: The job posting that best matches the user's profile
+    - name: match_score
+      type: float
+      description: Score indicating how well the job matches the user's profile (0-1)
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        job_postings: []
+        user_profile: {}
+      expected_output_contains:
+        - best_fit_job
+        - match_score
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
