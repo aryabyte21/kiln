@@ -1006,6 +1006,152 @@ body {
 }
 .docs-note strong { color: var(--blue); }
 
+/* ── Docs framework pills ─────────────────────────────────────────────────── */
+.docs-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.docs-fw-pill {
+  background: var(--blue-glow);
+  border: 1px solid rgba(59,130,246,0.3);
+  color: var(--blue);
+  border-radius: 99px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── Lifecycle flow ───────────────────────────────────────────────────────── */
+.lifecycle-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+}
+.lifecycle-flow-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lifecycle-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  min-width: 80px;
+  text-align: center;
+}
+.lifecycle-icon  { font-size: 18px; }
+.lifecycle-label { font-size: 11px; font-weight: 700; color: var(--text-1); }
+.lifecycle-desc  { font-size: 10px; color: var(--text-3); }
+.lifecycle-arrow {
+  font-size: 16px;
+  color: var(--border-lit);
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+/* ── Framework tabs ───────────────────────────────────────────────────────── */
+.fw-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.fw-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.fw-tab-btn:hover { border-color: var(--blue); color: var(--text-1); }
+.fw-tab-active {
+  background: var(--blue-glow);
+  border-color: rgba(59,130,246,0.5);
+  color: var(--blue) !important;
+}
+.fw-tab-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.fw-tab-active .fw-tab-badge { color: var(--blue); border-color: rgba(59,130,246,0.3); }
+.fw-desc { margin: 8px 0 10px !important; }
+
+/* ── Code block ───────────────────────────────────────────────────────────── */
+.code-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.code-lang {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+.code-pre {
+  margin: 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-1);
+  white-space: pre;
+}
+
+/* ── Docs feature cards ───────────────────────────────────────────────────── */
+.docs-three-col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 700px) { .docs-three-col { grid-template-columns: 1fr; } }
+
+.docs-feat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.docs-feat-title { font-size: 13px; font-weight: 700; color: var(--text-1); }
+.docs-feat-desc  { font-size: 12px; color: var(--text-2); line-height: 1.6; }
+
 /* ── About page ───────────────────────────────────────────────────────────── */
 .about-page {
   width: 100%;
