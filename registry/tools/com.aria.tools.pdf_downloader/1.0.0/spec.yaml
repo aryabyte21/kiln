@@ -1,0 +1,45 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.pdf_downloader
+  name: pdf_downloader
+  version: 1.0.0
+  description: Download PDF files from a list of URLs and save them to a specified location.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: pdf_urls
+      type: array
+      description: List of URLs pointing to PDF files to be downloaded.
+      required: true
+    - name: output_dir
+      type: string
+      description: Directory path where the downloaded PDFs will be saved.
+      required: true
+  outputs:
+    - name: downloaded_files
+      type: array
+      description: List of file paths where the PDFs were successfully saved.
+    - name: failed_downloads
+      type: array
+      description: List of URLs that failed to download.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        pdf_urls: []
+        output_dir: "test"
+      expected_output_contains:
+        - downloaded_files
+        - failed_downloads
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

@@ -113,16 +113,24 @@ class ARIAPlanner:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def plan(self, user_request: str, tools: list[dict] | None = None) -> dict:
+    def plan(
+        self,
+        user_request: str,
+        tools: list[dict] | None = None,
+        file_contexts: list[dict] | None = None,
+    ) -> dict:
         """
         Produce a task graph for the given user request.
 
         Args:
-            user_request: Natural-language task description.
-            tools:        Optional pre-fetched tool list. When provided, the
-                          HTTP call to BabelServer is skipped. Useful when
-                          calling from within BabelServer itself to avoid a
-                          self-request deadlock.
+            user_request:  Natural-language task description.
+            tools:         Optional pre-fetched tool list. When provided, the
+                           HTTP call to BabelServer is skipped. Useful when
+                           calling from within BabelServer itself to avoid a
+                           self-request deadlock.
+            file_contexts: Optional list of dicts produced by _extract_file_context().
+                           Each dict has keys: filename, type (pdf/text/image),
+                           content (text or base64), and mime_type (images only).
 
         Returns:
             Task graph dict (see module docstring for schema).
@@ -133,7 +141,7 @@ class ARIAPlanner:
         """
         if tools is None:
             tools = self._fetch_tools()
-        graph = self._call_planner(user_request, tools)
+        graph = self._call_planner(user_request, tools, file_contexts or [])
         return graph
 
     # ── Private ────────────────────────────────────────────────────────────────
@@ -150,23 +158,56 @@ class ARIAPlanner:
                 "Run: python run_server.py"
             )
 
-    def _call_planner(self, user_request: str, tools: list[dict]) -> dict:
+    def _call_planner(
+        self,
+        user_request: str,
+        tools: list[dict],
+        file_contexts: list[dict] | None = None,
+    ) -> dict:
         tool_summary = "\n".join(
             f"  - {t['id']}: {t['description'][:80]}"
             for t in tools
         )
 
+        # Separate text-based files from images
+        text_files  = [fc for fc in (file_contexts or []) if fc["type"] != "image"]
+        image_files = [fc for fc in (file_contexts or []) if fc["type"] == "image"]
+
+        # Build text portion of the message
+        file_section = ""
+        for fc in text_files:
+            snippet = fc["content"][:12000]   # cap per file to stay within token limits
+            file_section += f"\n\n--- Attached file: {fc['filename']} ---\n{snippet}"
+
         user_msg = (
             f"User request: {user_request}\n\n"
             f"Available Babel tools:\n{tool_summary}\n\n"
-            "Produce the task graph JSON now."
         )
+        if file_section:
+            user_msg += (
+                f"Attached files (use their content to inform your planning):"
+                f"{file_section}\n\n"
+            )
+        user_msg += "Produce the task graph JSON now."
+
+        # Images require a vision-capable model (pixtral-large-latest)
+        if image_files:
+            content: list = [{"type": "text", "text": user_msg}]
+            for img in image_files:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img['mime_type']};base64,{img['content']}"},
+                })
+            model = "pixtral-large-latest"
+        else:
+            content = user_msg
+            model   = self._model
 
         response = self._client.chat.complete(
-            model=self._model,
+            model=model,
             messages=[
                 {"role": "system", "content": PLANNER_SYSTEM},
-                {"role": "user",   "content": user_msg},
+                {"role": "user",   "content": content},
             ],
             response_format={"type": "json_object"},
         )

@@ -1,0 +1,42 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.season_detector
+  name: season_detector
+  version: 1.0.0
+  description: Determine the current season based on a given date and approximate location (latitude/longitude or hemisphere).
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: date
+      type: string
+      description: The date in YYYY-MM-DD format
+      required: true
+    - name: hemisphere
+      type: string
+      description: The hemisphere (Northern or Southern)
+      required: false
+      default: Northern
+  outputs:
+    - name: season
+      type: string
+      description: The current season (e.g., Winter, Spring, Summer, Autumn)
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        date: "2023-12-25"
+        hemisphere: "Northern"
+      expected_output_contains:
+        - season
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

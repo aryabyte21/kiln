@@ -1,0 +1,36 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.paper_ranker
+  name: paper_ranker
+  version: 1.0.0
+  description: Rank a list of research papers based on relevance, citation count, and publication date.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: papers
+      type: array
+      description: List of papers with metadata (title, authors, abstract, publication date, citation count)
+      required: true
+  outputs:
+    - name: ranked_papers
+      type: array
+      description: List of papers sorted by rank, with a relevance score for each
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        papers: []
+      expected_output_contains:
+        - ranked_papers
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

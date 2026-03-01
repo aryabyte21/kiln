@@ -34,6 +34,8 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import os
 import shutil
@@ -527,14 +529,56 @@ def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[di
     return jobs
 
 
+# ── File upload helpers ────────────────────────────────────────────────────────
+
+def _pdf_to_text(data: bytes) -> str:
+    """Extract plain text from PDF bytes using pypdf."""
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as exc:
+        return f"[Could not extract PDF text: {exc}]"
+
+
+async def _extract_file_context(file: UploadFile) -> dict:
+    """Read an uploaded file and return its content ready for prompt injection."""
+    filename = file.filename or "unnamed_file"
+    data     = await file.read()
+    ct       = (file.content_type or "").lower()
+
+    if ct == "application/pdf" or filename.lower().endswith(".pdf"):
+        return {"filename": filename, "type": "pdf",
+                "content": _pdf_to_text(data)}
+
+    if ct.startswith("image/") or filename.lower().endswith(
+            (".png", ".jpg", ".jpeg", ".gif", ".webp")):
+        b64 = base64.b64encode(data).decode()
+        return {"filename": filename, "type": "image",
+                "content": b64, "mime_type": ct or "image/png"}
+
+    # CSV, JSON, plain text, code, markdown — decode as UTF-8
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1", errors="replace")
+    return {"filename": filename, "type": "text", "content": text}
+
+
 @app.post("/aria/start", summary="Plan an ARIA run; returns plan + any missing env vars")
-async def aria_start(body: dict):
+async def aria_start(
+    request:  str              = Form(...),
+    env_vars: str | None       = Form(None),
+    files:    list[UploadFile] = File(default=[]),
+):
     """
     Phase 1 of a two-phase start: plan the task graph and check for missing
     environment variables (API keys) required by the planned tools.
 
-    Body:
-        {"request": "...", "env_vars": {"SERPER_API_KEY": "..."}}  # env_vars optional
+    Body (multipart/form-data):
+        request   — natural language query (required)
+        env_vars  — JSON-encoded dict of env vars (optional)
+        files     — one or more uploaded files (optional): PDF, CSV, text, images
 
     Returns one of:
         {"status": "needs_config", "run_id": "...", "plan": {...}, "missing_envs": [...]}
@@ -547,11 +591,12 @@ async def aria_start(body: dict):
     if not api_key:
         raise HTTPException(status_code=500, detail="MISTRAL_API_KEY not set on server")
 
-    user_request = body.get("request", "").strip()
+    user_request = request.strip()
     if not user_request:
         raise HTTPException(status_code=422, detail="'request' field is required")
 
-    provided_env: dict[str, str] = body.get("env_vars", {}) or {}
+    provided_env: dict[str, str] = json.loads(env_vars) if env_vars else {}
+    file_contexts = [await _extract_file_context(f) for f in (files or [])]
 
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -564,7 +609,7 @@ async def aria_start(body: dict):
     tools_list = [{**_tool_to_dict(t), "tool_def": _tool_def(t)} for t in registry.list()]
 
     planner = ARIAPlanner(babel_server_url="http://localhost:8765", api_key=api_key)
-    graph   = planner.plan(user_request, tools=tools_list)
+    graph   = planner.plan(user_request, tools=tools_list, file_contexts=file_contexts)
 
     run_id = str(uuid.uuid4())
     _run_plans[run_id]  = graph

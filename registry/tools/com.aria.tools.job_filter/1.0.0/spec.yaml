@@ -1,0 +1,54 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.job_filter
+  name: job_filter
+  version: 1.0.0
+  description: Filter job postings based on criteria such as date, location, salary range, or job type to identify the most relevant ones.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: job_postings
+      type: array
+      description: List of job postings in structured format (e.g., title, company, date, location, salary)
+      required: true
+    - name: date_range
+      type: string
+      description: Date range to filter job postings (e.g., 'last 7 days')
+      required: false
+      default: null
+    - name: location
+      type: string
+      description: Location to filter job postings (e.g., 'San Francisco')
+      required: false
+      default: null
+    - name: salary_min
+      type: integer
+      description: Minimum salary to filter job postings
+      required: false
+      default: null
+  outputs:
+    - name: filtered_jobs
+      type: array
+      description: List of filtered job postings matching the criteria
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        job_postings: []
+        date_range: "test"
+        location: "test"
+        salary_min: 1
+      expected_output_contains:
+        - filtered_jobs
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

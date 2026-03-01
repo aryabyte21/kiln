@@ -1060,6 +1060,8 @@ export default function App() {
   const [missingEnvs, setMissingEnvs]     = useState<MissingEnv[]>([])
   const [envValues, setEnvValues]         = useState<Record<string, string>>({})
   const [synthesisJobs, setSynthesisJobs] = useState<SynthesisJob[]>([])
+  const [files, setFiles]                 = useState<File[]>([])
+  const fileInputRef                      = useRef<HTMLInputElement | null>(null)
 
   // Sync theme to <html> so body background also responds to light/dark
   useEffect(() => {
@@ -1097,9 +1099,12 @@ export default function App() {
     if (!query.trim() || isRunning) return
     srcRef.current?.close()
     dispatch({ type: 'RESET' }); dispatch({ type: 'PLANNING' })
-    setMissingEnvs([]); setEnvValues({}); setSynthesisJobs([])
+    setMissingEnvs([]); setEnvValues({}); setSynthesisJobs([]); setFiles([])
     try {
-      const res = await fetch('/aria/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: query }) })
+      const fd = new FormData()
+      fd.append('request', query)
+      files.forEach(f => fd.append('files', f))
+      const res = await fetch('/aria/start', { method: 'POST', body: fd })
       if (!res.ok) { const err = await res.json(); dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } }); return }
       const data = await res.json()
       runIdRef.current = data.run_id
@@ -1170,8 +1175,45 @@ export default function App() {
               placeholder="Ask ARIA anything — e.g. Get the latest Bitcoin price and predict tomorrow's trend"
               disabled={isRunning}
             />
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              accept=".pdf,.csv,.txt,.json,.md,.png,.jpg,.jpeg,.gif,.webp"
+              onChange={e => {
+                const picked = Array.from(e.target.files || [])
+                setFiles(prev => [...prev, ...picked])
+                e.target.value = ''
+              }}
+              disabled={isRunning}
+            />
+            {/* Attach button */}
+            <button
+              type="button"
+              className="btn-ghost"
+              title="Attach files"
+              disabled={isRunning}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              &#128206;
+            </button>
+            {/* File chips */}
+            {files.map((f, i) => (
+              <span key={i} className="file-chip">
+                {f.name}
+                <button
+                  type="button"
+                  onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                  disabled={isRunning}
+                >
+                  &#215;
+                </button>
+              </span>
+            ))}
             {isActive && (
-              <button type="button" className="btn-ghost" onClick={() => { dispatch({ type: 'RESET' }); setQuery('') }}>
+              <button type="button" className="btn-ghost" onClick={() => { dispatch({ type: 'RESET' }); setQuery(''); setSynthesisJobs([]); setFiles([]) }}>
                 Clear
               </button>
             )}

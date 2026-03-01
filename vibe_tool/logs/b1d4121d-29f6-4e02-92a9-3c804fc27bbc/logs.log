@@ -1,0 +1,7 @@
+[2026-03-01T05:17:13Z] [pipeline] started — Synthesizing tool: sec_filings_fetcher
+[2026-03-01T05:17:13Z] [pipeline] workspace_ready — Workspace prepared at /tmp/vibe_workspace/b1d4121d-29f6-4e02-92a9-3c804fc27bbc
+[2026-03-01T05:17:13Z] [pipeline] vibe_started — Vibe CLI spawned, generating tool...
+[2026-03-01T05:20:33Z] [vibe:] Setup cancelled. See you next time!
+[2026-03-01T05:20:34Z] [pipeline] vibe_finished — Vibe CLI completed
+[2026-03-01T05:20:34Z] [pipeline] error — Vibe CLI did not create spec.yaml in /tmp/vibe_workspace/b1d4121d-29f6-4e02-92a9-3c804fc27bbc
+[2026-03-01T05:20:34Z] [pipeline] done — done

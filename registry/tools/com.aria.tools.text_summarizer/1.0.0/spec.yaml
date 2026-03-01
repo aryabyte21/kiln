@@ -1,0 +1,42 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.text_summarizer
+  name: text_summarizer
+  version: 1.0.0
+  description: Generate a concise summary of a research paper's abstract and key points.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: text
+      type: string
+      description: The text content of the paper or abstract to summarize.
+      required: true
+    - name: length
+      type: integer
+      description: Desired length of the summary in words.
+      required: false
+      default: null
+  outputs:
+    - name: summary
+      type: string
+      description: The generated summary of the input text.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        text: "test"
+        length: 1
+      expected_output_contains:
+        - summary
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

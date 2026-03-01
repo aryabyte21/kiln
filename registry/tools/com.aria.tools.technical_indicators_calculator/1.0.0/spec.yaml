@@ -1,0 +1,46 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.technical_indicators_calculator
+  name: technical_indicators_calculator
+  version: 1.0.0
+  description: Calculate technical indicators (e.g., moving averages, RSI, MACD) from historical stock data.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: historical_data
+      type: object
+      description: Structured historical stock data (e.g., open, high, low, close, volume)
+      required: true
+    - name: indicators
+      type: array
+      description: List of technical indicators to calculate (e.g., ['SMA', 'RSI', 'MACD'])
+      required: true
+  outputs:
+    - name: indicators
+      type: object
+      description: Calculated technical indicators with their values
+    - name: trends
+      type: object
+      description: Identified trends (e.g., bullish, bearish) based on the indicators
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        historical_data:
+          close_prices: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+        indicators: ["SMA", "RSI"]
+      expected_output_contains:
+        - indicators
+        - trends
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

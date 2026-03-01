@@ -1,0 +1,46 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.iran_action_predictor
+  name: iran_action_predictor
+  version: 1.0.0
+  description: Predict Iran's likely actions based on filtered geopolitical events, historical behavior, and regional dynamics.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: filtered_events
+      type: array
+      description: List of geopolitical events filtered for relevance to Iran
+      required: true
+    - name: historical_behavior
+      type: object
+      description: Historical behavior patterns of Iran in response to similar geopolitical events
+      required: false
+      default: null
+  outputs:
+    - name: predicted_actions
+      type: array
+      description: List of predicted actions by Iran, including likelihood scores and potential outcomes
+    - name: confidence_score
+      type: float
+      description: Confidence score for the predictions, ranging from 0 to 1
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        filtered_events: []
+        historical_behavior: {}
+      expected_output_contains:
+        - predicted_actions
+        - confidence_score
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

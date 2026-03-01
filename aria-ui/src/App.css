@@ -265,6 +265,7 @@ body {
 /* ── Query form ───────────────────────────────────────────────────────────── */
 .query-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   background: var(--card);
@@ -273,6 +274,33 @@ body {
   padding: 6px 6px 6px 20px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--purple-dim);
+  border: 1px solid var(--border-lit);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-chip button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.file-chip button:hover { color: var(--red); }
 .query-form:focus-within {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px var(--blue-glow);

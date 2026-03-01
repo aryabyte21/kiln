@@ -1,0 +1,40 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.markdown_url_extractor
+  name: markdown_url_extractor
+  version: 1.0.0
+  description: Extract URLs from markdown content, specifically targeting GitHub repository links or documentation links.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: markdown_content
+      type: string
+      description: The raw markdown content to parse for URLs.
+      required: true
+  outputs:
+    - name: urls
+      type: array
+      description: List of extracted URLs from the markdown content.
+    - name: url_types
+      type: array
+      description: List of inferred types for each URL (e.g., 'github_repo', 'documentation').
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        markdown_content: "Check out [this repo](https://github.com/user/repo) and [docs](https://example.com/docs)"
+      expected_output_contains:
+        - urls
+        - url_types
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

@@ -1,0 +1,42 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.iran_geopolitical_filter
+  name: iran_geopolitical_filter
+  version: 1.0.0
+  description: Filter and rank geopolitical events specifically relevant to Iran based on regional dynamics, historical context, and actor behavior.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: events
+      type: array
+      description: List of geopolitical events with fields like date, actors, description, and region.
+      required: true
+    - name: historical_context
+      type: object
+      description: Historical context of Iran's geopolitical behavior, including past actions and regional alliances.
+      required: false
+      default: null
+  outputs:
+    - name: ranked_events
+      type: array
+      description: List of geopolitical events ranked by relevance to Iran, with additional fields like predicted_impact and regional_significance.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        events: []
+        historical_context: {}
+      expected_output_contains:
+        - ranked_events
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

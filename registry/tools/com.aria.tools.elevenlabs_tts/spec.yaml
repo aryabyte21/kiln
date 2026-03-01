@@ -1,0 +1,75 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.elevenlabs_tts
+  name: elevenlabs_tts
+  version: 1.0.0
+  description: "Convert text to speech using ElevenLabs API. Saves audio to a file and returns the file path."
+  author: aria
+  license: MIT
+
+interface:
+  inputs:
+    - name: text
+      type: string
+      required: true
+      description: "The text to convert to speech."
+    - name: voice_id
+      type: string
+      required: false
+      default: "JBFqnCBsd6RMkjVDRZzb"
+      description: "ElevenLabs voice ID to use. Defaults to 'George'."
+    - name: output_path
+      type: string
+      required: false
+      default: "output_audio.mp3"
+      description: "File path to save the generated audio (e.g. 'speech.mp3')."
+    - name: model_id
+      type: string
+      required: false
+      default: "eleven_monolingual_v1"
+      description: "ElevenLabs model ID to use."
+
+  outputs:
+    - name: file_path
+      type: string
+      description: "Absolute path to the saved audio file."
+    - name: characters_used
+      type: integer
+      description: "Number of characters processed."
+    - name: success
+      type: boolean
+      description: "Whether the TTS generation succeeded."
+    - name: error
+      type: string
+      description: "Error message if success is false."
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies:
+    - requests
+  execution:
+    timeout: 15000ms
+    retries: 1
+    async: false
+
+targets:
+  - ag2
+  - mistral
+  - langchain
+  - pydantic_ai
+
+testing:
+  fixtures:
+    - input:
+        text: "Hello, this is a test of the ElevenLabs text to speech tool."
+      expected_output_contains:
+        - file_path
+        - success
+
+metadata:
+  tags: [voice, tts, text-to-speech, elevenlabs, audio]
+  category: media
+  generated_by: human
+  generation_timestamp: "2026-03-01T00:00:00Z"
