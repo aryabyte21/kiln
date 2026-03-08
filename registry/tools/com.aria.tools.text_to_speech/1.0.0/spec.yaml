@@ -26,15 +26,19 @@ interface:
   outputs:
     - name: audio_data
       type: string
-      description: Base64-encoded audio data in the specified format (e.g., WAV or MP3).
+      description: Base64-encoded audio data in MP3 format.
     - name: format
       type: string
-      description: The format of the audio data (e.g., 'wav' or 'mp3').
+      description: The format of the audio data (e.g., 'mp3').
+    - name: file_path
+      type: string
+      description: Absolute path to the generated audio file for playback.
 
 implementation:
   runtime: python3.10
   entrypoint: impl.py
-  dependencies: []
+  dependencies:
+    - elevenlabs
 
 testing:
   fixtures:

@@ -112,12 +112,16 @@ def {name}({sig_str}):
 """
 
     def _http_execute(url: str, tid: str, args: dict) -> Any:
+        # Filter out AG2 TERMINATE signals leaking into tool args
+        for k, v in list(args.items()):
+            if isinstance(v, str) and v.strip().upper() == "TERMINATE":
+                return {"skipped": True, "reason": "TERMINATE signal filtered"}
         if on_event:
             on_event({"type": "tool_call", "node_id": node_id, "tool": name, "args": args})
         r = requests.post(
             f"{url}/tools/{tid}/execute",
             json={"args": args},
-            timeout=30,
+            timeout=120,
         )
         r.raise_for_status()
         result = r.json()["result"]

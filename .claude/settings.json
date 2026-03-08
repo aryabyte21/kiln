@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -d /Users/shivansh/Desktop/babel_project/registry/tools/*/1.0.0/)",
+      "Bash(git ls-tree -r --name-only HEAD)",
+      "Bash(git ls-tree -r --name-only origin/staging)",
+      "Bash(git checkout origin/final/shivansh -- babel/voice_tools/elevenlabs_tts.py babel/voice_tools/voxtral_stt.py)",
+      "Bash(ls -1d /Users/shivansh/Desktop/babel_project/registry/tools/com.aria.tools.*/)",
+      "Bash(source venv/bin/activate)",
+      "Bash(python -c \"from gtts import gTTS; print\\(''gtts OK''\\)\")"
+    ]
+  }
+}

@@ -1,55 +1,63 @@
 import base64
-import io
-import requests
+import os
+import tempfile
 from typing import Optional
 
-REQUIRED_ENV_VARS = []
+REQUIRED_ENV_VARS = [
+    {"name": "ELEVENLABS_API_KEY", "description": "ElevenLabs API key for text-to-speech synthesis"}
+]
+
+# Preset voices for quick access
+VOICES = {
+    "george": "JBFqnCBsd6RMkjVDRZzb",
+    "rachel": "21m00Tcm4TlvDq8ikWAM",
+    "adam": "pNInz6obpgDQGcFmaJgB",
+    "bella": "EXAVITQu4vr4xnSDxMaL",
+    "brian": "nPczCjzI2devNBz1zQrb",
+    "charlotte": "XB0fDUnXU5powFXDhCwa",
+    "daniel": "onwK4e9ZLuTAKqWW03F9",
+}
+
+DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # George
+DEFAULT_MODEL = "eleven_multilingual_v2"
+
 
 def text_to_speech(text: str, language: Optional[str] = None, voice_type: Optional[str] = None) -> dict:
-    """Convert text to speech using a free TTS API."""
+    """Convert text to speech using ElevenLabs API."""
     try:
-        # Use a free TTS API (e.g., ResponsiveVoice or similar)
-        # Note: ResponsiveVoice API may require an API key, so we use a free alternative
-        # Using a free TTS service that doesn't require authentication
-        url = "https://api.voicerss.org/"
-        params = {
-            "key": "free_api_key",  # Placeholder for free tier
-            "hl": language or "en",
-            "src": text,
-            "f": "44khz_16bit_stereo",
-            "c": "MP3"
-        }
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        # Encode audio data to base64
-        audio_data = base64.b64encode(response.content).decode("utf-8")
-        
+        from elevenlabs.client import ElevenLabs
+        from elevenlabs import VoiceSettings
+
+        api_key = os.environ["ELEVENLABS_API_KEY"]
+        client = ElevenLabs(api_key=api_key)
+
+        # Map voice_type to a preset voice ID
+        voice_id = VOICES.get((voice_type or "").lower(), DEFAULT_VOICE_ID)
+
+        audio_iter = client.text_to_speech.convert(
+            text=text,
+            voice_id=voice_id,
+            model_id=DEFAULT_MODEL,
+            output_format="mp3_44100_128",
+            voice_settings=VoiceSettings(
+                stability=0.71,
+                similarity_boost=0.5,
+            ),
+        )
+        audio_bytes = b"".join(audio_iter)
+
+        # Save to temp file for UI playback via /audio endpoint
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp.write(audio_bytes)
+        tmp.close()
+
+        # Also provide base64 for other consumers
+        audio_data = base64.b64encode(audio_bytes).decode("utf-8")
+
         return {
             "audio_data": audio_data,
-            "format": "mp3"
+            "format": "mp3",
+            "file_path": tmp.name
         }
     except Exception as e:
-        # Fallback to local synthesis if API fails
-        try:
-            import gtts
-            from gtts import gTTS
-            
-            tts = gTTS(text=text, lang=language or "en", slow=False)
-            audio_buffer = io.BytesIO()
-            tts.write_to_fp(audio_buffer)
-            audio_buffer.seek(0)
-            
-            audio_data = base64.b64encode(audio_buffer.read()).decode("utf-8")
-            
-            return {
-                "audio_data": audio_data,
-                "format": "mp3"
-            }
-        except Exception as e:
-            return {"error": f"Failed to generate audio: {str(e)}"}
+        return {"error": f"Failed to generate audio: {str(e)}"}

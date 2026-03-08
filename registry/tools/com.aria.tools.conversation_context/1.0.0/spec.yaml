@@ -1,0 +1,50 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.conversation_context
+  name: conversation_context
+  version: 1.0.0
+  description: Retrieve or infer the current context of the conversation, including user sentiment and prior interactions.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: user_id
+      type: string
+      description: Unique identifier for the user to fetch conversation history.
+      required: true
+    - name: session_id
+      type: string
+      description: Unique identifier for the current conversation session.
+      required: false
+      default: null
+  outputs:
+    - name: sentiment
+      type: string
+      description: Inferred sentiment of the user's message (e.g., positive, neutral, negative).
+    - name: context
+      type: string
+      description: Brief summary of the conversation context or prior interactions.
+    - name: user_preferences
+      type: object
+      description: User preferences or settings, if available (e.g., tone, language).
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        user_id: "test"
+        session_id: "test"
+      expected_output_contains:
+        - sentiment
+        - context
+        - user_preferences
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

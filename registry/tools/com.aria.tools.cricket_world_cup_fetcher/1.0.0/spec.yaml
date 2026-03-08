@@ -1,0 +1,44 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.cricket_world_cup_fetcher
+  name: cricket_world_cup_fetcher
+  version: 1.0.0
+  description: Fetch real-time details about the cricket world cup, including location, schedule, and match details.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: date
+      type: string
+      description: The date for which the cricket world cup details are required, in YYYY-MM-DD format.
+      required: true
+  outputs:
+    - name: location
+      type: string
+      description: The city and country where the cricket world cup is being held.
+    - name: matches
+      type: array
+      description: A list of matches scheduled for the given date, including teams and venues.
+    - name: event_name
+      type: string
+      description: The official name of the cricket world cup event.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        date: "2023-10-10"
+      expected_output_contains:
+        - location
+        - matches
+        - event_name
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

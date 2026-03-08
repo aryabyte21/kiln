@@ -1,0 +1,58 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.flight_search
+  name: flight_search
+  version: 1.0.0
+  description: Search for available flights between two locations, including details like airlines, departure/arrival times, prices, and layovers.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: origin
+      type: string
+      description: The departure city or airport code (e.g., Singapore or SIN).
+      required: true
+    - name: destination
+      type: string
+      description: The arrival city or airport code (e.g., Ahmedabad or AMD).
+      required: true
+    - name: departure_date
+      type: string
+      description: The preferred departure date in YYYY-MM-DD format.
+      required: true
+    - name: return_date
+      type: string
+      description: The preferred return date in YYYY-MM-DD format (optional for one-way trips).
+      required: false
+      default: null
+    - name: passengers
+      type: integer
+      description: Number of passengers traveling.
+      required: false
+      default: null
+  outputs:
+    - name: flights
+      type: array
+      description: List of available flights matching the search criteria.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        origin: "test"
+        destination: "test"
+        departure_date: "test"
+        return_date: "test"
+        passengers: 1
+      expected_output_contains:
+        - flights
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

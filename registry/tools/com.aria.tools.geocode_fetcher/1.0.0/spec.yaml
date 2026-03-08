@@ -1,0 +1,40 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.geocode_fetcher
+  name: geocode_fetcher
+  version: 1.0.0
+  description: Fetch geographic coordinates (latitude and longitude) for a given address or location name.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: location_name
+      type: string
+      description: The name or address of the location to geocode.
+      required: true
+  outputs:
+    - name: latitude
+      type: float
+      description: The latitude coordinate of the location.
+    - name: longitude
+      type: float
+      description: The longitude coordinate of the location.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        location_name: "test"
+      expected_output_contains:
+        - latitude
+        - longitude
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
