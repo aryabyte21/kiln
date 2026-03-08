@@ -1,0 +1,89 @@
+[2026-03-08T16:07:04Z] [pipeline] started — Synthesizing tool: directions_fetcher
+[2026-03-08T16:07:04Z] [pipeline] workspace_ready — Workspace prepared at /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375
+[2026-03-08T16:07:04Z] [pipeline] vibe_started — Vibe CLI spawned, generating tool...
+[2026-03-08T16:07:05Z] [vibe:system] You are Mistral Vibe, a CLI coding agent built by Mistral AI. You interact with a local codebase through tools. You have no internet access.
+CRITICAL: Users complain you are too verbose. Your responses must be minimal. Most tasks need <100 words. Code speaks for itself.
+
+Skills are markdown files in your skill directories, NOT tools or agents. To use a skill:
+
+1. Find the matching file in your skill directories.
+2. Read it with `read_file`.
+3. Follow its instructions step by step. You are the ex
+[2026-03-08T16:07:05Z] [vibe:user] Read the file CONTEXT.md in this directory for full instructions. Generate a Babel tool called 'directions_fetcher' that: Fetch the shortest and fastest directions between two geographic coordinates, including distance, estimated time, and step-by-step instructions.. Create two files in this directory: spec.yaml and impl.py. Follow the Babel spec format exactly as described in CONTEXT.md. IMPORTANT: First test the import works: python -c "from impl import directions_fetcher; print('OK')". Then t
+[2026-03-08T16:07:06Z] [vibe:assistant] 
+[2026-03-08T16:07:06Z] [vibe:tool] path: /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375/CONTEXT.md
+content: # Babel Tool Synthesis Context
+
+## Your Task
+
+Generate a Babel tool with the following requirements:
+
+- **Tool name**: directions_fetcher
+- **Tool ID**: com.aria.tools.directions_fetcher
+- **Description**: Fetch the shortest and fastest directions between two geographic coordinates, including distance, estimated time, and step-by-step instructions.
+
+### Inputs
+- **origin_lat** (float): Latitude of the starting loc
+[2026-03-08T16:07:11Z] [vibe:assistant] 
+[2026-03-08T16:07:11Z] [vibe:tool] path: /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375/spec.yaml
+bytes_written: 1909
+file_existed: False
+content: babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.directions_fetcher
+  name: directions_fetcher
+  version: 1.0.0
+  description: Fetch the shortest and fastest directions between two geographic coordinates, including distance, estimated time, and step-by-step instructions.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: origin_lat
+      type: float
+      description: Lati
+[2026-03-08T16:07:25Z] [vibe:assistant] 
+[2026-03-08T16:07:25Z] [vibe:tool] path: /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375/impl.py
+bytes_written: 2944
+file_existed: False
+content: import math
+
+REQUIRED_ENV_VARS = []
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate the great-circle distance between two points on the Earth."""
+    R = 6371  # Earth radius in kilometers
+    dLat = math.radians(lat2 - lat1)
+    dLon = math.radians(lon2 - lon1)
+    a = (math.sin(dLat / 2) * math.sin(dLat / 2) +
+         math.cos(math.radians(lat1)) * math.cos(math.rad
+[2026-03-08T16:07:27Z] [vibe:assistant] 
+[2026-03-08T16:07:27Z] [vibe:tool] command: cd /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375 && python -c "from impl import directions_fetcher; print('Import OK')"
+stdout: Import OK
+
+stderr: 
+returncode: 0
+[2026-03-08T16:07:28Z] [vibe:assistant] 
+[2026-03-08T16:07:28Z] [vibe:tool] <tool_error>bash failed: Command failed: 'cd /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375 && python -c "from impl import directions_fetcher; import json; result = directions_fetcher(**{"origin_lat": 1.0, "origin_lon": 1.0, "destination_lat": 1.0, "destination_lon": 1.0, "mode": "test"}); print(json.dumps(result, indent=2))"'
+Return code: 1
+Stderr: Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+NameError: name 'origin_lat' is not defined</tool_error>
+[2026-03-08T16:07:29Z] [vibe:assistant] 
+[2026-03-08T16:07:29Z] [vibe:tool] command: cd /tmp/vibe_workspace/2a187789-2cf8-408d-83ee-81cd058e1375 && python -c "from impl import directions_fetcher; import json; result = directions_fetcher(origin_lat=1.0, origin_lon=1.0, destination_lat=1.0, destination_lon=1.0, mode='test'); print(json.dumps(result, indent=2))"
+stdout: {
+  "distance": "0.00 km",
+  "duration": "0 mins",
+  "steps": [
+    {
+      "instruction": "Start at (1.0, 1.0) and head towards (1.0, 1.0).",
+      "distance": "0.00 km"
+    }
+  ],
+  "polyline": "_ibE_ibE?
+[2026-03-08T16:07:30Z] [vibe:assistant] Task completed.
+[2026-03-08T16:07:30Z] [pipeline] vibe_finished — Vibe CLI completed
+[2026-03-08T16:07:30Z] [pipeline] artifacts_collected — Found spec.yaml + impl.py (tool_id=com.aria.tools.directions_fetcher)
+[2026-03-08T16:07:30Z] [pipeline] error — Unexpected error: Client error '422 Unprocessable Entity' for url 'http://host.docker.internal:8765/vibe/callback'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+[2026-03-08T16:07:30Z] [pipeline] done — done

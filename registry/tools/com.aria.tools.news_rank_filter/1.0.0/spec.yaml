@@ -1,0 +1,41 @@
+babel_version: "1.0"
+
+tool:
+  id: com.aria.tools.news_rank_filter
+  name: news_rank_filter
+  version: 1.0.0
+  description: Filter and rank a list of news articles based on recency, relevance, and source credibility.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: news_list
+      type: array
+      description: List of news articles with metadata (title, summary, date, source)
+      required: true
+    - name: topic
+      type: string
+      description: Topic to filter news by (e.g., Bitcoin)
+      required: true
+  outputs:
+    - name: ranked_news
+      type: array
+      description: List of ranked news articles with metadata
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        news_list: []
+        topic: "test"
+      expected_output_contains:
+        - ranked_news
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

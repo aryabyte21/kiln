@@ -66,6 +66,31 @@ def _topo_sort(nodes: list[dict], edges: list[list[str]]) -> list[str]:
     return result
 
 
+# ── Compact large tool results before returning to AG2 ───────────────────────
+
+_MAX_VALUE_LEN = 500  # max characters per field value returned to the LLM
+
+
+def _compact_result(result: Any) -> Any:
+    """Shrink large tool results so they don't bloat the AG2 conversation.
+
+    Binary blobs (base64 audio/images, huge HTML, etc.) are replaced with a
+    short placeholder.  The *full* result is still emitted via on_event so the
+    UI can consume it.
+    """
+    if isinstance(result, dict):
+        compacted = {}
+        for k, v in result.items():
+            if isinstance(v, str) and len(v) > _MAX_VALUE_LEN:
+                compacted[k] = f"<{k}: {len(v)} chars — omitted for brevity>"
+            else:
+                compacted[k] = v
+        return compacted
+    if isinstance(result, str) and len(result) > _MAX_VALUE_LEN:
+        return result[:_MAX_VALUE_LEN] + "…(truncated)"
+    return result
+
+
 # ── BabelToolBridge ───────────────────────────────────────────────────────────
 
 def _make_http_tool(
@@ -127,7 +152,9 @@ def {name}({sig_str}):
         result = r.json()["result"]
         if on_event:
             on_event({"type": "tool_result", "node_id": node_id, "tool": name, "result": result})
-        return result
+        # Return a compact summary to AG2 so large payloads (e.g. base64
+        # audio) don't bloat the conversation history and confuse the LLM.
+        return _compact_result(result)
 
     namespace = {
         "_http_execute": _http_execute,
@@ -343,10 +370,22 @@ class ARIAGraphFlow:
             is_termination_msg=lambda m: "TERMINATE" in (m.get("content") or ""),
         )
 
-        # ── Strip 'name' from messages before LLM call (Mistral rejects it) ────
+        # ── Sanitise messages before LLM call ────────────────────────────────
+        def _sanitize_messages(messages):
+            sanitized = []
+            for m in messages:
+                cleaned = {k: v for k, v in m.items() if k != "name"}
+                # Anthropic API rejects assistant messages with neither content
+                # nor tool_calls (error 3240). Ensure at least content exists.
+                if cleaned.get("role") == "assistant":
+                    if not cleaned.get("content") and not cleaned.get("tool_calls"):
+                        cleaned["content"] = ""
+                sanitized.append(cleaned)
+            return sanitized
+
         assistant.register_hook(
             "process_all_messages_before_reply",
-            lambda messages: [{k: v for k, v in m.items() if k != "name"} for m in messages],
+            _sanitize_messages,
         )
 
         # ── Register Babel tools via HTTP bridge ──────────────────────────────
