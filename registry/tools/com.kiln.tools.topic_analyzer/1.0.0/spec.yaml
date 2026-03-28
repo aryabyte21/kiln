@@ -1,0 +1,41 @@
+kiln_version: "1.0"
+
+tool:
+  id: com.kiln.tools.topic_analyzer
+  name: topic_analyzer
+  version: 1.0.0
+  description: Analyze a collection of text documents (e.g., abstracts) to identify and rank the most common or emerging topics.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: documents
+      type: array
+      description: List of text documents (e.g., abstracts) to analyze
+      required: true
+    - name: top_n
+      type: integer
+      description: Number of top topics to return
+      required: true
+  outputs:
+    - name: topics
+      type: array
+      description: List of top topics, each with a topic name and relevance score
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        documents: []
+        top_n: 1
+      expected_output_contains:
+        - topics
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

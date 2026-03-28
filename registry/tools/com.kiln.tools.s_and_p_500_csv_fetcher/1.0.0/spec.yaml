@@ -1,0 +1,40 @@
+kiln_version: "1.0"
+
+tool:
+  id: com.kiln.tools.s_and_p_500_csv_fetcher
+  name: s_and_p_500_csv_fetcher
+  version: 1.0.0
+  description: Fetch the latest S&P 500 stock data in CSV format for a specified date from a reliable financial data provider.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: date
+      type: string
+      description: The date for which S&P 500 data is required, in YYYY-MM-DD format.
+      required: true
+  outputs:
+    - name: csv_content
+      type: string
+      description: The content of the CSV file containing S&P 500 stock data.
+    - name: source_url
+      type: string
+      description: The URL from which the CSV data was fetched.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        date: "2023-01-01"
+      expected_output_contains:
+        - csv_content
+        - source_url
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
