@@ -1,0 +1,46 @@
+kiln_version: "1.0"
+
+tool:
+  id: com.kiln.tools.job_ranking_filter
+  name: job_ranking_filter
+  version: 1.0.0
+  description: Filter and rank job postings based on relevance, recency, and company reputation.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: job_listings
+      type: array
+      description: List of parsed job postings with structured details
+      required: true
+    - name: location
+      type: string
+      description: Location to prioritize in ranking
+      required: true
+    - name: top_n
+      type: integer
+      description: Number of top job listings to return
+      required: true
+  outputs:
+    - name: top_jobs
+      type: array
+      description: List of top N job postings ranked by relevance
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        job_listings: []
+        location: "test"
+        top_n: 1
+      expected_output_contains:
+        - top_jobs
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

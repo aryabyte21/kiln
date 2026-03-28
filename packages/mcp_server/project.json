@@ -1,0 +1,9 @@
+{
+  "name": "mcp-server",
+  "root": "packages/mcp_server",
+  "targets": {
+    "dev": {
+      "command": "uv run uvicorn kiln_mcp.main:app --host 127.0.0.1 --port 8768 --reload"
+    }
+  }
+}

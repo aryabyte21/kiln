@@ -1,0 +1,37 @@
+[project]
+name = "kiln"
+version = "1.0.0"
+description = "A self-evolving tool registry for autonomous AI agents"
+requires-python = ">=3.12"
+dependencies = [
+    "kiln-shared",
+    "kiln-registry-api",
+    "kiln-chat-backend",
+    "kiln-synthesis-service",
+    "kiln-tool-executor",
+    "kiln-mcp-server",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.5.0",
+    "pytest>=8.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/shared",
+    "packages/chat_backend",
+    "packages/registry_api",
+    "packages/tool_executor",
+    "packages/synthesis_service",
+    "packages/mcp_server",
+]
+
+[tool.uv.sources]
+kiln-shared = { workspace = true }
+kiln-registry-api = { workspace = true }
+kiln-chat-backend = { workspace = true }
+kiln-synthesis-service = { workspace = true }
+kiln-tool-executor = { workspace = true }
+kiln-mcp-server = { workspace = true }

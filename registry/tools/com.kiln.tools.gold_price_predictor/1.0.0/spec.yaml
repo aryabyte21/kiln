@@ -1,0 +1,45 @@
+kiln_version: "1.0"
+
+tool:
+  id: com.kiln.tools.gold_price_predictor
+  name: gold_price_predictor
+  version: 1.0.0
+  description: Predict future gold price movements based on geopolitical events and historical trends.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: geopolitical_analysis
+      type: string
+      description: Analysis of geopolitical events affecting gold prices.
+      required: true
+    - name: historical_data
+      type: object
+      description: Historical gold price data for trend analysis.
+      required: true
+  outputs:
+    - name: prediction
+      type: string
+      description: Predicted short-term and long-term impact on gold prices.
+    - name: confidence_score
+      type: float
+      description: Confidence score for the prediction (0.0 to 1.0).
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        geopolitical_analysis: "test"
+        historical_data: "test"
+      expected_output_contains:
+        - prediction
+        - confidence_score
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

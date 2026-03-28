@@ -1,0 +1,39 @@
+kiln_version: "1.0"
+tool:
+  id: com.kiln.tools.web_search
+  name: web_search
+  version: "1.0.0"
+  description: "Search the web using Serper.dev and return top organic results with titles, links, and snippets."
+  author: aria
+interface:
+  inputs:
+    - name: query
+      type: string
+      description: "Search query string"
+      required: true
+    - name: num_results
+      type: integer
+      description: "Number of results to return (default 5, max 10)"
+      required: false
+      default: 5
+  outputs:
+    - name: results
+      type: array
+      description: "List of {title, link, snippet} objects"
+    - name: query
+      type: string
+    - name: success
+      type: boolean
+implementation:
+  runtime: python3.10
+  entrypoint: web_search.py
+  dependencies:
+    - requests>=2.28
+testing:
+  fixtures:
+    - input:
+        query: "Mistral AI latest news"
+      expected_output_contains: [results, success]
+metadata:
+  tags: [search, web, utility]
+  category: search

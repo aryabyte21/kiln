@@ -1,0 +1,56 @@
+kiln_version: "1.0"
+
+tool:
+  id: com.kiln.tools.job_parser
+  name: job_parser
+  version: 1.0.0
+  description: Parse plain-text job postings to extract structured details such as title, company, location, salary, and description.
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: text_content
+      type: string
+      description: The plain-text content of a job posting.
+      required: true
+  outputs:
+    - name: title
+      type: string
+      description: The job title.
+    - name: company
+      type: string
+      description: The name of the company offering the job.
+    - name: location
+      type: string
+      description: The job location.
+    - name: salary
+      type: string
+      description: The salary range or amount, if specified.
+    - name: description
+      type: string
+      description: The job description.
+    - name: posted_date
+      type: string
+      description: The date the job was posted.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        text_content: "test"
+      expected_output_contains:
+        - title
+        - company
+        - location
+        - salary
+        - description
+        - posted_date
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool

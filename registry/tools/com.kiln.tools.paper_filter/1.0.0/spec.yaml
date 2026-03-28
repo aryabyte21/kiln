@@ -1,0 +1,42 @@
+kiln_version: "1.0"
+
+tool:
+  id: com.kiln.tools.paper_filter
+  name: paper_filter
+  version: 1.0.0
+  description: Filter a list of URLs or search results to identify those likely to contain research papers from reputable sources (e.g., arXiv, IEEE, ACM).
+  author: vibe_tool
+
+interface:
+  inputs:
+    - name: results
+      type: array
+      description: List of search results or URLs to filter.
+      required: true
+    - name: source_domains
+      type: array
+      description: List of reputable domains to prioritize (e.g., ['arxiv.org', 'ieee.org']).
+      required: false
+      default: null
+  outputs:
+    - name: filtered_urls
+      type: array
+      description: List of URLs that match the criteria.
+
+implementation:
+  runtime: python3.10
+  entrypoint: impl.py
+  dependencies: []
+
+testing:
+  fixtures:
+    - input:
+        results: []
+        source_domains: []
+      expected_output_contains:
+        - filtered_urls
+
+metadata:
+  tags: [synthesized]
+  category: general
+  generated_by: vibe_tool
