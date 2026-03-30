@@ -1,12 +1,17 @@
 import { SignedIn, SignedOut, SignIn, UserButton, useAuth } from '@clerk/clerk-react'
-import { useReducer, useRef, useEffect, useState, useCallback } from 'react'
+import { useReducer, useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Sun, Moon, Play, RotateCcw, Search, RefreshCw, ChevronRight,
+  Sun, Moon, Play, Search, RefreshCw, ChevronRight,
   CheckCircle2, Loader2, AlertTriangle, Zap, Brain,
-  Wrench, Package, Bot, ArrowRight, Hash, Code2, BookOpen,
+  Package, Bot, ArrowRight, Hash, Code2, BookOpen,
   Info,
 } from 'lucide-react'
+
+import { FullScreen } from '@openuidev/react-ui'
+import { EventType } from '@openuidev/react-headless'
+import type { AssistantMessage, Message } from '@openuidev/react-headless'
+import '@openuidev/react-ui/defaults.css'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -16,6 +21,22 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+
+// ── Safe Clerk auth hook ──────────────────────────────────────────────────────
+// ClerkProvider may not be present (e.g. local dev without Clerk key).
+// Auth context that works with or without Clerk
+const CLERK_ENABLED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+
+// Stub for when Clerk is not configured
+const AUTH_STUB = { getToken: async () => null as string | null, isSignedIn: false } as const
+
+function useKilnAuth() {
+  // Always call useAuth when Clerk is enabled (hook order is stable since
+  // CLERK_ENABLED is a module-level constant that never changes between renders)
+  const clerkAuth = CLERK_ENABLED ? useAuth() : null // eslint-disable-line react-hooks/rules-of-hooks
+  if (!clerkAuth) return AUTH_STUB
+  return { getToken: clerkAuth.getToken, isSignedIn: clerkAuth.isSignedIn ?? false }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -476,53 +497,6 @@ const EXAMPLES = [
   { label: 'News', q: 'What are the top geopolitical events this week?' },
   { label: 'Market', q: 'Analyze the market impact of recent Fed policy changes on tech stocks.' },
 ]
-
-function IdleLanding({ onSelect }: { onSelect: (q: string) => void }) {
-  return (
-    <div className="flex min-h-[480px] flex-1 flex-col items-center justify-center gap-8 px-6 py-12">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <Zap className="mb-1 h-10 w-10 text-blue-400" />
-        <h1 className="bg-gradient-to-br from-blue-400 to-purple-400 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent">
-          Ask Kiln anything
-        </h1>
-        <p className="max-w-[520px] text-[15px] leading-relaxed text-muted-foreground">
-          Kiln plans, fetches, synthesizes, and answers — building new tools on the fly when needed.
-        </p>
-      </div>
-
-      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-        Try an example
-      </span>
-
-      <div className="grid w-full max-w-[780px] grid-cols-3 gap-2.5 max-sm:grid-cols-2">
-        {EXAMPLES.map(ex => (
-          <button
-            key={ex.label}
-            className="group flex cursor-pointer flex-col gap-1.5 rounded-lg border border-border bg-card p-3 text-left transition-all hover:-translate-y-0.5 hover:border-blue-500 hover:shadow-lg"
-            onClick={() => onSelect(ex.q)}
-          >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500">{ex.label}</span>
-            <span className="text-xs leading-relaxed text-muted-foreground">{ex.q}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap justify-center gap-6">
-        {[
-          { icon: Brain,   text: 'Mistral Large planner' },
-          { icon: Wrench,  text: 'Live tool synthesis' },
-          { icon: Package, text: 'Kiln tool registry' },
-          { icon: Bot,     text: 'AG2 multi-agent' },
-        ].map(f => (
-          <div key={f.text} className="flex items-center gap-2">
-            <f.icon className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">{f.text}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ── ToolsPage ──────────────────────────────────────────────────────────────────
 
@@ -1277,27 +1251,358 @@ function VibeStreamPanel({ job }: { job: SynthesisJob }) {
   )
 }
 
-// ── App ────────────────────────────────────────────────────────────────────────
+// ── KilnDagPanel — renders below assistant message in the OpenUI chat ────────
+// This component is placed outside the chat flow, driven by the shared reducer state.
 
-type View = 'kiln' | 'tools' | 'howto' | 'about'
+function KilnDagPanel({
+  state, synthesisJobs, missingEnvs, envValues, audioUrls,
+  onEnvChange, onEnvSubmit,
+}: {
+  state: AppState
+  synthesisJobs: SynthesisJob[]
+  missingEnvs: MissingEnv[]
+  envValues: Record<string, string>
+  audioUrls: string[]
+  onEnvChange: (k: string, v: string) => void
+  onEnvSubmit: () => void
+}) {
+  if (state.phase === 'idle') return null
 
-export default function App() {
-  const [view, setView]         = useState<View>('kiln')
-  const [dark, setDark]         = useState(true)
+  return (
+    <div className="flex flex-col gap-4 px-2 py-3">
+      {/* Missing tools banner */}
+      {state.missingTools.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/15 px-4 py-2.5 text-[13px] text-amber-300">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-semibold">Missing tools:</span>
+          {state.missingTools.map(t => (
+            <span key={t.id} className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 font-mono text-[10px] text-blue-300">
+              {t.id.split('.').pop()}
+            </span>
+          ))}
+          <span className="text-xs opacity-80">
+            {synthesisJobs.length > 0
+              ? `Synthesizing ${synthesisJobs.length} tool${synthesisJobs.length > 1 ? 's' : ''} via Vibe Coder — re-run this query when done`
+              : 'Start Vibe Coder to auto-build these tools'}
+          </span>
+        </div>
+      )}
+
+      {/* Vibe synthesis streams */}
+      {synthesisJobs.map(job => (
+        <VibeStreamPanel key={job.job_id} job={job} />
+      ))}
+
+      {/* Task graph */}
+      <GraphView state={state} />
+
+      {/* Config panel */}
+      {state.phase === 'config' && missingEnvs.length > 0 && (
+        <EnvConfigPanel
+          missing={missingEnvs}
+          values={envValues}
+          onChange={onEnvChange}
+          onSubmit={onEnvSubmit}
+        />
+      )}
+
+      {/* Log + Answer row */}
+      {(state.logs.length > 0 || state.phase === 'complete' || state.phase === 'error') && (
+        <div className="grid grid-cols-2 items-start gap-4 max-md:grid-cols-1">
+          <StreamLog logs={state.logs} />
+          {(state.phase === 'complete' || state.phase === 'error') && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  {state.phase === 'complete' ? 'Final Answer' : 'Error'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className={cn(
+                  'max-h-[360px] overflow-y-auto rounded-lg border p-4 text-sm leading-[1.8] text-foreground',
+                  state.phase === 'error'
+                    ? 'border-destructive/30 text-red-300'
+                    : 'border-emerald-500/30 bg-background'
+                )}>
+                  {state.phase === 'complete' ? <Markdown text={state.finalAnswer} /> : state.error}
+                </div>
+                {audioUrls.length > 0 && (
+                  <div className="mt-3.5 flex flex-col gap-2.5">
+                    {audioUrls.map((url, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-background p-2.5">
+                        <span className="whitespace-nowrap text-[11px] font-semibold text-purple-400">
+                          Generated Audio {audioUrls.length > 1 ? `#${i + 1}` : ''}
+                        </span>
+                        <audio controls src={url} className="h-9 min-w-0 flex-1 rounded-md" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Custom AssistantMessage for OpenUI ─────────────────────────────────────────
+// Renders the text content from the AG-UI stream, plus a reference to the
+// external DAG panel via shared state.
+
+function KilnAssistantMessage({ message }: { message: AssistantMessage }) {
+  const content = message.content ?? ''
+  return (
+    <div className="text-sm leading-[1.8] text-foreground">
+      {content ? <Markdown text={content} /> : (
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Processing...</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── KilnStreamAdapter ─────────────────────────────────────────────────────────
+// Converts our custom SSE from /kiln/stream/{run_id} into AG-UI protocol events
+// so that OpenUI can render them as assistant messages.
+
+function createKilnStreamAdapter(
+  dispatch: React.Dispatch<Action>,
+  setAudioUrls: React.Dispatch<React.SetStateAction<string[]>>,
+) {
+  return {
+    async *parse(response: Response) {
+      // The response body is an SSE stream with AG-UI formatted events
+      // produced by our createKilnStreamResponse function
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (!data || data === '[DONE]') continue
+          try {
+            const event = JSON.parse(data)
+            // Dispatch Kiln-specific side effects from rawEvent
+            if (event.rawEvent) {
+              const raw = event.rawEvent
+              if (raw._kilnType === 'plan_ready' || raw._kilnType === 'plan_updated') {
+                const order = [...raw.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== raw.exit_node), raw.exit_node]
+                dispatch({ type: 'PLAN_READY', payload: { nodes: raw.nodes, order, exit_node: raw.exit_node, missing_tools: raw.missing_tools || [] } })
+              } else if (raw._kilnType === 'node_start') {
+                dispatch({ type: 'NODE_START', payload: { node_id: raw.node_id } })
+              } else if (raw._kilnType === 'tool_call') {
+                dispatch({ type: 'TOOL_CALL', payload: { node_id: raw.node_id, tool: raw.tool, args: raw.args } })
+              } else if (raw._kilnType === 'tool_result') {
+                dispatch({ type: 'TOOL_RESULT', payload: { node_id: raw.node_id, tool: raw.tool, result: raw.result } })
+                // Detect audio
+                const r = raw.result as Record<string, unknown> | undefined
+                if (r && typeof r === 'object') {
+                  const fp = (r.file_path || r.audio_path || r.output_path) as string | undefined
+                  if (fp && /\.(mp3|wav|ogg|flac)$/i.test(fp)) {
+                    setAudioUrls(prev => [...prev, `/audio?path=${encodeURIComponent(fp)}`])
+                  }
+                }
+              } else if (raw._kilnType === 'node_retry') {
+                dispatch({ type: 'NODE_RETRY', payload: { node_id: raw.node_id, reason: raw.reason } })
+              } else if (raw._kilnType === 'node_complete') {
+                dispatch({ type: 'NODE_COMPLETE', payload: { node_id: raw.node_id, result: raw.result } })
+              } else if (raw._kilnType === 'flow_complete') {
+                dispatch({ type: 'FLOW_COMPLETE', payload: { final_answer: raw.final_answer } })
+              } else if (raw._kilnType === 'error') {
+                dispatch({ type: 'ERROR', payload: { message: raw.message } })
+              }
+            }
+            // Yield the AG-UI event for OpenUI to process
+            yield event
+          } catch (e) {
+            console.error('Failed to parse SSE event', e)
+          }
+        }
+      }
+    },
+  }
+}
+
+// ── Helper: create a Response that streams our SSE events as AG-UI ────────────
+
+function createKilnStreamResponse(
+  run_id: string,
+  abortSignal: AbortSignal,
+): Response {
+  const messageId = `kiln-${run_id}`
+  let toolCallCounter = 0
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder()
+      let closed = false
+
+      function send(event: Record<string, unknown>) {
+        if (closed) return
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+      }
+
+      function closeStream() {
+        if (closed) return
+        closed = true
+        send({ type: EventType.TEXT_MESSAGE_END, messageId })
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      }
+
+      // Send TEXT_MESSAGE_START
+      send({
+        type: EventType.TEXT_MESSAGE_START,
+        messageId,
+        role: 'assistant',
+      })
+
+      const src = new EventSource(`/kiln/stream/${run_id}`)
+
+      abortSignal.addEventListener('abort', () => {
+        src.close()
+        closeStream()
+      })
+
+      src.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data)
+
+          if (ev.type === 'plan_ready' || ev.type === 'plan_updated') {
+            // Send a text content delta describing the plan, plus rawEvent for DAG
+            const nodeNames = ev.nodes.map((n: NodeDef) => n.role).join(', ')
+            send({
+              type: EventType.TEXT_MESSAGE_CONTENT,
+              messageId,
+              delta: `**Planning complete** — agents: ${nodeNames}\n\n`,
+              rawEvent: { ...ev, _kilnType: ev.type },
+            })
+          } else if (ev.type === 'node_start') {
+            send({
+              type: EventType.STEP_STARTED,
+              stepName: ev.node_id,
+              rawEvent: { ...ev, _kilnType: 'node_start' },
+            })
+          } else if (ev.type === 'tool_call') {
+            const tcId = `tc-${++toolCallCounter}`
+            send({
+              type: EventType.TOOL_CALL_START,
+              toolCallId: tcId,
+              toolCallName: ev.tool,
+              rawEvent: { ...ev, _kilnType: 'tool_call' },
+            })
+            send({
+              type: EventType.TOOL_CALL_ARGS,
+              toolCallId: tcId,
+              delta: JSON.stringify(ev.args),
+            })
+            send({
+              type: EventType.TOOL_CALL_END,
+              toolCallId: tcId,
+            })
+          } else if (ev.type === 'tool_result') {
+            send({
+              type: EventType.TOOL_CALL_RESULT,
+              toolCallId: `tc-result-${toolCallCounter}`,
+              result: JSON.stringify(ev.result),
+              rawEvent: { ...ev, _kilnType: 'tool_result' },
+            })
+          } else if (ev.type === 'node_retry') {
+            send({
+              type: EventType.TEXT_MESSAGE_CONTENT,
+              messageId,
+              delta: `*Retrying ${ev.node_id}...*\n`,
+              rawEvent: { ...ev, _kilnType: 'node_retry' },
+            })
+          } else if (ev.type === 'node_complete') {
+            send({
+              type: EventType.STEP_FINISHED,
+              stepName: ev.node_id,
+              rawEvent: { ...ev, _kilnType: 'node_complete' },
+            })
+          } else if (ev.type === 'flow_complete') {
+            // Stream the final answer as text content
+            send({
+              type: EventType.TEXT_MESSAGE_CONTENT,
+              messageId,
+              delta: `\n\n---\n\n${ev.final_answer}`,
+              rawEvent: { ...ev, _kilnType: 'flow_complete' },
+            })
+            send({ type: EventType.RUN_FINISHED })
+            src.close()
+            closeStream()
+          } else if (ev.type === 'error') {
+            send({
+              type: EventType.TEXT_MESSAGE_CONTENT,
+              messageId,
+              delta: `\n\n**Error:** ${ev.message}`,
+              rawEvent: { ...ev, _kilnType: 'error' },
+            })
+            send({
+              type: EventType.TEXT_MESSAGE_END,
+              messageId,
+            })
+            send({
+              type: EventType.RUN_ERROR,
+              message: ev.message,
+            })
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            src.close()
+            controller.close()
+          }
+        } catch (err) {
+          console.error('Error processing Kiln SSE event', err)
+        }
+      }
+
+      src.onerror = () => {
+        send({
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId,
+          delta: '\n\n**Error:** Stream connection lost',
+          rawEvent: { _kilnType: 'error', message: 'Stream connection lost' },
+        })
+        send({
+          type: EventType.TEXT_MESSAGE_END,
+          messageId,
+        })
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        src.close()
+        try { controller.close() } catch { /* already closed */ }
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+// ── KilnAgentView — the OpenUI-powered chat view ─────────────────────────────
+
+function KilnAgentView() {
   const [state, dispatch]       = useReducer(reducer, initial)
-  const [query, setQuery]       = useState('')
-  const srcRef                  = useRef<EventSource | null>(null)
   const runIdRef                = useRef<string>('')
   const [missingEnvs, setMissingEnvs]     = useState<MissingEnv[]>([])
   const [envValues, setEnvValues]         = useState<Record<string, string>>({})
   const [synthesisJobs, setSynthesisJobs] = useState<SynthesisJob[]>([])
   const [audioUrls, setAudioUrls]         = useState<string[]>([])
 
-  // Auth: safely get JWT token (works even without ClerkProvider)
-  const clerkAuth = (() => {
-    try { return useAuth() } catch { return null }
-  })()
-  const isSignedIn = clerkAuth?.isSignedIn ?? false
+  // Auth
+  const clerkAuth = useKilnAuth()
 
   const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
     const headers: Record<string, string> = {
@@ -1308,34 +1613,148 @@ export default function App() {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`
       }
-    } catch { /* Clerk not configured — proceed without auth */ }
+    } catch { /* Clerk not configured */ }
     return fetch(url, { ...options, headers })
   }, [clerkAuth])
 
-  // Sync theme to <html> so body background also responds to light/dark
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
-    if (dark) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }, [dark])
+  const streamAdapter = useMemo(
+    () => createKilnStreamAdapter(dispatch, setAudioUrls),
+    [dispatch, setAudioUrls],
+  )
 
-  // Cleanup EventSource on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      srcRef.current?.close()
-    }
-  }, [])
+  // processMessage for OpenUI's ChatProvider
+  const processMessage = useCallback(async ({
+    messages,
+    abortController,
+  }: {
+    threadId: string
+    messages: Message[]
+    abortController: AbortController
+  }): Promise<Response> => {
+    // Get the last user message
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+    const queryText = typeof lastUserMsg?.content === 'string'
+      ? lastUserMsg.content
+      : ''
 
-  const isRunning = state.phase === 'planning' || state.phase === 'running'
-  const isActive  = state.phase !== 'idle'
+    if (!queryText.trim()) {
+      return new Response('data: [DONE]\n\n', {
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    }
+
+    // Reset DAG state
+    dispatch({ type: 'RESET' })
+    dispatch({ type: 'PLANNING' })
+    setMissingEnvs([])
+    setEnvValues({})
+    setSynthesisJobs([])
+    setAudioUrls([])
+
+    try {
+      const res = await authFetch('/kiln/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: queryText }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } })
+        const errorMessageId = `kiln-error-${Date.now()}`
+        const errorStream = new ReadableStream({
+          start(controller) {
+            const enc = new TextEncoder()
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_START, messageId: errorMessageId, role: 'assistant' })}\n\n`))
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: errorMessageId, delta: `**Error:** ${err.detail || 'Server error'}` })}\n\n`))
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_END, messageId: errorMessageId })}\n\n`))
+            controller.enqueue(enc.encode('data: [DONE]\n\n'))
+            controller.close()
+          },
+        })
+        return new Response(errorStream, {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+
+      const data = await res.json()
+      runIdRef.current = data.run_id
+
+      if (data.synthesis_jobs?.length) {
+        setSynthesisJobs(data.synthesis_jobs)
+      }
+
+      if (data.status === 'needs_config') {
+        const plan = data.plan
+        const order = [...plan.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== plan.exit_node), plan.exit_node]
+        dispatch({ type: 'PLAN_READY', payload: { nodes: plan.nodes, order, exit_node: plan.exit_node, missing_tools: plan.missing_tools || [] } })
+        dispatch({ type: 'NEEDS_CONFIG' })
+        setMissingEnvs(data.missing_envs)
+
+        // Return a response indicating config is needed
+        const configMessageId = `kiln-config-${Date.now()}`
+        const configStream = new ReadableStream({
+          start(controller) {
+            const enc = new TextEncoder()
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_START, messageId: configMessageId, role: 'assistant' })}\n\n`))
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: configMessageId, delta: '**Configuration required** — please provide the missing API keys below to continue.' })}\n\n`))
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_END, messageId: configMessageId })}\n\n`))
+            controller.enqueue(enc.encode('data: [DONE]\n\n'))
+            controller.close()
+          },
+        })
+        return new Response(configStream, {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+
+      // Normal flow: connect to the SSE stream and convert to AG-UI events
+      return createKilnStreamResponse(data.run_id, abortController.signal)
+    } catch (err) {
+      dispatch({ type: 'ERROR', payload: { message: String(err) } })
+      const errorMessageId = `kiln-catch-${Date.now()}`
+      const errorStream = new ReadableStream({
+        start(controller) {
+          const enc = new TextEncoder()
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_START, messageId: errorMessageId, role: 'assistant' })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: errorMessageId, delta: `**Error:** ${String(err)}` })}\n\n`))
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: EventType.TEXT_MESSAGE_END, messageId: errorMessageId })}\n\n`))
+          controller.enqueue(enc.encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(errorStream, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    }
+  }, [authFetch, dispatch, setMissingEnvs, setEnvValues, setSynthesisJobs, setAudioUrls])
+
+  async function executeWithEnv() {
+    const run_id = runIdRef.current
+    if (!run_id) return
+    dispatch({ type: 'PLANNING' })
+    try {
+      const res = await authFetch(`/kiln/execute/${run_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ env_vars: envValues }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } })
+        return
+      }
+      // After env config, we need to manually connect to the stream
+      // and dispatch events. The OpenUI chat has already finished its
+      // processMessage cycle, so we update the DAG state directly.
+      connectStream(run_id)
+    } catch (err) {
+      dispatch({ type: 'ERROR', payload: { message: String(err) } })
+    }
+  }
 
   function connectStream(run_id: string) {
-    srcRef.current?.close()
     const src = new EventSource(`/kiln/stream/${run_id}`)
-    srcRef.current = src
     src.onmessage = (e) => {
       const ev = JSON.parse(e.data)
       if (ev.type === 'plan_ready' || ev.type === 'plan_updated') {
@@ -1345,7 +1764,6 @@ export default function App() {
       } else if (ev.type === 'tool_call')     { dispatch({ type: 'TOOL_CALL',     payload: { node_id: ev.node_id, tool: ev.tool, args: ev.args } })
       } else if (ev.type === 'tool_result')   {
         dispatch({ type: 'TOOL_RESULT', payload: { node_id: ev.node_id, tool: ev.tool, result: ev.result } })
-        // Detect audio file paths in tool results
         const r = ev.result as Record<string, unknown> | undefined
         if (r && typeof r === 'object') {
           const fp = (r.file_path || r.audio_path || r.output_path) as string | undefined
@@ -1364,36 +1782,71 @@ export default function App() {
     }
   }
 
-  async function submit(e?: React.FormEvent) {
-    e?.preventDefault()
-    if (!query.trim() || isRunning) return
-    srcRef.current?.close()
-    dispatch({ type: 'RESET' }); dispatch({ type: 'PLANNING' })
-    setMissingEnvs([]); setEnvValues({}); setSynthesisJobs([]); setAudioUrls([])
-    try {
-      const res = await authFetch('/kiln/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: query }) })
-      if (!res.ok) { const err = await res.json(); dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } }); return }
-      const data = await res.json()
-      runIdRef.current = data.run_id
-      if (data.synthesis_jobs?.length) setSynthesisJobs(data.synthesis_jobs)
-      if (data.status === 'needs_config') {
-        const plan = data.plan
-        const order = [...plan.nodes.map((n: NodeDef) => n.id).filter((id: string) => id !== plan.exit_node), plan.exit_node]
-        dispatch({ type: 'PLAN_READY', payload: { nodes: plan.nodes, order, exit_node: plan.exit_node, missing_tools: plan.missing_tools || [] } })
-        dispatch({ type: 'NEEDS_CONFIG' }); setMissingEnvs(data.missing_envs)
-      } else { connectStream(data.run_id) }
-    } catch (err) { dispatch({ type: 'ERROR', payload: { message: String(err) } }) }
+  const welcomeConfig = {
+    title: 'Ask Kiln anything',
+    description: 'Kiln plans, fetches, synthesizes, and answers — building new tools on the fly when needed.',
   }
 
-  async function executeWithEnv() {
-    const run_id = runIdRef.current; if (!run_id) return
-    dispatch({ type: 'PLANNING' })
-    try {
-      const res = await authFetch(`/kiln/execute/${run_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ env_vars: envValues }) })
-      if (!res.ok) { const err = await res.json(); dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } }); return }
-      connectStream(run_id)
-    } catch (err) { dispatch({ type: 'ERROR', payload: { message: String(err) } }) }
+  const conversationStarters = {
+    variant: 'long' as const,
+    options: EXAMPLES.map(ex => ({
+      displayText: ex.q,
+      prompt: ex.q,
+    })),
   }
+
+  return (
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+      <div className="flex min-h-0 flex-1">
+        <FullScreen
+          processMessage={processMessage}
+          streamProtocol={streamAdapter}
+          agentName="Kiln"
+          welcomeMessage={welcomeConfig}
+          conversationStarters={conversationStarters}
+          assistantMessage={KilnAssistantMessage}
+          disableThemeProvider
+        />
+      </div>
+      {/* DAG visualization panel below the chat */}
+      {state.phase !== 'idle' && (
+        <div className="shrink-0 overflow-y-auto border-t border-border bg-background px-6 pb-4" style={{ maxHeight: '50vh' }}>
+          <KilnDagPanel
+            state={state}
+            synthesisJobs={synthesisJobs}
+            missingEnvs={missingEnvs}
+            envValues={envValues}
+            audioUrls={audioUrls}
+            onEnvChange={(k, v) => setEnvValues(prev => ({ ...prev, [k]: v }))}
+            onEnvSubmit={executeWithEnv}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── App ────────────────────────────────────────────────────────────────────────
+
+type View = 'kiln' | 'tools' | 'howto' | 'about'
+
+export default function App() {
+  const [view, setView] = useState<View>('kiln')
+  const [dark, setDark]  = useState(true)
+
+  // Auth: safely get whether signed in
+  const clerkAuth = useKilnAuth()
+  const isSignedIn = clerkAuth?.isSignedIn ?? false
+
+  // Sync theme to <html>
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    if (dark) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  }, [dark])
 
   const NAV: { key: View; label: string; icon: typeof Play }[] = [
     { key: 'kiln',  label: 'Agent',      icon: Play },
@@ -1457,117 +1910,16 @@ export default function App() {
       {view === 'about' && <main className="flex flex-1 flex-col gap-4 px-10 py-7 max-sm:px-4"><AboutPage /></main>}
 
       {view === 'kiln' && (
-        <main className="flex flex-1 flex-col gap-4 px-10 py-7 max-sm:px-4">
-          {/* Auth gate for chat — sign in required to run queries */}
+        <>
           <SignedOut>
             <div className="flex justify-center py-16">
               <SignIn routing="hash" />
             </div>
           </SignedOut>
           <SignedIn>
-          {/* Query bar */}
-          <form onSubmit={submit} className="flex items-center gap-2 rounded-xl border border-border bg-card p-1.5 pl-5 transition-all focus-within:border-blue-500 focus-within:ring-[3px] focus-within:ring-blue-500/20">
-            <input
-              className="min-w-0 flex-1 border-none bg-transparent py-2.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Ask Kiln anything — e.g. Get the latest Bitcoin price and predict tomorrow's trend"
-              disabled={isRunning}
-            />
-            {isActive && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => { dispatch({ type: 'RESET' }); setQuery(''); setSynthesisJobs([]) }}
-                className="gap-1.5 text-muted-foreground"
-              >
-                <RotateCcw className="h-3.5 w-3.5" /> Clear
-              </Button>
-            )}
-            <Button type="submit" disabled={isRunning || !query.trim()} size="lg" className="gap-1.5">
-              {isRunning ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Running</>
-              ) : (
-                <>Run <ArrowRight className="h-4 w-4" /></>
-              )}
-            </Button>
-          </form>
-
-          {/* Idle state */}
-          {state.phase === 'idle' && <IdleLanding onSelect={q => { setQuery(q) }} />}
-
-          {/* Missing tools banner */}
-          {state.missingTools.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/15 px-4 py-2.5 text-[13px] text-amber-300">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-              <span className="font-semibold">Missing tools:</span>
-              {state.missingTools.map(t => (
-                <span key={t.id} className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 font-mono text-[10px] text-blue-300">
-                  {t.id.split('.').pop()}
-                </span>
-              ))}
-              <span className="text-xs opacity-80">
-                {synthesisJobs.length > 0
-                  ? `Synthesizing ${synthesisJobs.length} tool${synthesisJobs.length > 1 ? 's' : ''} via Vibe Coder — re-run this query when done`
-                  : 'Start Vibe Coder to auto-build these tools'}
-              </span>
-            </div>
-          )}
-
-          {/* Vibe synthesis streams */}
-          {synthesisJobs.map(job => (
-            <VibeStreamPanel key={job.job_id} job={job} />
-          ))}
-
-          {/* Task graph */}
-          <GraphView state={state} />
-
-          {/* Config panel */}
-          {state.phase === 'config' && missingEnvs.length > 0 && (
-            <EnvConfigPanel missing={missingEnvs} values={envValues}
-              onChange={(k, v) => setEnvValues(prev => ({ ...prev, [k]: v }))} onSubmit={executeWithEnv} />
-          )}
-
-          {/* Log + Answer row */}
-          {(state.logs.length > 0 || state.phase === 'complete' || state.phase === 'error') && (
-            <div className="grid grid-cols-2 items-start gap-4 max-md:grid-cols-1">
-              <StreamLog logs={state.logs} />
-              {(state.phase === 'complete' || state.phase === 'error') && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      {state.phase === 'complete' ? 'Final Answer' : 'Error'}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className={cn(
-                      'max-h-[360px] overflow-y-auto rounded-lg border p-4 text-sm leading-[1.8] text-foreground',
-                      state.phase === 'error'
-                        ? 'border-destructive/30 text-red-300'
-                        : 'border-emerald-500/30 bg-background'
-                    )}>
-                      {state.phase === 'complete' ? <Markdown text={state.finalAnswer} /> : state.error}
-                    </div>
-                    {audioUrls.length > 0 && (
-                      <div className="mt-3.5 flex flex-col gap-2.5">
-                        {audioUrls.map((url, i) => (
-                          <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-background p-2.5">
-                            <span className="whitespace-nowrap text-[11px] font-semibold text-purple-400">
-                              Generated Audio {audioUrls.length > 1 ? `#${i + 1}` : ''}
-                            </span>
-                            <audio controls src={url} className="h-9 min-w-0 flex-1 rounded-md" />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
+            <KilnAgentView />
           </SignedIn>
-        </main>
+        </>
       )}
     </div>
   )
