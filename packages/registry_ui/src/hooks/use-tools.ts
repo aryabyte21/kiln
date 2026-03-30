@@ -74,6 +74,20 @@ export function useTools() {
   })
 }
 
+export function useSearchTools(query: string) {
+  return useQuery({
+    queryKey: ["tools", "search", query],
+    queryFn: async () => {
+      if (!query.trim()) return []
+      const res = await fetch(`/tools/search?q=${encodeURIComponent(query)}`)
+      if (!res.ok) throw new Error("Search failed")
+      return res.json() as Promise<Tool[]>
+    },
+    enabled: query.trim().length > 0,
+    staleTime: 10_000,
+  })
+}
+
 export function useTool(toolId: string) {
   return useQuery({
     queryKey: ["tool", toolId],

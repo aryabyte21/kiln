@@ -59,6 +59,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health", summary="Service health")
+def health():
+    return {
+        "status": "ok",
+        "service": "kiln-chat-backend",
+        "active_runs": len(_run_queues),
+    }
+
+
 # ── Kiln run state ───────────────────────────────────────────────────────────
 # run_id → Queue of event dicts; None sentinel = stream finished
 _run_queues: dict[str, Queue] = {}
