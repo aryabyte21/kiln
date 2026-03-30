@@ -4,7 +4,9 @@ import {
   LayoutGrid,
   Moon,
   Settings,
-  Sun } from "lucide-react"
+  Sun,
+  Upload,
+} from "lucide-react"
 import { useEffect, useState } from "react"
 import { Link, Route, Routes, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
@@ -12,6 +14,7 @@ import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import CatalogPage from "@/pages/catalog"
+import PublishPage from "@/pages/publish"
 import SettingsPage from "@/pages/settings"
 import ToolDetailPage from "@/pages/tool-detail"
 
@@ -25,6 +28,7 @@ export function App() {
 
   const nav = [
     { to: "/", label: "Registry", icon: LayoutGrid },
+    { to: "/publish", label: "Publish", icon: Upload },
     { to: "/settings", label: "Settings", icon: Settings },
   ] as const
 
@@ -131,6 +135,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<CatalogPage />} />
             <Route path="/tools/:toolId" element={<ToolDetailPage />} />
+            <Route path="/publish" element={<PublishPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>
