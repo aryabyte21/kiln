@@ -32,6 +32,7 @@ MCP client config (e.g., Claude Desktop):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -67,8 +68,19 @@ _registered_tools: dict[str, dict] = {}  # tool_id → tool spec from registry A
 _tool_lock = asyncio.Lock()
 
 
+def _fetch_tools_sync() -> list[dict]:
+    """Fetch all tools from the Kiln Registry API (sync, for startup)."""
+    try:
+        resp = httpx.get(f"{REGISTRY_URL}/tools", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logger.warning("Failed to fetch tools from registry: %s", e)
+        return []
+
+
 async def _fetch_tools() -> list[dict]:
-    """Fetch all tools from the Kiln Registry API."""
+    """Fetch all tools from the Kiln Registry API (async, for polling)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(f"{REGISTRY_URL}/tools")
@@ -130,7 +142,6 @@ def _make_tool_handler(tool_id: str, tool_name: str):
             return json.dumps({"error": result.get("detail", "Unknown error")})
         except httpx.HTTPStatusError as e:
             error_detail = e.response.text
-            import contextlib
             with contextlib.suppress(Exception):
                 error_detail = e.response.json().get("detail", error_detail)
             return json.dumps({"error": str(error_detail)})
@@ -200,15 +211,29 @@ async def _poll_registry():
             logger.error("Registry poll failed: %s", e)
 
 
-# ── Startup (called from __main__) ────────────────────────────────────────────
+def load_tools_on_startup() -> int:
+    """Synchronously load tools from registry before the event loop starts."""
+    tools = _fetch_tools_sync()
+    if not tools:
+        return 0
 
-async def startup():
-    """Load tools from registry before starting the server."""
-    from kiln_shared.logging_config import setup_logging
-    setup_logging()
+    added = 0
+    for tool in tools:
+        tid = tool["id"]
+        if tid not in _registered_tools:
+            handler = _make_tool_handler(tid, tool["name"])
+            handler.__doc__ = tool.get("description", "")
 
-    count = await sync_tools()
-    logger.info("Kiln MCP Server ready with %d tools (registry: %s)", count, REGISTRY_URL)
+            mcp.tool(
+                name=tool["name"],
+                description=tool.get("description", ""),
+            )(handler)
+
+            _registered_tools[tid] = tool
+            added += 1
+            logger.info("Registered MCP tool: %s (%s)", tool["name"], tid)
+
+    return added
 
 
 # ── Built-in Utility Tools ───────────────────────────────────────────────────
@@ -254,14 +279,18 @@ def main():
     """CLI entry point for the Kiln MCP Server."""
     import sys
 
+    from kiln_shared.logging_config import setup_logging
+    setup_logging()
+
     transport = sys.argv[1] if len(sys.argv) > 1 else "streamable-http"
     host = os.environ.get("KILN_MCP_HOST", "127.0.0.1")
     port = int(os.environ.get("KILN_MCP_PORT", "8768"))
 
-    # Load tools from registry before starting
-    asyncio.run(startup())
+    # Load tools synchronously before the event loop starts
+    count = load_tools_on_startup()
+    logger.info("Loaded %d tools from registry (%s)", count, REGISTRY_URL)
+    logger.info("Starting Kiln MCP Server on %s:%s (transport: %s)", host, port, transport)
 
-    print(f"Starting Kiln MCP Server on {host}:{port} (transport: {transport})")  # noqa: T201
     mcp.run(transport=transport, host=host, port=port)
 
 
