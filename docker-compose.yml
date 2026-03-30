@@ -73,7 +73,7 @@ services:
     build:
       context: ./packages/registry_ui
       dockerfile: ../../docker/Dockerfile.nextjs
-    command: npm run dev -- -H 0.0.0.0
+    command: npm run dev -- --hostname 0.0.0.0
     ports:
       - "3000:3000"
     volumes:
