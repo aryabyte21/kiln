@@ -33,11 +33,14 @@ Flow (example):
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import requests
 from autogen import AssistantAgent, UserProxyAgent, register_function
+
+logger = logging.getLogger(__name__)
 
 # ── Topological sort (Kahn's algorithm) ───────────────────────────────────────
 
@@ -279,10 +282,8 @@ class KilnGraphFlow:
                 task=node.get("task", ""),
             )
             if verbose:
-                print(f"\n{'─' * 60}")
-                print(f"  Running node: [{node_id}]  role={node['role']}")
-                print(f"  Tools: {node.get('tools', []) or '(none)'}")
-                print(f"{'─' * 60}")
+                logger.info(f"Running node: [{node_id}]  role={node['role']}")
+                logger.info(f"Tools: {node.get('tools', []) or '(none)'}")
 
             result = self._run_node(node, context, task_graph["task"])
 
@@ -290,7 +291,7 @@ class KilnGraphFlow:
             if node_id != exit_node and self._is_failure(result):
                 self._emit("node_retry", node_id=node_id, reason=result[:300])
                 if verbose:
-                    print(f"\n  [RETRY] Node '{node_id}' failed — retrying with enriched prompt")
+                    logger.info(f"Node '{node_id}' failed — retrying with enriched prompt")
                 retry_node = {
                     **node,
                     "task": (
@@ -310,7 +311,7 @@ class KilnGraphFlow:
             self._emit("node_complete", node_id=node_id, result=result)
 
             if verbose:
-                print(f"\n  Result → {result[:200]}{'...' if len(result) > 200 else ''}")
+                logger.info(f"Result → {result[:200]}{'...' if len(result) > 200 else ''}")
 
         return context.get(exit_node, "(no result)")
 
@@ -356,7 +357,7 @@ class KilnGraphFlow:
         for tool_id in tool_ids:
             spec = self._tool_cache.get(tool_id)
             if spec is None:
-                print(f"  [WARN] Tool '{tool_id}' not found on Kiln registry — skipping")
+                logger.warning(f"Tool '{tool_id}' not found on Kiln registry — skipping")
                 continue
             fn = _make_http_tool(tool_id, spec, self._server_url, node_id=node_id, on_event=self._on_event)
             register_function(
@@ -408,24 +409,20 @@ class KilnGraphFlow:
                 if tool["id"] in needed:
                     self._tool_cache[tool["id"]] = tool
         except requests.RequestException as e:
-            print(f"  [WARN] Could not fetch tools from Kiln registry: {e}")
+            logger.warning(f"Could not fetch tools from Kiln registry: {e}")
 
     def _print_graph(self, task_graph: dict, order: list[str]) -> None:
         """Pretty-print the task graph before execution."""
         nodes = {n["id"]: n for n in task_graph["nodes"]}
-        print(f"\n{'=' * 62}")
-        print("  Kiln Task Graph")
-        print(f"  Task: {task_graph['task'][:55]}")
-        print(f"{'=' * 62}")
-        print(f"  Execution order: {' → '.join(order)}")
-        print(f"  Edges: {task_graph.get('edges', [])}")
+        logger.info("Kiln Task Graph")
+        logger.info(f"Task: {task_graph['task'][:55]}")
+        logger.info(f"Execution order: {' → '.join(order)}")
+        logger.info(f"Edges: {task_graph.get('edges', [])}")
         if task_graph.get("missing_tools"):
-            print(f"  Missing tools:   {task_graph['missing_tools']}")
-        print()
+            logger.info(f"Missing tools:   {task_graph['missing_tools']}")
         for nid in order:
             n = nodes[nid]
             marker = "EXIT" if nid == task_graph["exit_node"] else "    "
-            print(f"  [{marker}] {nid:20s}  role={n['role']}")
-            print(f"          tools={n.get('tools', []) or '(none)'}")
-            print(f"          task={n.get('task', '')[:55]}")
-        print(f"{'=' * 62}")
+            logger.info(f"[{marker}] {nid:20s}  role={n['role']}")
+            logger.info(f"        tools={n.get('tools', []) or '(none)'}")
+            logger.info(f"        task={n.get('task', '')[:55]}")

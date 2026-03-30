@@ -26,6 +26,7 @@ Or use the convenience method:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -33,6 +34,8 @@ from typing import Any
 from kiln_shared.spec import KilnTool
 
 from .base import BaseAdapter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,7 +70,7 @@ class CompiledAG2Tool:
             description=self.description,
             name=self.name,
         )
-        print(f"[Kiln->AG2] Registered: {self.name}")
+        logger.info(f"Registered: {self.name}")
 
 
 class AG2Adapter(BaseAdapter):

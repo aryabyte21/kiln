@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import logging
 import os
 import threading
 import uuid
@@ -32,6 +33,8 @@ from kiln_shared.auth import KilnUser, require_auth
 
 from .graph_flow import KilnGraphFlow
 from .planner import KilnPlanner
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -236,7 +239,7 @@ def _research_api(tool_description: str, api_key: str) -> str:
         )
         return resp.choices[0].message.content.strip()
     except Exception as exc:
-        print(f"[API Research] Could not research API: {exc}")
+        logger.error(f"Could not research API: {exc}")
         return ""
 
 
@@ -267,7 +270,7 @@ def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[di
         # Ask Mistral to research the best free API for this tool before sending to synthesis
         api_hint = _research_api(description, api_key) if api_key else ""
         if api_hint:
-            print(f"[API Research] {tool_id}: {api_hint[:120]}...")
+            logger.info(f"{tool_id}: {api_hint[:120]}...")
 
         payload   = {
             "job_id":       job_id,
@@ -286,9 +289,9 @@ def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[di
             )
             resp.raise_for_status()
             jobs.append({"job_id": job_id, "tool_id": tool_id, "status": "queued"})
-            print(f"[Synthesis] Synthesis queued for {tool_id}  job={job_id}")
+            logger.info(f"Synthesis queued for {tool_id}  job={job_id}")
         except Exception as exc:
-            print(f"[Synthesis] Could not queue synthesis for {tool_id}: {exc}")
+            logger.error(f"Could not queue synthesis for {tool_id}: {exc}")
 
     threads = []
     for entry in missing_tools:

@@ -27,6 +27,7 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -44,6 +45,8 @@ from kiln_shared.config import get_config
 
 from .loader import KilnLoader
 from .registry import get_global_registry
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -79,13 +82,13 @@ async def _startup() -> None:
 
     # Initialize async database (creates tables if needed)
     await init_db()
-    print("[KilnRegistryAPI] Database initialized")
+    logger.info("Database initialized")
 
     # Load all tools from disk into the in-process registry
     if REGISTRY_DIR.exists():
         loader = KilnLoader(auto_register=True)
         tools  = loader.load_all(str(REGISTRY_DIR))
-        print(f"[KilnRegistryAPI] Loaded {len(tools)} tools from {REGISTRY_DIR}")
+        logger.info(f"Loaded {len(tools)} tools from {REGISTRY_DIR}")
 
         # Sync tool metadata to async database
         for tool in tools:
@@ -100,9 +103,9 @@ async def _startup() -> None:
                 category=s.category,
                 tags_json=_json.dumps(s.tags),
             )
-        print(f"[KilnRegistryAPI] Synced {len(tools)} tools to database")
+        logger.info(f"Synced {len(tools)} tools to database")
     else:
-        print(f"[KilnRegistryAPI] Registry dir not found: {REGISTRY_DIR} — starting empty")
+        logger.info(f"Registry dir not found: {REGISTRY_DIR} — starting empty")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -460,7 +463,7 @@ async def synthesis_callback(
 
         if report["failed"] > 0:
             failed_details = [r for r in report["results"] if not r["passed"]]
-            print(f"[Kiln/Synthesis Callback] tool {resolved_tool_id} failed fixtures — not registered")
+            logger.warning(f"tool {resolved_tool_id} failed fixtures — not registered")
             return JSONResponse(
                 status_code=422,
                 content={
@@ -480,7 +483,7 @@ async def synthesis_callback(
         loader_reg = KilnLoader(auto_register=True)
         tool = loader_reg.load(str(dest_dir))
 
-    print(f"[Kiln/Synthesis Callback] registered tool {resolved_tool_id} v{version}")
+    logger.info(f"registered tool {resolved_tool_id} v{version}")
     return {
         "success":  True,
         "tool_id":  tool.id,

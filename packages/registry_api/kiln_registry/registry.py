@@ -12,11 +12,14 @@ Adapters never store tools themselves.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 from kiln_shared.spec import KilnTool
 
 from .sqlite_registry import SQLiteRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class KilnRegistry:
@@ -38,7 +41,7 @@ class KilnRegistry:
     def register(self, tool: KilnTool) -> None:
         """Register a KilnTool. Overwrites if same ID exists."""
         self._tools[tool.id] = tool
-        print(f"[Kiln] Registered: {tool.id} ({tool.spec.name})")
+        logger.info(f"Registered: {tool.id} ({tool.spec.name})")
 
     def unregister(self, tool_id: str) -> None:
         """Remove a tool from the registry."""

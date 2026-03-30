@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from kiln_shared.spec import KilnTool
@@ -35,6 +36,8 @@ from .compiler.langchain import LangChainAdapter
 from .compiler.mistral import MistralAdapter
 from .compiler.pydantic_ai import PydanticAIAdapter
 from .registry import KilnRegistry, get_global_registry
+
+logger = logging.getLogger(__name__)
 
 # ── Adapter registry ──────────────────────────────────────────────────────────
 # Add new framework adapters here — nowhere else.
@@ -130,7 +133,7 @@ class KilnRuntime:
             adapter = ADAPTERS[target]
             compiled = adapter.compile(tool)
             self._cache[cache_key] = compiled
-            print(f"[Kiln] Compiled {tool.id} -> {target}")
+            logger.info(f"Compiled {tool.id} -> {target}")
         return self._cache[cache_key]
 
     def invalidate_cache(self, tool_id: str | None = None) -> None:

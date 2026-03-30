@@ -21,10 +21,13 @@ Schema:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Callable, Iterator
 
 from kiln_shared.spec import KilnTool, KilnToolSpec, ToolParam, ToolReturn
+
+logger = logging.getLogger(__name__)
 
 # ── Spec <-> dict serialisation ───────────────────────────────────────────────
 
@@ -134,7 +137,7 @@ class SQLiteRegistry:
                 (tool.id, tool.spec.name, json.dumps(_spec_to_dict(tool.spec))),
             )
         self._fns[tool.id] = tool.fn
-        print(f"[Kiln/SQLite] Registered: {tool.id} ({tool.spec.name})")
+        logger.info(f"Registered: {tool.id} ({tool.spec.name})")
 
     def unregister(self, tool_id: str) -> None:
         with self._conn() as conn:

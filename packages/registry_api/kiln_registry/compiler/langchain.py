@@ -62,7 +62,7 @@ class LangChainAdapter(BaseAdapter):
             return_direct=False,
         )
 
-        print(f"[Kiln→LangChain] Compiled: {spec.name}")
+        # Compiled successfully
         return structured_tool
 
 
