@@ -1,4 +1,5 @@
-import { useReducer, useRef, useEffect, useState } from 'react'
+import { SignedIn, SignedOut, SignIn, UserButton, useAuth } from '@clerk/clerk-react'
+import { useReducer, useRef, useEffect, useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import './App.css'
 
@@ -1058,6 +1059,20 @@ export default function App() {
   const [synthesisJobs, setSynthesisJobs] = useState<SynthesisJob[]>([])
   const [audioUrls, setAudioUrls]         = useState<string[]>([])
 
+  // Auth: get JWT token for authenticated requests
+  const { getToken, isSignedIn } = useAuth()
+
+  const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
+    const token = await getToken()
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string> || {}),
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    return fetch(url, { ...options, headers })
+  }, [getToken])
+
   // Sync theme to <html> so body background also responds to light/dark
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
@@ -1105,7 +1120,7 @@ export default function App() {
     dispatch({ type: 'RESET' }); dispatch({ type: 'PLANNING' })
     setMissingEnvs([]); setEnvValues({}); setSynthesisJobs([]); setAudioUrls([])
     try {
-      const res = await fetch('/kiln/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: query }) })
+      const res = await authFetch('/kiln/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request: query }) })
       if (!res.ok) { const err = await res.json(); dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } }); return }
       const data = await res.json()
       runIdRef.current = data.run_id
@@ -1123,7 +1138,7 @@ export default function App() {
     const run_id = runIdRef.current; if (!run_id) return
     dispatch({ type: 'PLANNING' })
     try {
-      const res = await fetch(`/kiln/execute/${run_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ env_vars: envValues }) })
+      const res = await authFetch(`/kiln/execute/${run_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ env_vars: envValues }) })
       if (!res.ok) { const err = await res.json(); dispatch({ type: 'ERROR', payload: { message: err.detail || 'Server error' } }); return }
       connectStream(run_id)
     } catch (err) { dispatch({ type: 'ERROR', payload: { message: String(err) } }) }
@@ -1143,7 +1158,7 @@ export default function App() {
         <div className="header-brand">
           <span className="aria-logo">Kiln</span>
           <span className="header-sep" />
-          <span className="header-sub">Adaptive Runtime Intelligence Architecture</span>
+          <span className="header-sub">Self-Evolving Tool Registry</span>
         </div>
         <nav className="app-nav">
           {NAV.map(n => (
@@ -1157,6 +1172,7 @@ export default function App() {
           <button className="theme-toggle" onClick={() => setDark(d => !d)} title="Toggle theme">
             {dark ? '☀' : '☾'}
           </button>
+          {isSignedIn && <UserButton afterSignOutUrl="/" />}
         </div>
       </header>
 
@@ -1167,6 +1183,13 @@ export default function App() {
 
       {view === 'kiln' && (
         <main className="app-main">
+          {/* Auth gate for chat — sign in required to run queries */}
+          <SignedOut>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem 0' }}>
+              <SignIn routing="hash" />
+            </div>
+          </SignedOut>
+          <SignedIn>
           {/* Query bar — always on top */}
           <form onSubmit={submit} className="query-form">
             <input
@@ -1241,6 +1264,7 @@ export default function App() {
               )}
             </div>
           )}
+          </SignedIn>
         </main>
       )}
     </div>
