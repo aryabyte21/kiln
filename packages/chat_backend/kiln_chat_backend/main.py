@@ -62,6 +62,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+def _startup() -> None:
+    from kiln_shared.logging_config import setup_logging
+    setup_logging()
+
+
 @app.get("/health", summary="Service health")
 def health():
     return {
