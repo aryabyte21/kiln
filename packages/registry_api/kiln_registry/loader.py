@@ -157,6 +157,13 @@ class KilnLoader:
             expected = fixture["expected_output_contains"]
             try:
                 output  = fn(**inputs)
+                if not isinstance(output, dict):
+                    results.append({
+                        "fixture": i + 1,
+                        "passed":  False,
+                        "error":   f"Expected dict output, got {type(output).__name__}: {output!r:.200}",
+                    })
+                    continue
                 missing = [k for k in expected if k not in output]
                 if missing:
                     results.append({
