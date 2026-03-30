@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 from pathlib import Path
 
 import jsonschema
@@ -51,6 +52,8 @@ import kiln_shared
 from kiln_shared.spec import KilnTool, KilnToolSpec, ToolParam, ToolReturn
 
 from .registry import register
+
+logger = logging.getLogger(__name__)
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -126,7 +129,7 @@ class KilnLoader:
         if self._auto_register:
             register(tool)
 
-        print(f"[Kiln/Loader] Loaded: {tool.id}  v{tool.spec.version}  from {tool_dir}")
+        logger.info(f"Loaded: {tool.id}  v{tool.spec.version}  from {tool_dir}")
         return tool
 
     def test(self, tool_dir: str | Path) -> dict:
@@ -216,7 +219,7 @@ class KilnLoader:
             try:
                 tools.append(self.load(latest))
             except Exception as exc:
-                print(f"[Kiln/Loader] Skipped {tool_id_dir.name}: {exc}")
+                logger.warning(f"Skipped {tool_id_dir.name}: {exc}")
 
         return tools
 
