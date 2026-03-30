@@ -5,15 +5,15 @@ import { Geist, Geist_Mono } from "next/font/google"
 import Link from "next/link"
 import { Flame } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
 import { NavLinks } from "@/app/_components/nav-links"
+import { Button } from "@/components/ui/button"
 import "./globals.css"
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Kiln Registry",
+  title: "Kiln",
   description: "Self-evolving tool registry for autonomous AI agents",
 }
 
@@ -28,77 +28,69 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full bg-background antialiased`}
       suppressHydrationWarning
     >
-      <body className="flex min-h-full flex-col bg-background text-foreground">
+      <body className="min-h-full bg-background text-foreground">
         <ClerkProvider appearance={{ baseTheme: dark }}>
-          {/* ── Navbar ─────────────────────────────────────────────── */}
-          <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-background/60 backdrop-blur-xl">
-            <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-6">
-              {/* Logo */}
-              <Link href="/" className="group flex items-center gap-2.5">
-                <span className="relative flex h-8 w-8 items-center justify-center">
-                  {/* Gradient glow behind the icon */}
-                  <span className="absolute inset-0 rounded-lg bg-gradient-to-br from-orange-500/25 to-amber-500/10 blur-md transition-all group-hover:from-orange-500/35 group-hover:to-amber-500/20" />
-                  <Flame className="relative h-5 w-5 text-orange-400 transition-colors group-hover:text-orange-300" />
-                </span>
-                <span className="text-[15px] font-semibold tracking-tight text-foreground/90">
-                  Kiln
-                </span>
-              </Link>
-
-              {/* Separator */}
-              <div className="h-4 w-px bg-white/[0.08]" />
-
-              {/* Nav links — client component for active state */}
-              <NavLinks items={nav} />
-
-              {/* Right side */}
-              <div className="ml-auto flex items-center gap-3">
-                <Show when="signed-out">
-                  <SignInButton>
-                    <Button
-                      size="sm"
-                      className="bg-white/[0.08] text-foreground/80 hover:bg-white/[0.14] hover:text-foreground border-white/[0.06]"
-                    >
-                      Sign in
-                    </Button>
-                  </SignInButton>
-                </Show>
-                <Show when="signed-in">
-                  <div className="ring-1 ring-white/[0.08] rounded-full p-[2px] transition-all hover:ring-white/[0.16]">
-                    <UserButton
-                      appearance={{
-                        baseTheme: dark,
-                        elements: {
-                          avatarBox: "h-7 w-7",
-                        },
-                      }}
-                    />
-                  </div>
-                </Show>
-              </div>
+          <div className="relative flex min-h-full flex-col overflow-x-clip">
+            <div className="pointer-events-none absolute inset-0 -z-10">
+              <div className="absolute left-1/2 top-0 h-[28rem] w-[48rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_center,hsl(24_95%_58%_/_0.12),transparent_70%)] blur-3xl" />
+              <div className="absolute -left-40 top-52 h-96 w-96 rounded-full bg-[radial-gradient(circle_at_center,hsl(204_100%_68%_/_0.09),transparent_72%)] blur-3xl" />
+              <div className="absolute bottom-0 right-0 h-[30rem] w-[34rem] bg-[radial-gradient(circle_at_center,hsl(258_92%_72%_/_0.08),transparent_72%)] blur-3xl" />
             </div>
-          </header>
 
-          {/* ── Content ────────────────────────────────────────────── */}
-          <main className="flex-1">
-            <div className="mx-auto max-w-7xl px-6 py-8">{children}</div>
-          </main>
+            <header className="sticky top-0 z-50 border-b border-border/60 bg-background/75 backdrop-blur-2xl backdrop-saturate-150">
+              <div className="mx-auto flex h-16 w-full max-w-[1200px] items-center px-6">
+                <Link href="/" className="group mr-8 flex items-center gap-2.5">
+                  <span className="relative flex size-9 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 transition-all duration-300 group-hover:border-primary/50 group-hover:bg-primary/15">
+                    <Flame className="size-4 text-primary transition-colors duration-300 group-hover:text-primary" />
+                  </span>
+                  <span className="text-[15px] font-semibold tracking-tight text-foreground/95">
+                    Kiln
+                  </span>
+                </Link>
 
-          {/* ── Footer ─────────────────────────────────────────────── */}
-          <footer className="border-t border-white/[0.04] py-6">
-            <div className="mx-auto flex max-w-7xl items-center justify-between px-6">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
-                <Flame className="h-3.5 w-3.5 text-orange-500/40" />
-                <span>Kiln</span>
+                <NavLinks items={nav} />
+
+                <div className="ml-auto flex items-center gap-3">
+                  <Show when="signed-out">
+                    <SignInButton mode="modal">
+                      <Button variant="outline" size="sm" className="rounded-lg px-3.5 text-xs">
+                        Sign in
+                      </Button>
+                    </SignInButton>
+                  </Show>
+                  <Show when="signed-in">
+                    <div className="rounded-full border border-border/70 p-[2px] transition-colors duration-300 hover:border-border">
+                      <UserButton
+                        appearance={{
+                          baseTheme: dark,
+                          elements: { avatarBox: "h-7 w-7" },
+                        }}
+                      />
+                    </div>
+                  </Show>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground/40">
-                &copy; {new Date().getFullYear()} Kiln
-              </p>
-            </div>
-          </footer>
+            </header>
+
+            <main className="flex-1">
+              <div className="mx-auto w-full max-w-[1200px] px-6 pb-14 pt-10">{children}</div>
+            </main>
+
+            <footer className="border-t border-border/60">
+              <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between px-6 py-5">
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <Flame className="size-3 text-primary/65" />
+                  Kiln — Self-evolving tool registry
+                </div>
+                <div className="text-[11px] text-muted-foreground/80">
+                  &copy; {new Date().getFullYear()}
+                </div>
+              </div>
+            </footer>
+          </div>
         </ClerkProvider>
       </body>
     </html>

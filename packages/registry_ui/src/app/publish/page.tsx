@@ -89,12 +89,12 @@ function FileDropZone({
 
   return (
     <div
-      className={`relative rounded-xl border-2 border-dashed transition-all duration-200 ${
+      className={`relative rounded-2xl border-2 border-dashed transition-all duration-200 ${
         isDragging
-          ? "border-primary bg-primary/5"
+          ? "border-primary/70 bg-primary/10"
           : file
-            ? "border-emerald-500/50 bg-emerald-500/5"
-            : "border-border hover:border-muted-foreground/30"
+            ? "border-primary/40 bg-primary/10"
+            : "border-border/80 bg-card/40 hover:border-border"
       }`}
       onDragOver={(e) => {
         e.preventDefault()
@@ -116,13 +116,13 @@ function FileDropZone({
 
       <button
         type="button"
-        className="flex w-full flex-col items-center gap-3 p-8"
+        className="flex min-h-[9.25rem] w-full flex-col items-center justify-center gap-3 px-5 py-5 text-center sm:min-h-[9.75rem]"
         onClick={() => inputRef.current?.click()}
       >
         <div
           className={`flex size-12 items-center justify-center rounded-xl transition-colors ${
             file
-              ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
+              ? "bg-primary/20 text-primary"
               : "bg-muted text-muted-foreground"
           }`}
         >
@@ -172,7 +172,7 @@ function FixtureResults({ results }: { results: FixtureResult[] }) {
   const failed = results.length - passed
 
   return (
-    <Card>
+    <Card className="section-surface py-0">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Sparkles className="size-4" />
@@ -218,7 +218,7 @@ function BlockedPackages({ packages }: { packages: string[] }) {
   if (packages.length === 0) return null
 
   return (
-    <Card className="border-amber-500/30">
+    <Card className="section-surface border-amber-500/30 py-0">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base text-amber-600 dark:text-amber-400">
           <ShieldAlert className="size-4" />
@@ -252,11 +252,14 @@ function BlockedPackages({ packages }: { packages: string[] }) {
 
 export default function PublishPage() {
   return (
-    <div className="w-full py-4">
+    <div className="w-full">
       <Show when="signed-out">
-        <div className="flex flex-col items-center justify-center gap-6 py-24 text-center">
-          <div className="flex size-16 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/[0.06]">
-            <Upload className="size-8 text-muted-foreground/60" />
+        <div className="hero-surface flex min-h-[32rem] flex-col items-center justify-center gap-6 text-center">
+          <div className="relative">
+            <span className="absolute -inset-4 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 blur-xl" />
+            <div className="relative flex size-16 items-center justify-center rounded-2xl border border-primary/35 bg-primary/15">
+              <Upload className="size-8 text-primary" />
+            </div>
           </div>
           <div className="max-w-sm space-y-2">
             <h3 className="text-lg font-semibold">Sign in required</h3>
@@ -351,11 +354,11 @@ function PublishForm() {
   }, [])
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-3xl">
       {/* Header */}
-      <div className="mb-8">
+      <div className="hero-surface mb-8">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 dark:bg-primary/15">
+          <div className="flex size-11 items-center justify-center rounded-xl border border-primary/30 bg-primary/15">
             <Upload className="size-5 text-primary" />
           </div>
           <div>
@@ -370,14 +373,14 @@ function PublishForm() {
       </div>
 
       {/* Upload area */}
-      <Card>
-        <CardHeader>
+      <Card className="section-surface overflow-hidden py-0">
+        <CardHeader className="px-5 pb-3 pt-5">
           <CardTitle>Upload Files</CardTitle>
           <CardDescription>
             Drag and drop or click to upload your spec.yaml and impl.py files.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-5 pb-5 pt-0">
           <FileDropZone
             label="spec.yaml"
             accept=".yaml,.yml"
@@ -403,7 +406,7 @@ function PublishForm() {
           size="lg"
           onClick={handlePublish}
           disabled={!canPublish}
-          className="gap-2"
+          className="gap-2 border border-primary/30"
         >
           {isPublishing ? (
             <Loader2 className="size-4 animate-spin" />
@@ -423,7 +426,7 @@ function PublishForm() {
 
       {/* Success */}
       {publishResult && (
-        <Card className="border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10">
+        <Card className="section-surface border-emerald-500/30 bg-emerald-500/10 py-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="size-5" />
@@ -456,7 +459,7 @@ function PublishForm() {
 
       {/* Error */}
       {publishError && (
-        <Card className="border-destructive/30">
+        <Card className="section-surface border-destructive/30 py-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="size-5" />

@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { LayoutGrid, MessageSquare, Upload, Settings } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
+
 import { cn } from "@/lib/utils"
 
 const iconMap: Record<string, LucideIcon> = {
@@ -23,7 +24,7 @@ export function NavLinks({ items }: { items: NavItem[] }) {
   const pathname = usePathname()
 
   return (
-    <nav className="flex items-center gap-1">
+    <nav className="flex items-center gap-1 rounded-xl border border-border/60 bg-card/50 p-1">
       {items.map(({ href, label, icon }) => {
         const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href)
         const Icon = iconMap[icon]
@@ -33,13 +34,20 @@ export function NavLinks({ items }: { items: NavItem[] }) {
             key={href}
             href={href}
             className={cn(
-              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all",
+              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all duration-200",
               isActive
-                ? "bg-white/[0.08] text-foreground shadow-sm shadow-black/10"
-                : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground/80"
+                ? "bg-primary/15 text-foreground shadow-sm ring-1 ring-primary/30"
+                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
             )}
           >
-            {Icon && <Icon className="h-3.5 w-3.5" />}
+            {Icon && (
+              <Icon
+                className={cn(
+                  "size-3.5",
+                  isActive ? "text-primary" : "text-muted-foreground"
+                )}
+              />
+            )}
             <span className="hidden sm:inline">{label}</span>
           </Link>
         )

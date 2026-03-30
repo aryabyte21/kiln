@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useAuth, UserProfile, Show } from "@clerk/nextjs"
 import { dark } from "@clerk/themes"
 import {
@@ -34,9 +34,11 @@ const REGISTRY_URL =
 // ---------------------------------------------------------------------------
 
 function ApiKeySection() {
-  const { getToken } = useAuth()
+  const { getToken, isLoaded } = useAuth()
 
   const [apiKey, setApiKey] = useState<string | null>(null)
+  const [isServerMaskedKey, setIsServerMaskedKey] = useState(false)
+  const [isLoadingExisting, setIsLoadingExisting] = useState(true)
   const [isVisible, setIsVisible] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -47,36 +49,53 @@ function ApiKeySection() {
     ? `${apiKey.slice(0, 8)}${"*".repeat(Math.max(0, apiKey.length - 12))}${apiKey.slice(-4)}`
     : null
 
+  const getErrorMessage = useCallback(
+    async (res: Response, fallback: string) => {
+      const payload = await res
+        .json()
+        .catch(() => ({ detail: fallback })) as { detail?: string }
+      return payload.detail || fallback
+    },
+    []
+  )
+
   const fetchApiKey = useCallback(async () => {
     setIsGenerating(true)
     setError(null)
 
     try {
       const token = await getToken()
+      if (!token) {
+        throw new Error("Authentication expired. Please sign in again.")
+      }
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
       }
-      if (token) headers["Authorization"] = `Bearer ${token}`
 
-      const res = await fetch(`${REGISTRY_URL}/api-keys`, {
+      const res = await fetch(`${REGISTRY_URL}/auth/api-key`, {
         method: "POST",
         headers,
       })
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to generate API key" }))
-        throw new Error(err.detail || "Failed to generate API key")
+        throw new Error(await getErrorMessage(res, "Failed to generate API key"))
       }
 
       const data = await res.json()
       setApiKey(data.api_key || data.key)
+      setIsServerMaskedKey(false)
       setIsVisible(true)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to generate API key")
+      if (e instanceof TypeError) {
+        setError("Could not reach the registry API. Check that port 8766 is running and CORS allows http://localhost:3000.")
+      } else {
+        setError(e instanceof Error ? e.message : "Failed to generate API key")
+      }
     } finally {
       setIsGenerating(false)
     }
-  }, [getToken])
+  }, [getToken, getErrorMessage])
 
   const regenerateApiKey = useCallback(async () => {
     setIsRegenerating(true)
@@ -84,44 +103,111 @@ function ApiKeySection() {
 
     try {
       const token = await getToken()
+      if (!token) {
+        throw new Error("Authentication expired. Please sign in again.")
+      }
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
       }
-      if (token) headers["Authorization"] = `Bearer ${token}`
 
-      const res = await fetch(`${REGISTRY_URL}/api-keys/regenerate`, {
+      const res = await fetch(`${REGISTRY_URL}/auth/api-key/regenerate`, {
         method: "POST",
         headers,
       })
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to regenerate API key" }))
-        throw new Error(err.detail || "Failed to regenerate API key")
+        throw new Error(
+          await getErrorMessage(res, "Failed to regenerate API key")
+        )
       }
 
       const data = await res.json()
       setApiKey(data.api_key || data.key)
+      setIsServerMaskedKey(false)
       setIsVisible(true)
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Failed to regenerate API key"
-      )
+      if (e instanceof TypeError) {
+        setError("Could not reach the registry API. Check that port 8766 is running and CORS allows http://localhost:3000.")
+      } else {
+        setError(
+          e instanceof Error ? e.message : "Failed to regenerate API key"
+        )
+      }
     } finally {
       setIsRegenerating(false)
     }
-  }, [getToken])
+  }, [getToken, getErrorMessage])
 
   const handleCopy = useCallback(() => {
-    if (!apiKey) return
+    if (!apiKey || isServerMaskedKey) return
     navigator.clipboard.writeText(apiKey).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
-  }, [apiKey])
+  }, [apiKey, isServerMaskedKey])
+
+  useEffect(() => {
+    let cancelled = false
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, ms)
+      })
+
+    const loadExistingKey = async () => {
+      setIsLoadingExisting(true)
+      setError(null)
+
+      try {
+        while (!cancelled) {
+          const token = await getToken()
+          if (token) {
+            const res = await fetch(`${REGISTRY_URL}/auth/api-key`, {
+              method: "GET",
+              headers: { Authorization: `Bearer ${token}` },
+            })
+
+            if (res.status === 404 || cancelled) return
+            if (!res.ok) {
+              throw new Error(
+                await getErrorMessage(res, "Failed to load existing API key")
+              )
+            }
+
+            const data = await res.json()
+            if (cancelled) return
+            setApiKey(data.api_key || data.key || null)
+            setIsServerMaskedKey(true)
+            setIsVisible(false)
+            return
+          }
+
+          await sleep(250)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : "Failed to load existing API key"
+          )
+        }
+      } finally {
+        if (!cancelled) setIsLoadingExisting(false)
+      }
+    }
+
+    if (!isLoaded) {
+      return
+    }
+
+    loadExistingKey()
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, getErrorMessage, isLoaded])
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="section-surface gap-0 py-0">
+      <CardHeader className="px-5 pb-2.5 pt-5">
         <CardTitle className="flex items-center gap-2">
           <Key className="size-4" />
           API Key
@@ -131,21 +217,33 @@ function ApiKeySection() {
           your code or CI/CD pipelines.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3 px-5 pb-5 pt-0">
+        {isLoadingExisting && (
+          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            Loading API key status...
+          </div>
+        )}
+
         {apiKey ? (
           <>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <Input
                   readOnly
-                  value={isVisible ? apiKey : maskedKey || ""}
-                  className="font-mono text-sm pr-20"
+                  value={
+                    isServerMaskedKey ? apiKey : isVisible ? apiKey : maskedKey || ""
+                  }
+                  className="border-border/70 bg-card/70 pr-20 font-mono text-sm"
                 />
                 <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    onClick={() => setIsVisible(!isVisible)}
+                    onClick={() => {
+                      if (!isServerMaskedKey) setIsVisible(!isVisible)
+                    }}
+                    disabled={isServerMaskedKey}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     {isVisible ? (
@@ -158,6 +256,7 @@ function ApiKeySection() {
                     variant="ghost"
                     size="icon-xs"
                     onClick={handleCopy}
+                    disabled={isServerMaskedKey}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     {copied ? (
@@ -170,7 +269,14 @@ function ApiKeySection() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {isServerMaskedKey && (
+              <p className="text-xs text-muted-foreground">
+                Existing keys are masked by default. Regenerate to get a new
+                plaintext key for copying.
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
               <Button
                 variant="outline"
                 size="sm"
@@ -232,11 +338,14 @@ function ApiKeySection() {
 
 export default function SettingsPage() {
   return (
-    <div className="w-full py-4">
+    <div className="w-full">
       <Show when="signed-out">
-        <div className="flex flex-col items-center justify-center gap-6 py-24 text-center">
-          <div className="flex size-16 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/[0.06]">
-            <Settings className="size-8 text-muted-foreground/60" />
+        <div className="hero-surface flex min-h-[32rem] flex-col items-center justify-center gap-6 text-center">
+          <div className="relative">
+            <span className="absolute -inset-4 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 blur-xl" />
+            <div className="relative flex size-16 items-center justify-center rounded-2xl border border-primary/35 bg-primary/15">
+              <Settings className="size-8 text-primary" />
+            </div>
           </div>
           <div className="max-w-sm space-y-2">
             <h3 className="text-lg font-semibold">Sign in required</h3>
@@ -256,11 +365,11 @@ export default function SettingsPage() {
 
 function SettingsContent() {
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
+    <div className="mx-auto max-w-3xl space-y-8">
       {/* Header */}
-      <div className="mb-8">
+      <div className="hero-surface mb-8">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 dark:bg-primary/15">
+          <div className="flex size-11 items-center justify-center rounded-xl border border-primary/30 bg-primary/15">
             <Settings className="size-5 text-primary" />
           </div>
           <div>
@@ -283,17 +392,14 @@ function SettingsContent() {
           <ShieldCheck className="size-4 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Account</h2>
         </div>
-        <div className="overflow-hidden rounded-xl w-full">
+        <div className="section-surface w-full p-4 [&>div]:w-full [&>div>div]:w-full">
           <UserProfile
             routing="hash"
             appearance={{
               baseTheme: dark,
-              layout: {
-                shimmer: false,
-              },
               elements: {
-                rootBox: "w-full max-w-none",
-                card: "w-full max-w-none shadow-none",
+                rootBox: { width: "100%", maxWidth: "100%" },
+                card: { width: "100%", maxWidth: "100%", boxShadow: "none" },
               },
             }}
           />

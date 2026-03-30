@@ -64,10 +64,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow requests from the React dev server (localhost:5173) and any local origin
+# Allow requests from local UI dev servers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(","),
+    allow_origins=os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173,http://localhost:5174",
+    ).split(","),
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,

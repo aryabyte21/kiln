@@ -15,6 +15,7 @@ import {
   PackageSearch,
   Sparkles,
   ArrowRight,
+  Flame,
 } from "lucide-react"
 import type { Tool, ToolStats } from "@/lib/registry"
 import { Badge } from "@/components/ui/badge"
@@ -38,15 +39,19 @@ function StatCard({
   label,
   value,
   color,
+  gradient,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   value: string | number
   color: string
+  gradient: string
 }) {
   return (
-    <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-card to-card shadow-sm ring-1 ring-foreground/[0.06] transition-all duration-300 hover:shadow-md hover:ring-foreground/[0.1]">
-      <CardContent className="flex items-center gap-3 py-4">
+    <Card className="section-surface relative overflow-hidden py-0 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_22px_56px_hsl(223_80%_4%_/_0.48)]">
+      {/* Subtle gradient background */}
+      <div className={`pointer-events-none absolute inset-0 ${gradient}`} />
+      <CardContent className="relative flex items-center gap-3 py-4">
         <div
           className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${color}`}
         >
@@ -72,6 +77,8 @@ function StatsRow({ stats }: { stats: ToolStats }) {
       value: stats.total,
       color:
         "bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400",
+      gradient:
+        "bg-gradient-to-br from-blue-500/[0.07] via-blue-400/[0.03] to-transparent",
     },
     {
       icon: FolderOpen,
@@ -79,6 +86,8 @@ function StatsRow({ stats }: { stats: ToolStats }) {
       value: categoryCount,
       color:
         "bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400",
+      gradient:
+        "bg-gradient-to-br from-violet-500/[0.07] via-purple-400/[0.03] to-transparent",
     },
     {
       icon: Users,
@@ -86,6 +95,8 @@ function StatsRow({ stats }: { stats: ToolStats }) {
       value: stats.unique_authors,
       color:
         "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400",
+      gradient:
+        "bg-gradient-to-br from-emerald-500/[0.07] via-green-400/[0.03] to-transparent",
     },
     {
       icon: Tag,
@@ -93,6 +104,8 @@ function StatsRow({ stats }: { stats: ToolStats }) {
       value: tagCount,
       color:
         "bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400",
+      gradient:
+        "bg-gradient-to-br from-amber-500/[0.07] via-yellow-400/[0.03] to-transparent",
     },
   ]
 
@@ -113,31 +126,39 @@ function ToolCard({ tool }: { tool: Tool }) {
 
   return (
     <Link href={`/tools/${tool.id}`} className="block">
-      <Card className="group/tool h-full cursor-pointer border-0 shadow-sm ring-1 ring-foreground/[0.06] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:ring-foreground/[0.12] hover:shadow-primary/5 dark:hover:shadow-primary/10">
-        <CardHeader>
+      <Card className="section-surface group/tool relative h-full cursor-pointer overflow-hidden border-border/70 bg-card/75 py-0 transition-all duration-300 hover:-translate-y-1 hover:border-primary/25 hover:shadow-[0_28px_72px_hsl(223_80%_4%_/_0.55)]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent opacity-70" />
+
+        <CardHeader className="px-5 pb-3 pt-5">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="flex items-center gap-2.5">
-              <div className="flex size-8 items-center justify-center rounded-lg bg-primary/5 ring-1 ring-primary/10 transition-colors group-hover/tool:bg-primary/10 dark:bg-primary/10 dark:ring-primary/20">
-                <Package className="size-4 text-primary/70" />
+            <CardTitle className="flex min-w-0 items-center gap-2.5">
+              <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 transition-all duration-300 group-hover/tool:bg-primary/15 group-hover/tool:ring-primary/40">
+                <Package className="size-4 text-primary/70 transition-colors duration-300 group-hover/tool:text-primary" />
               </div>
-              <span className="transition-colors group-hover/tool:text-primary/90">
+              <span className="truncate transition-colors duration-300 group-hover/tool:text-primary/90">
                 {tool.name}
               </span>
             </CardTitle>
-            <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
+            <Badge
+              variant="secondary"
+              className="shrink-0 rounded-full border border-border/80 bg-background/60 px-2.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+            >
               v{tool.version}
             </Badge>
           </div>
-          <CardDescription className="line-clamp-2 leading-relaxed">
+          <CardDescription className="line-clamp-2 pt-0.5 text-sm leading-6 text-muted-foreground/95">
             {truncatedDescription}
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-col gap-3 px-5 pb-4 pt-0">
           {/* Category */}
           <div className="flex items-center gap-2">
             <Layers className="size-3.5 text-muted-foreground/70" />
-            <Badge variant="outline" className="font-normal">
+            <Badge
+              variant="outline"
+              className="rounded-full border-border/70 bg-background/45 font-normal"
+            >
               {tool.category}
             </Badge>
           </div>
@@ -150,7 +171,7 @@ function ToolCard({ tool }: { tool: Tool }) {
                 <Badge
                   key={tag}
                   variant="secondary"
-                  className="text-[10px] font-normal"
+                  className="rounded-full bg-muted/65 text-[10px] font-normal"
                 >
                   {tag}
                 </Badge>
@@ -164,7 +185,7 @@ function ToolCard({ tool }: { tool: Tool }) {
           )}
         </CardContent>
 
-        <CardFooter className="mt-auto">
+        <CardFooter className="mt-auto border-t border-border/60 bg-background/35 px-5 py-3">
           <div className="flex w-full items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <User className="size-3.5" />
@@ -180,11 +201,11 @@ function ToolCard({ tool }: { tool: Tool }) {
 
 function EmptyState({ query }: { query: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-6 py-24 text-center">
+    <div className="section-surface flex flex-col items-center justify-center gap-6 px-4 py-24 text-center">
       <div className="relative">
-        <div className="absolute -inset-4 animate-pulse rounded-full bg-primary/5 dark:bg-primary/10" />
-        <div className="relative flex size-16 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/[0.06]">
-          <PackageSearch className="size-8 text-muted-foreground/60" />
+        <span className="absolute -inset-6 rounded-full bg-gradient-to-br from-primary/10 to-primary/5 blur-2xl" />
+        <div className="relative flex size-20 items-center justify-center rounded-2xl bg-muted/80 ring-1 ring-border/70">
+          <PackageSearch className="size-10 text-muted-foreground/50" />
         </div>
       </div>
       <div className="max-w-sm space-y-2">
@@ -197,6 +218,14 @@ function EmptyState({ query }: { query: string }) {
           . Try a different search term or clear the filters.
         </p>
       </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-2"
+        onClick={() => window.location.reload()}
+      >
+        Clear all filters
+      </Button>
     </div>
   )
 }
@@ -243,20 +272,27 @@ export function CatalogClient({
   }, [tools, search, activeCategory])
 
   return (
-    <div className="w-full py-4">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 dark:bg-primary/15">
-            <Sparkles className="size-5 text-primary" />
+    <div className="w-full">
+      {/* Hero section with gradient */}
+      <div className="hero-surface mb-10">
+        {/* Background gradient orbs */}
+        <div className="pointer-events-none absolute -left-20 -top-20 size-64 rounded-full bg-gradient-to-br from-primary/[0.16] to-primary/[0.02] blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 -right-16 size-48 rounded-full bg-gradient-to-br from-sky-400/[0.12] to-violet-400/[0.02] blur-3xl" />
+
+        <div className="relative flex items-center gap-4">
+          <div className="relative flex size-12 items-center justify-center">
+            <span className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/35 to-primary/10 blur-lg" />
+            <div className="relative flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/10 ring-1 ring-primary/35">
+              <Flame className="size-6 text-primary" />
+            </div>
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Tool Catalog</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               Browse and discover tools in the Kiln registry
               {tools.length > 0 && (
                 <span className="ml-1.5 inline-flex items-center gap-1 font-medium text-foreground">
-                  <span className="inline-block size-1 rounded-full bg-emerald-500" />
+                  <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
                   {filtered.length}
                   {filtered.length !== tools.length &&
                     ` of ${tools.length}`}{" "}
@@ -278,7 +314,7 @@ export function CatalogClient({
           placeholder="Search by name, description, id, or tag..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-11 rounded-xl bg-muted/30 pl-10 pr-10 text-sm shadow-sm ring-1 ring-foreground/[0.06] transition-all duration-200 placeholder:text-muted-foreground/50 focus-visible:bg-background focus-visible:shadow-md focus-visible:ring-primary/30 dark:bg-muted/20"
+          className="h-11 rounded-xl border-border/70 bg-card/70 pl-10 pr-10 text-sm shadow-sm ring-1 ring-border/60 transition-all duration-300 placeholder:text-muted-foreground/60 focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-primary/35"
         />
         {search && (
           <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -299,10 +335,10 @@ export function CatalogClient({
         <div className="mb-8 flex flex-wrap gap-2">
           <button
             onClick={() => setActiveCategory(null)}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-all duration-200 ${
+            className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-all duration-300 ${
               activeCategory === null
-                ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
-                : "bg-muted/60 text-muted-foreground ring-1 ring-foreground/[0.06] hover:bg-muted hover:text-foreground dark:bg-muted/30"
+                ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20 ring-1 ring-primary/50"
+                : "bg-card/65 text-muted-foreground ring-1 ring-border/70 hover:bg-card hover:text-foreground hover:ring-border"
             }`}
           >
             <Layers className="size-3" />
@@ -314,10 +350,10 @@ export function CatalogClient({
               onClick={() =>
                 setActiveCategory((prev) => (prev === cat ? null : cat))
               }
-              className={`inline-flex h-7 items-center rounded-full px-3 text-xs font-medium transition-all duration-200 ${
+              className={`inline-flex h-7 items-center rounded-full px-3 text-xs font-medium transition-all duration-300 ${
                 activeCategory === cat
-                  ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
-                  : "bg-muted/60 text-muted-foreground ring-1 ring-foreground/[0.06] hover:bg-muted hover:text-foreground dark:bg-muted/30"
+                  ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20 ring-1 ring-primary/50"
+                  : "bg-card/65 text-muted-foreground ring-1 ring-border/70 hover:bg-card hover:text-foreground hover:ring-border"
               }`}
             >
               {cat}
@@ -343,9 +379,12 @@ export function CatalogClient({
 
       {/* No tools at all */}
       {!error && tools.length === 0 && !search && !activeCategory && (
-        <div className="flex flex-col items-center justify-center gap-6 py-24 text-center">
-          <div className="flex size-16 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/[0.06]">
-            <Package className="size-8 text-muted-foreground/60" />
+        <div className="section-surface flex flex-col items-center justify-center gap-6 px-4 py-24 text-center">
+          <div className="relative">
+            <span className="absolute -inset-6 rounded-full bg-gradient-to-br from-primary/10 to-primary/5 blur-2xl" />
+            <div className="relative flex size-20 items-center justify-center rounded-2xl bg-muted/80 ring-1 ring-border/70">
+              <Package className="size-10 text-muted-foreground/50" />
+            </div>
           </div>
           <div className="max-w-sm space-y-2">
             <h3 className="text-lg font-semibold">No tools registered yet</h3>
@@ -353,12 +392,18 @@ export function CatalogClient({
               Be the first to publish a tool to the Kiln registry.
             </p>
           </div>
+          <Link href="/publish">
+            <Button size="sm" className="mt-2 gap-1.5">
+              <Sparkles className="size-3.5" />
+              Publish a tool
+            </Button>
+          </Link>
         </div>
       )}
 
       {/* Tool grid */}
       {filtered.length > 0 && (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {filtered.map((tool) => (
             <ToolCard key={tool.id} tool={tool} />
           ))}
