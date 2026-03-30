@@ -1,7 +1,7 @@
 {
   "name": "kiln",
   "private": true,
-  "workspaces": ["packages/chat_ui"],
+  "workspaces": ["packages/chat_ui", "packages/registry_ui"],
   "devDependencies": {
     "nx": "^21.0.0"
   }
