@@ -16,6 +16,19 @@ services:
       timeout: 3s
       retries: 5
 
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # ── Registry API (Python — port 8766) ───────────────────────────────────────
   registry_api:
     build:
@@ -31,8 +44,11 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://kiln:kiln_dev@postgres:5432/kiln_registry
+      - REDIS_URL=redis://redis:6379
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ── Chat Backend (Python — port 8765) ───────────────────────────────────────
@@ -49,6 +65,8 @@ services:
       - ./packages/registry_api/kiln_registry:/app/packages/registry_api/kiln_registry
       - ./registry:/app/registry
     env_file: .env
+    depends_on:
+      - registry_api
 
   # ── MCP Server (Python — port 8768) ─────────────────────────────────────────
   mcp_server:
@@ -65,6 +83,23 @@ services:
     environment:
       - KILN_REGISTRY_URL=http://registry_api:8766
       - KILN_MCP_HOST=0.0.0.0
+    depends_on:
+      - registry_api
+
+  # ── Synthesis Service (port 8002) ───────────────────────────────────────────
+  synthesis_service:
+    build:
+      context: ./packages/synthesis_service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILN_SYNTHESIS_MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILN_SYNTHESIS_CALLBACK_URL=http://registry_api:8766/synthesis/callback
+      - KILN_SYNTHESIS_INTERNAL_SECRET=${KILN_INTERNAL_SECRET:-}
+    volumes:
+      - synthesis_logs:/app/logs
     depends_on:
       - registry_api
 
@@ -85,47 +120,12 @@ services:
       - NEXT_PUBLIC_REGISTRY_URL=http://localhost:8766
       - REGISTRY_API_INTERNAL=http://registry_api:8766
       - NEXT_PUBLIC_CHAT_BACKEND=http://localhost:8765
-    depends_on:
-      - registry_api
-
-  # ── Chat UI (Vite — port 5173) ─────────────────────────────────────────────
-  chat_ui:
-    build:
-      context: ./packages/chat_ui
-      dockerfile: ../../docker/Dockerfile.vite
-    command: npx vite --host 0.0.0.0 --port 5173
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./packages/chat_ui/src:/app/src
-      - ./packages/chat_ui/index.html:/app/index.html
-      - ./packages/chat_ui/vite.config.ts:/app/vite.config.ts
-    environment:
-      - VITE_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
-      - VITE_REGISTRY_API=http://registry_api:8766
-      - VITE_CHAT_BACKEND=http://chat_backend:8765
-      - VITE_SYNTHESIS_API=http://synthesis_service:8002
+      - CHAT_BACKEND_INTERNAL=http://chat_backend:8765
     depends_on:
       - registry_api
       - chat_backend
 
-  # ── Synthesis Service (Docker — port 8002) ──────────────────────────────────
-  synthesis_service:
-    build:
-      context: ./packages/synthesis_service
-      dockerfile: Dockerfile
-    ports:
-      - "8002:8002"
-    environment:
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - KILN_SYNTHESIS_MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - KILN_SYNTHESIS_CALLBACK_URL=http://registry_api:8766/synthesis/callback
-      - KILN_SYNTHESIS_INTERNAL_SECRET=${KILN_INTERNAL_SECRET:-}
-    volumes:
-      - synthesis_logs:/app/logs
-    depends_on:
-      - registry_api
-
 volumes:
   pgdata:
+  redisdata:
   synthesis_logs:
