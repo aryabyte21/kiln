@@ -11,9 +11,9 @@ This module must stay framework-free forever.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, get_type_hints
-
+from typing import Any, get_type_hints
 
 # ── Parameter & Return types ──────────────────────────────────────────────────
 

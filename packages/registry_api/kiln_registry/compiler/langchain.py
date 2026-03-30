@@ -23,9 +23,11 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, Type
-from .base import BaseAdapter
+from typing import Any
+
 from kiln_shared.spec import KilnTool, ToolParam
+
+from .base import BaseAdapter
 
 
 class LangChainAdapter(BaseAdapter):
@@ -44,7 +46,7 @@ class LangChainAdapter(BaseAdapter):
         except ImportError:
             raise ImportError(
                 "LangChain not installed. Run: pip install langchain langchain-core"
-            )
+            ) from None
 
         spec = tool.spec
         args_schema = _build_pydantic_model(spec.name, spec.params)
@@ -64,7 +66,7 @@ class LangChainAdapter(BaseAdapter):
         return structured_tool
 
 
-def _build_pydantic_model(model_name: str, params: list[ToolParam]) -> Type:
+def _build_pydantic_model(model_name: str, params: list[ToolParam]) -> type:
     """
     Dynamically build a Pydantic v2 BaseModel class from a list of ToolParams.
 
@@ -72,8 +74,8 @@ def _build_pydantic_model(model_name: str, params: list[ToolParam]) -> Type:
     1. Validate inputs before calling the tool
     2. Generate the JSON schema it sends to the LLM
     """
-    from pydantic import BaseModel, Field, create_model
-    from typing import Optional
+
+    from pydantic import Field, create_model
 
     # Map Kiln type strings -> Python types
     type_map = {
@@ -109,7 +111,7 @@ def _build_pydantic_model(model_name: str, params: list[ToolParam]) -> Type:
             if param.default is not None:
                 field_definitions[param.name] = (python_type, Field(param.default, **{k: v for k, v in field_kwargs.items() if k != "default"}))
             else:
-                field_definitions[param.name] = (Optional[python_type], Field(None, description=param.description))
+                field_definitions[param.name] = (python_type | None, Field(None, description=param.description))
         else:
             field_definitions[param.name] = (python_type, Field(..., description=param.description))
 

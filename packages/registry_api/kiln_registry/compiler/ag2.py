@@ -26,10 +26,13 @@ Or use the convenience method:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
-from .base import BaseAdapter
+from typing import Any
+
 from kiln_shared.spec import KilnTool
+
+from .base import BaseAdapter
 
 
 @dataclass
@@ -56,7 +59,7 @@ class CompiledAG2Tool:
         except ImportError:
             raise ImportError(
                 "AG2/AutoGen not installed. Run: pip install autogen-agentchat"
-            )
+            ) from None
         register_function(
             self.fn,
             caller=caller,

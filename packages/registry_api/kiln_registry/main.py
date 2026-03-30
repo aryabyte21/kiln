@@ -27,7 +27,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -219,7 +218,7 @@ async def register_tool(
     try:
         raw = yaml.safe_load(spec_bytes)
     except yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid YAML in spec_file: {exc}")
+        raise HTTPException(status_code=422, detail=f"Invalid YAML in spec_file: {exc}") from exc
 
     tool_id = raw.get("tool", {}).get("id")
     version = str(raw.get("tool", {}).get("version", "1.0.0"))
@@ -305,12 +304,12 @@ def execute_tool(tool_id: str, body: dict):
         raise HTTPException(
             status_code=422,
             detail=f"Invalid arguments for '{tool_id}': {exc}",
-        )
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail=f"Tool '{tool_id}' raised {type(exc).__name__}: {exc}",
-        )
+        ) from exc
 
     return {"success": True, "tool_id": tool_id, "result": result}
 
@@ -381,7 +380,7 @@ async def synthesis_callback(
     try:
         raw = yaml.safe_load(spec_bytes)
     except yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid YAML in spec: {exc}")
+        raise HTTPException(status_code=422, detail=f"Invalid YAML in spec: {exc}") from exc
 
     resolved_tool_id = raw.get("tool", {}).get("id") or tool_id
     version          = str(raw.get("tool", {}).get("version", "1.0.0"))
@@ -395,7 +394,7 @@ async def synthesis_callback(
     try:
         jsonschema.validate(instance=raw, schema=loader_check._schema)
     except jsonschema.ValidationError as exc:
-        raise HTTPException(status_code=422, detail=f"spec.yaml schema invalid: {exc.message}")
+        raise HTTPException(status_code=422, detail=f"spec.yaml schema invalid: {exc.message}") from exc
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path  = Path(tmp)

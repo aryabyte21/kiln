@@ -20,10 +20,13 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
-from .base import BaseAdapter
+from typing import Any
+
 from kiln_shared.spec import KilnTool
+
+from .base import BaseAdapter
 
 
 @dataclass

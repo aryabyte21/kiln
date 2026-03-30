@@ -39,9 +39,9 @@ Triggering synthesis is the caller's responsibility.
 from __future__ import annotations
 
 import json
+
 import requests
 from mistralai.client import Mistral
-
 
 PLANNER_SYSTEM = """\
 You are Kiln's task planner. Your job is to decompose a user request into a \
@@ -148,7 +148,7 @@ class KilnPlanner:
             raise requests.ConnectionError(
                 f"Kiln registry not reachable at {self._server_url}. "
                 "Run: python run_server.py"
-            )
+            ) from None
 
     def _call_planner(self, user_request: str, tools: list[dict]) -> dict:
         tool_summary = "\n".join(

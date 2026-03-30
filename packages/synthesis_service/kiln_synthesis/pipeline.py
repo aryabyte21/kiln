@@ -9,17 +9,16 @@ Pushes SSE events at each stage for real-time progress streaming.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
 
 import yaml
 
+from kiln_synthesis.callback import notify_failure, notify_success
 from kiln_synthesis.config import get_settings
 from kiln_synthesis.jobs.job_store import job_store
 from kiln_synthesis.models import JobStatus, SynthesizeRequest
-from kiln_synthesis.callback import notify_failure, notify_success
 from kiln_synthesis.prompt_builder import build_prompt, write_context
 from kiln_synthesis.vibe_runner import VibeError, run_vibe
 
@@ -40,9 +39,8 @@ def _extract_env_vars(impl_path: Path) -> list[dict[str, str]]:
     namespace: dict = {}
     try:
         compiled = compile(code, str(impl_path), "exec")
-        builtins = __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
-        safe_globals = {"__builtins__": builtins}
-        eval_func = getattr(__builtins__ if isinstance(__builtins__, dict) else type(__builtins__), '__getitem__', None)
+        __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
+        getattr(__builtins__ if isinstance(__builtins__, dict) else type(__builtins__), '__getitem__', None)
         # Use the exec builtin to run the compiled code in a sandboxed namespace
         _run_code(compiled, namespace)
         env_vars = namespace.get("REQUIRED_ENV_VARS")
