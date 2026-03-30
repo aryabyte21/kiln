@@ -256,6 +256,34 @@ async def search_tools(q: str = ""):
     return matched
 
 
+@app.get("/tools/versions/{tool_id:path}", summary="List all versions of a tool")
+def list_tool_versions(tool_id: str):
+    """Returns all available versions for a tool, sorted newest first."""
+    tool_dir = REGISTRY_DIR / tool_id
+    if not tool_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found on disk")
+
+    versions = []
+    for ver_dir in sorted(tool_dir.iterdir(), reverse=True):
+        if not ver_dir.is_dir():
+            continue
+        spec_path = ver_dir / "spec.yaml"
+        if not spec_path.exists():
+            continue
+        try:
+            raw = yaml.safe_load(spec_path.read_text())
+            versions.append({
+                "version": ver_dir.name,
+                "description": raw.get("tool", {}).get("description", ""),
+                "author": raw.get("tool", {}).get("author", ""),
+                "generated_by": raw.get("metadata", {}).get("generated_by", ""),
+            })
+        except Exception:
+            versions.append({"version": ver_dir.name, "error": "Could not parse spec"})
+
+    return {"tool_id": tool_id, "versions": versions, "count": len(versions)}
+
+
 @app.get("/tools/{tool_id:path}", summary="Get a single tool by ID")
 def get_tool(tool_id: str):
     """Returns the full spec + LLM tool_def for one tool."""
@@ -304,6 +332,15 @@ async def register_tool(
 
     if not tool_id:
         raise HTTPException(status_code=422, detail="spec.yaml must contain tool.id")
+
+    # ── Safety: check for blocked imports ─────────────────────────────────────
+    from .safety import validate_imports
+    violations = validate_imports(impl_bytes.decode("utf-8", errors="replace"))
+    if violations:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Tool uses blocked packages", "violations": violations},
+        )
 
     # ── Write to a temp dir, validate + test, then persist ───────────────────
     with tempfile.TemporaryDirectory() as tmp:
@@ -483,6 +520,16 @@ async def synthesis_callback(
 
     if not resolved_tool_id:
         raise HTTPException(status_code=422, detail="spec.yaml must contain tool.id")
+
+    # Safety: check for blocked imports
+    from .safety import validate_imports as _validate_imports
+    _violations = _validate_imports(impl_bytes.decode("utf-8", errors="replace"))
+    if _violations:
+        logger.warning("Synthesis callback rejected for %s: %s", resolved_tool_id, _violations)
+        return JSONResponse(
+            status_code=422,
+            content={"success": False, "message": "Blocked packages detected", "violations": _violations},
+        )
 
     # Validate spec schema before touching disk
     loader_check = KilnLoader(auto_register=False)
