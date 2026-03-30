@@ -33,13 +33,11 @@ Flow (example):
 
 from __future__ import annotations
 
-import json
 import os
-import requests
 from typing import Any
 
+import requests
 from autogen import AssistantAgent, UserProxyAgent, register_function
-
 
 # ── Topological sort (Kahn's algorithm) ───────────────────────────────────────
 
@@ -416,7 +414,7 @@ class KilnGraphFlow:
         """Pretty-print the task graph before execution."""
         nodes = {n["id"]: n for n in task_graph["nodes"]}
         print(f"\n{'=' * 62}")
-        print(f"  Kiln Task Graph")
+        print("  Kiln Task Graph")
         print(f"  Task: {task_graph['task'][:55]}")
         print(f"{'=' * 62}")
         print(f"  Execution order: {' → '.join(order)}")

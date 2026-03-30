@@ -12,8 +12,10 @@ Adapters never store tools themselves.
 
 from __future__ import annotations
 
-from typing import Iterator
-from kiln_shared.spec import KilnTool, KilnToolSpec
+from collections.abc import Iterator
+
+from kiln_shared.spec import KilnTool
+
 from .sqlite_registry import SQLiteRegistry
 
 

@@ -43,15 +43,14 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from typing import Any
 
-import yaml
 import jsonschema
+import yaml
 
 import kiln_shared
 from kiln_shared.spec import KilnTool, KilnToolSpec, ToolParam, ToolReturn
-from .registry import register
 
+from .registry import register
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 

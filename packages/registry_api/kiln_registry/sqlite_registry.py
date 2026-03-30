@@ -22,10 +22,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Callable, Iterator
+from collections.abc import Callable, Iterator
 
 from kiln_shared.spec import KilnTool, KilnToolSpec, ToolParam, ToolReturn
-
 
 # ── Spec <-> dict serialisation ───────────────────────────────────────────────
 

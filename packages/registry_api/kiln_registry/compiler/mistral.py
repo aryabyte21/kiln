@@ -34,11 +34,13 @@ Usage:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
+
+from kiln_shared.spec import KilnTool
 
 from .base import BaseAdapter
-from kiln_shared.spec import KilnTool
 
 
 @dataclass

@@ -11,7 +11,6 @@ from pathlib import Path
 
 from kiln_synthesis.models import SynthesizeRequest
 
-
 # -- Kiln spec format reference (embedded) ------------------------------------
 
 _SPEC_FORMAT = """\

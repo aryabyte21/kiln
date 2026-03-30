@@ -10,11 +10,12 @@ process spawning without shell injection risk.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from kiln_synthesis.config import get_settings
 
@@ -119,16 +120,14 @@ async def run_vibe(
         # Collect stderr
         stderr_str = await stderr_task
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         # Still try to collect stderr for diagnostics
         stderr_str = ""
-        try:
+        with contextlib.suppress(Exception):
             stderr_str = await asyncio.wait_for(stderr_task, timeout=5)
-        except Exception:
-            pass
         logger.error("Vibe CLI timed out. stderr tail: %s", stderr_str[-2000:] if stderr_str else "(empty)")
-        raise VibeError("Vibe CLI timed out")
+        raise VibeError("Vibe CLI timed out") from None
 
     if proc.returncode != 0:
         logger.error("Vibe CLI exited with code %d\nstderr: %s", proc.returncode, stderr_str[:2000])

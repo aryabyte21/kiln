@@ -23,14 +23,13 @@ from typing import Any
 
 import requests
 import yaml
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from dotenv import load_dotenv
-
-from .planner import KilnPlanner
 from .graph_flow import KilnGraphFlow
+from .planner import KilnPlanner
 
 load_dotenv()
 
@@ -330,7 +329,7 @@ async def kiln_start(body: dict):
         raise HTTPException(
             status_code=503,
             detail=f"Could not fetch tools from Kiln registry at {REGISTRY_URL}: {exc}",
-        )
+        ) from exc
 
     planner = KilnPlanner(registry_url=REGISTRY_URL, api_key=api_key)
     graph   = planner.plan(user_request, tools=tools_list)

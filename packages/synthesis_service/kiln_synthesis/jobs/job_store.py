@@ -8,10 +8,11 @@ In-memory job state tracker + per-job event queues for SSE streaming
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kiln_synthesis.models import JobInfo, JobStatus
@@ -31,7 +32,7 @@ class JobStore:
         self._log_dir = log_dir
 
     def create(self, job_id: str, tool_name: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with self._lock:
             self._jobs[job_id] = JobInfo(
                 job_id=job_id,
@@ -45,7 +46,7 @@ class JobStore:
             # Open log file
             log_path = Path(self._log_dir) / job_id
             log_path.mkdir(parents=True, exist_ok=True)
-            self._log_files[job_id] = open(log_path / "logs.log", "a", encoding="utf-8")
+            self._log_files[job_id] = open(log_path / "logs.log", "a", encoding="utf-8")  # noqa: SIM115
 
     def update(self, job_id: str, **kwargs) -> None:
         with self._lock:
@@ -54,7 +55,7 @@ class JobStore:
                 return
             for k, v in kwargs.items():
                 setattr(job, k, v)
-            job.updated_at = datetime.now(timezone.utc)
+            job.updated_at = datetime.now(UTC)
 
     def get(self, job_id: str) -> JobInfo | None:
         with self._lock:
@@ -77,14 +78,12 @@ class JobStore:
             log_file = self._log_files.get(job_id)
 
         if q is not None:
-            try:
+            with contextlib.suppress(asyncio.QueueFull):
                 q.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
 
         # Write to log file
         if log_file is not None and event is not None:
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             event_type = event.get("type", "unknown")
             if event_type == "pipeline":
                 stage = event.get("stage", "")
@@ -108,10 +107,8 @@ class JobStore:
         with self._lock:
             log_file = self._log_files.pop(job_id, None)
         if log_file is not None:
-            try:
+            with contextlib.suppress(ValueError, OSError):
                 log_file.close()
-            except (ValueError, OSError):
-                pass
 
 
 # Singleton
