@@ -41,3 +41,5 @@ packages/synthesis_service/logs/
 # Build artifacts
 *.whl
 *.tar.gz
+.next/
+packages/registry_ui/.next/
