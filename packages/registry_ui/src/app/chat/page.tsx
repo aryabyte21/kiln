@@ -1,7 +1,8 @@
 "use client"
 
-import { useRef, useEffect } from "react"
+import { useRef, useEffect, useState } from "react"
 import { useChat } from "@ai-sdk/react"
+import { DefaultChatTransport } from "ai"
 import { Show, SignInButton } from "@clerk/nextjs"
 import {
   Flame,
@@ -54,8 +55,12 @@ export default function ChatPage() {
 }
 
 function KilnChat() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, append } =
-    useChat({ api: "/api/chat" })
+  const [input, setInput] = useState("")
+  const { messages, sendMessage, append, status } =
+    useChat({
+      transport: new DefaultChatTransport({ api: "/api/chat" }),
+    })
+  const isLoading = status === "streaming" || status === "submitted"
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -76,12 +81,16 @@ function KilnChat() {
     append({ role: "user", content: text })
   }
 
+  const handleSend = () => {
+    if (!input.trim() || isLoading) return
+    sendMessage({ text: input })
+    setInput("")
+  }
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      if (input.trim() && !isLoading) {
-        handleSubmit(e as unknown as React.FormEvent)
-      }
+      handleSend()
     }
   }
 
@@ -172,14 +181,14 @@ function KilnChat() {
       {/* Input bar */}
       <div className="shrink-0 border-t border-white/[0.06] bg-background/60 backdrop-blur-xl px-6 py-4">
         <form
-          onSubmit={handleSubmit}
+          onSubmit={(e) => { e.preventDefault(); handleSend() }}
           className="mx-auto flex max-w-3xl items-end gap-3"
         >
           <div className="relative flex-1">
             <textarea
               ref={inputRef}
               value={input}
-              onChange={handleInputChange}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder="Ask Kiln something..."
               rows={1}
