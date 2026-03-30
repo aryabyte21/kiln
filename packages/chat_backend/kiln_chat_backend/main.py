@@ -78,7 +78,8 @@ def health():
     }
 
 
-# ── Kiln run state ───────────────────────────────────────────────────────────
+# ── Kiln run state (thread-safe via lock) ─────────────────────────────────────
+_run_lock = threading.Lock()
 # run_id → Queue of event dicts; None sentinel = stream finished
 _run_queues: dict[str, Queue] = {}
 # run_id → planned task graph (stored between /kiln/start and /kiln/execute)

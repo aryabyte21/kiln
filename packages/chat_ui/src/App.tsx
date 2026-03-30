@@ -1059,19 +1059,24 @@ export default function App() {
   const [synthesisJobs, setSynthesisJobs] = useState<SynthesisJob[]>([])
   const [audioUrls, setAudioUrls]         = useState<string[]>([])
 
-  // Auth: get JWT token for authenticated requests
-  const { getToken, isSignedIn } = useAuth()
+  // Auth: safely get JWT token (works even without ClerkProvider)
+  const clerkAuth = (() => {
+    try { return useAuth() } catch { return null }
+  })()
+  const isSignedIn = clerkAuth?.isSignedIn ?? false
 
   const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
-    const token = await getToken()
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string> || {}),
     }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
+    try {
+      const token = clerkAuth ? await clerkAuth.getToken() : null
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+    } catch { /* Clerk not configured — proceed without auth */ }
     return fetch(url, { ...options, headers })
-  }, [getToken])
+  }, [clerkAuth])
 
   // Sync theme to <html> so body background also responds to light/dark
   useEffect(() => {

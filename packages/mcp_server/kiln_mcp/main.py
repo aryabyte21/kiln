@@ -131,26 +131,66 @@ def _build_mcp_tool_schema(tool_spec: dict) -> dict:
     }
 
 
-def _make_tool_handler(tool_id: str, tool_name: str):
-    """Create an async handler function for an MCP tool."""
-    async def handler(ctx: Context[ServerSession, None], **kwargs) -> str:
-        await ctx.info(f"Executing {tool_name} ({tool_id})")
-        try:
-            result = await _execute_tool(tool_id, kwargs)
-            if result.get("success"):
-                return json.dumps(result.get("result", {}), indent=2, default=str)
-            return json.dumps({"error": result.get("detail", "Unknown error")})
-        except httpx.HTTPStatusError as e:
-            error_detail = e.response.text
-            with contextlib.suppress(Exception):
-                error_detail = e.response.json().get("detail", error_detail)
-            return json.dumps({"error": str(error_detail)})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+def _make_tool_handler(tool_id: str, tool_spec: dict):
+    """
+    Create an async handler function with proper typed signature for FastMCP.
 
-    handler.__name__ = tool_name
-    handler.__doc__ = _registered_tools.get(tool_id, {}).get("description", "")
-    return handler
+    FastMCP introspects function signatures to generate JSON schema for MCP clients.
+    We use exec() to dynamically build a function with the exact parameter types
+    matching the Kiln tool spec — same pattern used in graph_flow.py.
+    """
+    name = tool_spec["name"]
+    description = tool_spec.get("description", "")
+    params = tool_spec.get("params", [])
+
+    _TYPE_MAP = {
+        "str": "str", "int": "int", "float": "float",
+        "bool": "bool", "list": "list", "dict": "dict",
+    }
+
+    # Build typed function signature: e.g. "location: str, units: str = 'celsius'"
+    sig_parts = []
+    for p in params:
+        t = _TYPE_MAP.get(p.get("type", "str"), "str")
+        if not p.get("required", True) and p.get("default") is not None:
+            sig_parts.append(f"{p['name']}: {t} = {repr(p['default'])}")
+        elif not p.get("required", True):
+            sig_parts.append(f"{p['name']}: {t} = None")
+        else:
+            sig_parts.append(f"{p['name']}: {t}")
+
+    sig_str = ", ".join(sig_parts)
+    kwargs_str = ", ".join(f'"{p["name"]}": {p["name"]}' for p in params)
+
+    tool_id_repr = repr(tool_id)
+    fn_source = f'''
+async def {name}({sig_str}) -> str:
+    """{description}"""
+    _args = {{{kwargs_str}}}
+    return await _execute({tool_id_repr}, _args)
+'''
+
+    namespace = {
+        "_execute": _execute_tool_safe,
+    }
+    exec(fn_source, namespace)  # noqa: S102
+    return namespace[name]
+
+
+async def _execute_tool_safe(tool_id: str, args: dict) -> str:
+    """Execute a tool and return JSON result string (safe — catches all errors)."""
+    try:
+        result = await _execute_tool(tool_id, args)
+        if result.get("success"):
+            return json.dumps(result.get("result", {}), indent=2, default=str)
+        return json.dumps({"error": result.get("detail", "Unknown error")})
+    except httpx.HTTPStatusError as e:
+        error_detail = e.response.text
+        with contextlib.suppress(Exception):
+            error_detail = e.response.json().get("detail", error_detail)
+        return json.dumps({"error": str(error_detail)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 async def sync_tools() -> int:
@@ -171,8 +211,8 @@ async def sync_tools() -> int:
         for tool in tools:
             tid = tool["id"]
             if tid not in current_ids:
-                handler = _make_tool_handler(tid, tool["name"])
-                handler.__doc__ = tool.get("description", "")
+                handler = _make_tool_handler(tid, tool)
+
 
                 # Register with FastMCP using the low-level API
                 mcp.tool(
