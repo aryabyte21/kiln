@@ -170,6 +170,8 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
             # Dynamically load the module to read REQUIRED_ENV_VARS
             try:
                 spec = importlib.util.spec_from_file_location("_tmp", impl_file)
+                if spec is None or spec.loader is None:
+                    continue
                 mod  = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
                 required = getattr(mod, "REQUIRED_ENV_VARS", [])
@@ -395,8 +397,10 @@ def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_k
     """Spawn the background thread that runs KilnGraphFlow and feeds the SSE queue."""
     import time
 
-    q              = _run_queues[run_id]
-    awaited_tools  = _run_awaited_tools.pop(run_id, [])
+    q = _run_queues.get(run_id)
+    if q is None:
+        raise ValueError(f"Run '{run_id}' has no event queue — was /kiln/start called first?")
+    awaited_tools = _run_awaited_tools.pop(run_id, [])
 
     def _run() -> None:
         try:
