@@ -32,11 +32,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import httpx
 import jsonschema
 import yaml
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+
+from kiln_shared.auth import KilnUser, invalidate_api_key_cache, require_auth, require_jwt_auth, verify_internal_secret
+from kiln_shared.config import get_config
 
 from .loader import KilnLoader
 from .registry import get_global_registry
@@ -192,6 +196,7 @@ def get_tool(tool_id: str):
 async def register_tool(
     spec_file: UploadFile = File(..., description="spec.yaml — validated against kiln.schema.json"),
     impl_file: UploadFile = File(..., description="Python implementation file, e.g. weather.py"),
+    _user: KilnUser = Depends(require_auth),
 ):
     """
     Register a new tool from a spec.yaml + implementation .py file.
@@ -278,7 +283,7 @@ async def register_tool(
 
 
 @app.post("/tools/{tool_id:path}/execute", summary="Execute a registered tool")
-def execute_tool(tool_id: str, body: dict):
+def execute_tool(tool_id: str, body: dict, _user: KilnUser = Depends(require_auth)):
     """
     Execute a registered tool with the provided arguments.
 
@@ -338,7 +343,7 @@ def test_tool(tool_id: str):
 
 
 @app.delete("/tools/{tool_id:path}", summary="Unregister a tool")
-def delete_tool(tool_id: str):
+def delete_tool(tool_id: str, _user: KilnUser = Depends(require_auth)):
     """
     Remove a tool from the in-memory registry.
     Does NOT delete files from disk (to allow re-registration).
@@ -354,6 +359,7 @@ def delete_tool(tool_id: str):
 
 @app.post("/synthesis/callback", summary="Receive synthesis result and auto-register tool")
 async def synthesis_callback(
+    request: Request,
     tool_id:  str        = Form(...,  description="Kiln tool ID, e.g. com.kiln.tools.weather"),
     spec:     UploadFile = File(...,  description="Generated spec.yaml"),
     impl:     UploadFile = File(...,  description="Generated impl.py"),
@@ -373,6 +379,8 @@ async def synthesis_callback(
     Returns:
         {"success": true,  "tool_id": "...", "version": "...", "fixtures": {...}}
     """
+    verify_internal_secret(request)
+
     spec_bytes = await spec.read()
     impl_bytes = await impl.read()
 
@@ -439,3 +447,105 @@ async def synthesis_callback(
             "failed": report["failed"],
         },
     }
+
+
+# ── Auth / API Key Management Endpoints ──────────────────────────────────────
+
+
+@app.post("/auth/api-key", summary="Generate an API key for the authenticated user")
+async def create_api_key(user: KilnUser = Depends(require_jwt_auth)):
+    """
+    Generate a new API key for CLI/MCP access. JWT auth required (no API key fallback).
+    If a key already exists, returns the existing key.
+    """
+    import secrets
+
+    config = get_config()
+    if not config.clerk_secret_key:
+        raise HTTPException(status_code=500, detail="CLERK_SECRET_KEY not configured")
+
+    # Check if user already has a key
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"https://api.clerk.com/v1/users/{user.user_id}",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+        )
+        resp.raise_for_status()
+        user_data = resp.json()
+
+    existing_key = user_data.get("private_metadata", {}).get("api_key", "")
+    if existing_key:
+        return {"api_key": existing_key, "message": "Existing key returned"}
+
+    # Generate new key
+    api_key = f"kiln_{user.user_id}_{secrets.token_hex(16)}"
+
+    # Store in Clerk user metadata
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.patch(
+            f"https://api.clerk.com/v1/users/{user.user_id}/metadata",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+            json={"private_metadata": {"api_key": api_key}},
+        )
+        resp.raise_for_status()
+
+    return {"api_key": api_key, "message": "API key created"}
+
+
+@app.get("/auth/api-key", summary="Get the current user's API key (masked)")
+async def get_api_key(user: KilnUser = Depends(require_jwt_auth)):
+    """Returns the user's API key with all but the last 4 characters masked."""
+    config = get_config()
+    if not config.clerk_secret_key:
+        raise HTTPException(status_code=500, detail="CLERK_SECRET_KEY not configured")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"https://api.clerk.com/v1/users/{user.user_id}",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+        )
+        resp.raise_for_status()
+        user_data = resp.json()
+
+    api_key = user_data.get("private_metadata", {}).get("api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=404, detail="No API key generated yet. Call POST /auth/api-key first.")
+
+    masked = "*" * (len(api_key) - 4) + api_key[-4:]
+    return {"api_key": masked}
+
+
+@app.post("/auth/api-key/regenerate", summary="Regenerate the user's API key")
+async def regenerate_api_key(user: KilnUser = Depends(require_jwt_auth)):
+    """Invalidates the old key and generates a new one."""
+    import secrets
+
+    config = get_config()
+    if not config.clerk_secret_key:
+        raise HTTPException(status_code=500, detail="CLERK_SECRET_KEY not configured")
+
+    # Get old key to invalidate cache
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"https://api.clerk.com/v1/users/{user.user_id}",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+        )
+        resp.raise_for_status()
+        user_data = resp.json()
+
+    old_key = user_data.get("private_metadata", {}).get("api_key", "")
+    if old_key:
+        invalidate_api_key_cache(old_key)
+
+    # Generate and store new key
+    api_key = f"kiln_{user.user_id}_{secrets.token_hex(16)}"
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.patch(
+            f"https://api.clerk.com/v1/users/{user.user_id}/metadata",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+            json={"private_metadata": {"api_key": api_key}},
+        )
+        resp.raise_for_status()
+
+    return {"api_key": api_key, "message": "API key regenerated"}

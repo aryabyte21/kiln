@@ -24,9 +24,11 @@ from typing import Any
 import requests
 import yaml
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+
+from kiln_shared.auth import KilnUser, require_auth
 
 from .graph_flow import KilnGraphFlow
 from .planner import KilnPlanner
@@ -295,7 +297,7 @@ def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[di
 # ── Kiln Endpoints ────────────────────────────────────────────────────────────
 
 @app.post("/kiln/start", summary="Plan a Kiln run; returns plan + any missing env vars")
-async def kiln_start(body: dict):
+async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
     """
     Phase 1 of a two-phase start: plan the task graph and check for missing
     environment variables (API keys) required by the planned tools.
@@ -365,7 +367,7 @@ async def kiln_start(body: dict):
 
 
 @app.post("/kiln/execute/{run_id}", summary="Start execution after supplying missing env vars")
-async def kiln_execute(run_id: str, body: dict):
+async def kiln_execute(run_id: str, body: dict, _user: KilnUser = Depends(require_auth)):
     """
     Phase 2 of a two-phase start: supply the missing environment variables
     and begin executing the already-planned task graph.
