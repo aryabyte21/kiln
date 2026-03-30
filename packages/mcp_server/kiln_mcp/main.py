@@ -261,8 +261,7 @@ def load_tools_on_startup() -> int:
     for tool in tools:
         tid = tool["id"]
         if tid not in _registered_tools:
-            handler = _make_tool_handler(tid, tool["name"])
-            handler.__doc__ = tool.get("description", "")
+            handler = _make_tool_handler(tid, tool)
 
             mcp.tool(
                 name=tool["name"],
@@ -298,6 +297,22 @@ async def kiln_search_tools(query: str, ctx: Context[ServerSession, None]) -> st
             return "\n".join(result)
     except Exception as e:
         return f"Search failed: {e}"
+
+
+@mcp.tool()
+async def kiln_refresh_tools(ctx: Context[ServerSession, None]) -> str:
+    """Refresh the tool catalog from the Kiln registry. Call this after publishing new tools."""
+    await ctx.info("Refreshing tools from registry...")
+    added = await sync_tools()
+    if added > 0:
+        # Notify the MCP client that the tool list has changed
+        try:
+            await ctx.session.send_tool_list_changed()
+            await ctx.info(f"Added {added} new tools and notified client")
+        except Exception:
+            await ctx.info(f"Added {added} new tools (notification not supported by client)")
+    total = len(_registered_tools)
+    return f"Refreshed. {added} new tools added. Total: {total} tools available."
 
 
 @mcp.tool()
