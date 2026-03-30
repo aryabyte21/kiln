@@ -11,7 +11,8 @@ import {
 import { FullScreen } from '@openuidev/react-ui'
 import { EventType } from '@openuidev/react-headless'
 import type { AssistantMessage, Message } from '@openuidev/react-headless'
-import '@openuidev/react-ui/defaults.css'
+import '@openuidev/react-ui/dist/styles/openui-defaults.css'
+import '@openuidev/react-ui/dist/styles/index.css'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
