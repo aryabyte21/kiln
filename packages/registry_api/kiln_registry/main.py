@@ -71,10 +71,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Startup: hydrate registry from disk ───────────────────────────────────────
+# ── Startup ───────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def _startup() -> None:
+    from kiln_shared.logging_config import setup_logging
+    setup_logging()
+
     """Initialize database and load all tools from disk into the registry."""
     import json as _json
 
