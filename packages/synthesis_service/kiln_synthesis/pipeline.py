@@ -39,9 +39,6 @@ def _extract_env_vars(impl_path: Path) -> list[dict[str, str]]:
     namespace: dict = {}
     try:
         compiled = compile(code, str(impl_path), "exec")
-        __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
-        getattr(__builtins__ if isinstance(__builtins__, dict) else type(__builtins__), '__getitem__', None)
-        # Use the exec builtin to run the compiled code in a sandboxed namespace
         _run_code(compiled, namespace)
         env_vars = namespace.get("REQUIRED_ENV_VARS")
         if isinstance(env_vars, list):
@@ -137,8 +134,8 @@ async def run_synthesis_pipeline(job_id: str, request: SynthesizeRequest) -> Non
         _emit(job_id, "done", status="succeeded", tool_id=tool_id)
         logger.info("Synthesis completed for job %s -> %s", job_id, tool_id)
 
-    except (VibeError, FileNotFoundError, Exception) as exc:
-        error_msg = str(exc) if not isinstance(exc, Exception) or isinstance(exc, (VibeError, FileNotFoundError)) else f"Unexpected error: {exc}"
+    except Exception as exc:
+        error_msg = str(exc) if isinstance(exc, (VibeError, FileNotFoundError)) else f"Unexpected error: {type(exc).__name__}: {exc}"
         logger.error("Synthesis failed for job %s: %s", job_id, error_msg)
         job_store.update(job_id, status=JobStatus.FAILED, error=error_msg)
         _emit(job_id, "error", message=error_msg)
