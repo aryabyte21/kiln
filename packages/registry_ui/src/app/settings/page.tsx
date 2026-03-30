@@ -277,20 +277,23 @@ function SettingsContent() {
 
       <Separator />
 
-      {/* Clerk profile */}
+      {/* Clerk profile — embedded */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <ShieldCheck className="size-4 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Account</h2>
         </div>
-        <div className="overflow-hidden rounded-xl [&_.cl-rootBox]:w-full [&_.cl-card]:shadow-none [&_.cl-card]:ring-1 [&_.cl-card]:ring-foreground/10">
+        <div className="overflow-hidden rounded-xl w-full">
           <UserProfile
             routing="hash"
             appearance={{
               baseTheme: dark,
+              layout: {
+                shimmer: false,
+              },
               elements: {
-                rootBox: "w-full",
-                card: "shadow-none w-full",
+                rootBox: "w-full max-w-none",
+                card: "w-full max-w-none shadow-none",
               },
             }}
           />
