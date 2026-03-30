@@ -342,6 +342,19 @@ async def register_tool(
         loader_reg = KilnLoader(auto_register=True)
         tool = loader_reg.load(str(dest_dir))
 
+    # Sync to async database for search
+    import json as _json
+
+    from .db import db_upsert_tool
+    s = tool.spec
+    await db_upsert_tool(
+        tool_id=s.id, name=s.name,
+        spec_json=_json.dumps(_tool_to_dict(tool)),
+        description=s.description, version=s.version,
+        author=s.author, category=s.category,
+        tags_json=_json.dumps(s.tags),
+    )
+
     return JSONResponse(
         status_code=200,
         content={
@@ -510,6 +523,19 @@ async def synthesis_callback(
 
         loader_reg = KilnLoader(auto_register=True)
         tool = loader_reg.load(str(dest_dir))
+
+    # Sync to async database for search
+    import json as _json
+
+    from .db import db_upsert_tool as _db_upsert
+    s = tool.spec
+    await _db_upsert(
+        tool_id=s.id, name=s.name,
+        spec_json=_json.dumps(_tool_to_dict(tool)),
+        description=s.description, version=s.version,
+        author=s.author, category=s.category,
+        tags_json=_json.dumps(s.tags),
+    )
 
     logger.info(f"registered tool {resolved_tool_id} v{version}")
     return {

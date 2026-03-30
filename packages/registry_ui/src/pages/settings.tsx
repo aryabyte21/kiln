@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react"
-import { SignedIn, SignedOut, SignIn, UserProfile } from "@clerk/clerk-react"
+import { SignedIn, SignedOut, SignIn, UserProfile, useUser } from "@clerk/clerk-react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Key,
@@ -8,7 +8,9 @@ import {
   RefreshCw,
   Shield,
   Terminal,
-} from "lucide-react"
+  Settings2,
+  Zap,
+  ChevronRight } from "lucide-react"
 
 import { useApiKey } from "@/hooks/use-api-key"
 import {
@@ -16,26 +18,24 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardContent,
-} from "@/components/ui/card"
+  CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
+  DialogFooter } from "@/components/ui/dialog"
 
 const fadeUp = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -8 },
-  transition: { duration: 0.3 },
-}
+  transition: { duration: 0.3 } }
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -76,23 +76,148 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function CodeBlock({ code, label }: { code: string; label?: string }) {
+  // Tokenize code for simple syntax highlighting
+  function highlightCode(source: string) {
+    // Split into lines for rendering
+    return source.split("\n").map((line, lineIdx) => {
+      // Tokenize each line
+      const tokens: { text: string; className: string }[] = []
+      let remaining = line
+
+      while (remaining.length > 0) {
+        // Comments (# or //)
+        const commentMatch = remaining.match(/^(#.*)/) || remaining.match(/^(\/\/.*)/)
+        if (commentMatch) {
+          tokens.push({ text: commentMatch[1], className: "text-emerald-600 dark:text-emerald-400" })
+          remaining = remaining.slice(commentMatch[1].length)
+          continue
+        }
+
+        // Strings (double-quoted)
+        const stringMatch = remaining.match(/^("(?:[^"\\]|\\.)*")/)
+        if (stringMatch) {
+          tokens.push({ text: stringMatch[1], className: "text-amber-600 dark:text-amber-400" })
+          remaining = remaining.slice(stringMatch[1].length)
+          continue
+        }
+
+        // URLs
+        const urlMatch = remaining.match(/^(https?:\/\/[^\s"']+)/)
+        if (urlMatch) {
+          tokens.push({ text: urlMatch[1], className: "text-sky-600 dark:text-sky-400 underline decoration-sky-600/30 dark:decoration-sky-400/30" })
+          remaining = remaining.slice(urlMatch[1].length)
+          continue
+        }
+
+        // Keywords / flags
+        const flagMatch = remaining.match(/^(-H|--\w[\w-]*)/)
+        if (flagMatch) {
+          tokens.push({ text: flagMatch[1], className: "text-violet-600 dark:text-violet-400" })
+          remaining = remaining.slice(flagMatch[1].length)
+          continue
+        }
+
+        // JSON keys (word followed by colon)
+        const keyMatch = remaining.match(/^("[\w-]+")\s*(:)/)
+        if (keyMatch) {
+          tokens.push({ text: keyMatch[1], className: "text-sky-600 dark:text-sky-400" })
+          tokens.push({ text: keyMatch[2], className: "text-muted-foreground" })
+          remaining = remaining.slice(keyMatch[0].length)
+          continue
+        }
+
+        // Braces / brackets
+        const braceMatch = remaining.match(/^([{}[\]])/)
+        if (braceMatch) {
+          tokens.push({ text: braceMatch[1], className: "text-muted-foreground/80" })
+          remaining = remaining.slice(1)
+          continue
+        }
+
+        // Command names (curl, etc.)
+        const cmdMatch = remaining.match(/^(curl|wget|npm|npx|pnpm|yarn|node)\b/)
+        if (cmdMatch) {
+          tokens.push({ text: cmdMatch[1], className: "text-pink-600 dark:text-pink-400 font-semibold" })
+          remaining = remaining.slice(cmdMatch[1].length)
+          continue
+        }
+
+        // Default: consume one character
+        tokens.push({ text: remaining[0], className: "text-foreground" })
+        remaining = remaining.slice(1)
+      }
+
+      return (
+        <span key={lineIdx}>
+          {lineIdx > 0 && "\n"}
+          {tokens.map((token, i) => (
+            <span key={i} className={token.className}>
+              {token.text}
+            </span>
+          ))}
+        </span>
+      )
+    })
+  }
+
   return (
-    <div className="relative rounded-lg border border-border bg-muted/40 dark:bg-muted/20">
+    <div className="relative overflow-hidden rounded-xl ring-1 ring-foreground/[0.06] transition-all duration-200 hover:ring-foreground/[0.1]">
       {label && (
-        <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-          <span className="text-xs font-medium text-muted-foreground">
-            {label}
-          </span>
+        <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-4 py-2 dark:bg-muted/15">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5">
+              <span className="size-2.5 rounded-full bg-foreground/10" />
+              <span className="size-2.5 rounded-full bg-foreground/10" />
+              <span className="size-2.5 rounded-full bg-foreground/10" />
+            </div>
+            <span className="text-xs font-medium text-muted-foreground">
+              {label}
+            </span>
+          </div>
           <CopyButton text={code} />
         </div>
       )}
-      <div className="flex items-start gap-2 p-3">
-        <pre className="flex-1 overflow-x-auto text-xs leading-relaxed">
-          <code className="font-mono text-foreground">{code}</code>
+      <div className="flex items-start gap-2 bg-muted/15 p-4 dark:bg-muted/10">
+        <pre className="flex-1 overflow-x-auto text-[13px] leading-relaxed">
+          <code className="font-mono">{highlightCode(code)}</code>
         </pre>
         {!label && <CopyButton text={code} />}
       </div>
     </div>
+  )
+}
+
+function SettingsHeader() {
+  const { user } = useUser()
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/5 via-primary/[0.02] to-transparent p-6 ring-1 ring-foreground/[0.06] dark:from-primary/10 dark:via-primary/5"
+    >
+      <div className="absolute -right-12 -top-12 size-40 rounded-full bg-primary/5 blur-3xl dark:bg-primary/10" />
+      <div className="relative flex items-center gap-4">
+        <Avatar className="size-14 ring-2 ring-background shadow-lg">
+          <AvatarImage src={user?.imageUrl} alt={user?.fullName || "User"} />
+          <AvatarFallback className="bg-primary/10 text-lg font-semibold text-primary">
+            {user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || "U"}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <Settings2 className="size-6 text-primary/70" />
+            Settings
+          </h1>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">
+            {user?.fullName
+              ? `Welcome, ${user.fullName}`
+              : "Manage your API key and account preferences"}
+          </p>
+        </div>
+      </div>
+    </motion.div>
   )
 }
 
@@ -117,11 +242,11 @@ function ApiKeySection() {
 
   return (
     <motion.div {...fadeUp}>
-      <Card>
+      <Card className="border-0 shadow-sm ring-1 ring-foreground/[0.06] transition-shadow duration-300 hover:shadow-md">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
-              <Key className="size-4 text-primary" />
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-amber-500/10 ring-1 ring-amber-500/20 dark:bg-amber-500/15">
+              <Key className="size-4 text-amber-600 dark:text-amber-400" />
             </div>
             <div className="flex-1">
               <CardTitle>API Key</CardTitle>
@@ -130,8 +255,11 @@ function ApiKeySection() {
               </CardDescription>
             </div>
             {hasKey && (
-              <Badge variant="outline" className="gap-1">
-                <Shield className="size-3" />
+              <Badge variant="outline" className="gap-1.5 border-emerald-500/30 text-emerald-600 dark:border-emerald-500/20 dark:text-emerald-400">
+                <span className="relative flex size-1.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                </span>
                 Active
               </Badge>
             )}
@@ -141,10 +269,10 @@ function ApiKeySection() {
         <CardContent className="space-y-4">
           {/* Current key display */}
           {query.isLoading ? (
-            <div className="h-8 animate-pulse rounded-lg bg-muted" />
+            <div className="h-10 animate-pulse rounded-xl bg-muted/50" />
           ) : hasKey ? (
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 dark:bg-muted/20">
-              <code className="flex-1 font-mono text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-xl bg-muted/30 px-4 py-2.5 ring-1 ring-foreground/[0.06] dark:bg-muted/15">
+              <code className="flex-1 font-mono text-sm tracking-wide text-muted-foreground">
                 {maskedKey}
               </code>
               <Button
@@ -152,6 +280,7 @@ function ApiKeySection() {
                 size="sm"
                 onClick={() => setConfirmOpen(true)}
                 disabled={regenerate.isPending}
+                className="gap-1.5"
               >
                 {regenerate.isPending ? (
                   <RefreshCw className="size-3.5 animate-spin" />
@@ -162,22 +291,26 @@ function ApiKeySection() {
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-6 text-center">
-              <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-                <Key className="size-5 text-muted-foreground" />
+            <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-border/80 py-8 text-center">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/[0.06]">
+                <Key className="size-6 text-muted-foreground/60" />
               </div>
-              <p className="text-sm text-muted-foreground">
-                No API key generated
-              </p>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">No API key generated</p>
+                <p className="text-xs text-muted-foreground">
+                  Generate a key to start using the registry API
+                </p>
+              </div>
               <Button
                 onClick={handleCreate}
                 disabled={create.isPending}
                 size="sm"
+                className="gap-1.5"
               >
                 {create.isPending ? (
                   <RefreshCw className="size-3.5 animate-spin" />
                 ) : (
-                  <Key className="size-3.5" />
+                  <Zap className="size-3.5" />
                 )}
                 Generate API Key
               </Button>
@@ -191,33 +324,37 @@ function ApiKeySection() {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.25 }}
+                transition={{ duration: 0.3 }}
                 className="overflow-hidden"
               >
-                <div className="space-y-3 rounded-lg border border-green-500/30 bg-green-500/5 p-4 dark:border-green-500/20 dark:bg-green-500/5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400">
-                    <Check className="size-4" />
+                <div className="space-y-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5 dark:border-emerald-500/15 dark:bg-emerald-500/[0.07]">
+                  <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                    <div className="flex size-6 items-center justify-center rounded-full bg-emerald-500/15">
+                      <Check className="size-3.5" />
+                    </div>
                     API key generated successfully
                   </div>
-                  <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
+                  <div className="flex items-center gap-2 rounded-lg bg-background px-4 py-2.5 ring-1 ring-foreground/[0.06]">
                     <code className="flex-1 break-all font-mono text-sm">
                       {newKey}
                     </code>
                     <CopyButton text={newKey} />
                   </div>
-                  <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+                  <div className="flex items-start gap-2.5 rounded-lg bg-amber-500/5 px-3 py-2.5 text-xs text-amber-700 ring-1 ring-amber-500/10 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/15">
                     <Shield className="mt-0.5 size-3.5 shrink-0" />
-                    Store this key securely. You won't be able to see it again.
+                    <span>Store this key securely. You won't be able to see it again.</span>
                   </div>
 
-                  <Separator />
+                  <Separator className="bg-emerald-500/10" />
 
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-medium text-muted-foreground">
+                  <div className="space-y-2">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <ChevronRight className="size-3" />
                       Usage example
                     </p>
                     <CodeBlock
                       code={`curl -H "X-API-Key: ${newKey}" https://your-registry.example.com/tools`}
+                      label="Terminal"
                     />
                   </div>
                 </div>
@@ -229,8 +366,9 @@ function ApiKeySection() {
           {(create.isError || regenerate.isError) && (
             <motion.p
               {...fadeUp}
-              className="text-sm text-destructive"
+              className="flex items-center gap-2 rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive ring-1 ring-destructive/10"
             >
+              <Shield className="size-3.5 shrink-0" />
               {create.error?.message || regenerate.error?.message}
             </motion.p>
           )}
@@ -291,11 +429,11 @@ curl -H "X-API-Key: your-api-key" \\
 
   return (
     <motion.div {...fadeUp} transition={{ ...fadeUp.transition, delay: 0.1 }}>
-      <Card>
+      <Card className="border-0 shadow-sm ring-1 ring-foreground/[0.06] transition-shadow duration-300 hover:shadow-md">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
-              <Terminal className="size-4 text-primary" />
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-violet-500/10 ring-1 ring-violet-500/20 dark:bg-violet-500/15">
+              <Terminal className="size-4 text-violet-600 dark:text-violet-400" />
             </div>
             <div>
               <CardTitle>Quick Start</CardTitle>
@@ -306,9 +444,9 @@ curl -H "X-API-Key: your-api-key" \\
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <h4 className="flex items-center gap-1.5 text-sm font-medium">
+        <CardContent className="space-y-5">
+          <div className="space-y-3">
+            <h4 className="flex items-center gap-2 text-sm font-medium">
               <Badge variant="secondary" className="font-mono text-[10px]">
                 HTTP
               </Badge>
@@ -317,17 +455,17 @@ curl -H "X-API-Key: your-api-key" \\
             <CodeBlock code={httpExample} label="Terminal" />
           </div>
 
-          <Separator />
+          <Separator className="bg-border/50" />
 
-          <div className="space-y-2">
-            <h4 className="flex items-center gap-1.5 text-sm font-medium">
+          <div className="space-y-3">
+            <h4 className="flex items-center gap-2 text-sm font-medium">
               <Badge variant="secondary" className="font-mono text-[10px]">
                 MCP
               </Badge>
               Client Configuration
             </h4>
             <CodeBlock code={mcpExample} label="mcp.json" />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Add this to your MCP client configuration file to connect to the
               registry.
             </p>
@@ -356,13 +494,8 @@ export default function SettingsPage() {
           transition={{ duration: 0.3 }}
           className="space-y-8"
         >
-          {/* Page header */}
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-            <p className="text-sm text-muted-foreground">
-              Manage your API key and account preferences
-            </p>
-          </div>
+          {/* Page header with avatar */}
+          <SettingsHeader />
 
           {/* API Key management */}
           <ApiKeySection />
@@ -371,7 +504,7 @@ export default function SettingsPage() {
           <QuickStartSection />
 
           {/* Account profile */}
-          <Separator />
+          <Separator className="bg-border/50" />
 
           <motion.div
             {...fadeUp}
