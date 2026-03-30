@@ -71,12 +71,36 @@ app.add_middleware(
 # ── Startup: hydrate registry from disk ───────────────────────────────────────
 
 @app.on_event("startup")
-def _startup() -> None:
-    """Load all tools from registry/tools/ into the in-process registry."""
+async def _startup() -> None:
+    """Initialize database and load all tools from disk into the registry."""
+    import json as _json
+
+    from .db import db_upsert_tool, init_db
+
+    # Initialize async database (creates tables if needed)
+    await init_db()
+    print("[KilnRegistryAPI] Database initialized")
+
+    # Load all tools from disk into the in-process registry
     if REGISTRY_DIR.exists():
         loader = KilnLoader(auto_register=True)
         tools  = loader.load_all(str(REGISTRY_DIR))
         print(f"[KilnRegistryAPI] Loaded {len(tools)} tools from {REGISTRY_DIR}")
+
+        # Sync tool metadata to async database
+        for tool in tools:
+            s = tool.spec
+            await db_upsert_tool(
+                tool_id=s.id,
+                name=s.name,
+                spec_json=_json.dumps(_tool_to_dict(tool)),
+                description=s.description,
+                version=s.version,
+                author=s.author,
+                category=s.category,
+                tags_json=_json.dumps(s.tags),
+            )
+        print(f"[KilnRegistryAPI] Synced {len(tools)} tools to database")
     else:
         print(f"[KilnRegistryAPI] Registry dir not found: {REGISTRY_DIR} — starting empty")
 
@@ -180,6 +204,25 @@ def list_tools():
         {**_tool_to_dict(t), "tool_def": _tool_def(t)}
         for t in registry.list()
     ]
+
+
+@app.get("/tools/search", summary="Search tools by query string")
+async def search_tools(q: str = ""):
+    """Full-text search across tool names, descriptions, tags, and IDs."""
+    if not q.strip():
+        return []
+
+    from .db import db_search_tools
+
+    results = await db_search_tools(q.strip())
+    # Match results against in-memory registry to get callables
+    registry = get_global_registry()
+    matched = []
+    for row in results:
+        tool = registry.get(row.id)
+        if tool:
+            matched.append({**_tool_to_dict(tool), "tool_def": _tool_def(tool)})
+    return matched
 
 
 @app.get("/tools/{tool_id:path}", summary="Get a single tool by ID")
