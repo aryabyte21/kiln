@@ -178,7 +178,7 @@ def _tool_def(tool) -> dict:
 @app.get("/health", summary="Server health + tool count")
 def health():
     registry = get_global_registry()
-    return {"status": "ok", "tool_count": len(registry)}
+    return {"status": "ok", "service": "kiln-registry-api", "tool_count": len(registry)}
 
 
 @app.get("/audio", summary="Serve a generated audio file by absolute path")

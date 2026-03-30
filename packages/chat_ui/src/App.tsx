@@ -1078,6 +1078,13 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
   }, [dark])
 
+  // Cleanup EventSource on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      srcRef.current?.close()
+    }
+  }, [])
+
   const isRunning = state.phase === 'planning' || state.phase === 'running'
   const isActive  = state.phase !== 'idle'
 

@@ -1,15 +1,43 @@
-venv/
-.env
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
 .venv/
+venv/
+
+# Node
 node_modules/
 dist/
-*.egg-info/
-.nx/
-uv.lock
-babel_registry.db
-kiln_registry.db
-*.db
-kiln_async.db
 .vite/
+
+# Nx
+.nx/
+
+# uv
+uv.lock
+
+# Database
+*.db
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+packages/synthesis_service/logs/
+
+# Build artifacts
+*.whl
+*.tar.gz
