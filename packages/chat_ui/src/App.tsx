@@ -1,7 +1,21 @@
 import { SignedIn, SignedOut, SignIn, UserButton, useAuth } from '@clerk/clerk-react'
 import { useReducer, useRef, useEffect, useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import './App.css'
+import {
+  Sun, Moon, Play, RotateCcw, Search, RefreshCw, ChevronRight,
+  CheckCircle2, Loader2, AlertTriangle, Zap, Brain,
+  Wrench, Package, Bot, ArrowRight, Hash, Code2, BookOpen,
+  Info,
+} from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,7 +121,7 @@ function inlineMd(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code class="inline-code">$1</code>')
+    .replace(/`(.+?)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300 dark:text-blue-300">$1</code>')
 }
 
 function Markdown({ text }: { text: string }): ReactNode {
@@ -141,9 +155,9 @@ function Markdown({ text }: { text: string }): ReactNode {
     const isOrdered = /^\s*\d+\.\s/.test(lines[startIdx])
     const Tag = isOrdered ? 'ol' : 'ul'
     return [
-      <Tag key={`list-${startIdx}`}>
+      <Tag key={`list-${startIdx}`} className={isOrdered ? 'list-decimal pl-5 mb-2.5' : 'list-disc pl-5 mb-2.5'}>
         {items.map((it, j) => (
-          <li key={j}>
+          <li key={j} className="mb-1">
             <span dangerouslySetInnerHTML={{ __html: it.html }} />
             {it.children}
           </li>
@@ -159,7 +173,15 @@ function Markdown({ text }: { text: string }): ReactNode {
     const hMatch = line.match(/^(#{1,6})\s+(.+)$/)
     if (hMatch) {
       const html = inlineMd(hMatch[2])
-      const cls = `md-h${hMatch[1].length}`
+      const headingClasses: Record<number, string> = {
+        1: 'text-xl font-bold text-foreground mt-3.5 mb-1.5 first:mt-0',
+        2: 'text-lg font-bold text-foreground mt-3.5 mb-1.5 first:mt-0',
+        3: 'text-base font-bold text-foreground mt-3.5 mb-1.5 first:mt-0',
+        4: 'text-sm font-bold text-foreground mt-3.5 mb-1.5 first:mt-0',
+        5: 'text-[13px] font-bold text-foreground mt-3.5 mb-1.5 first:mt-0',
+        6: 'text-xs font-bold text-muted-foreground mt-3.5 mb-1.5 first:mt-0',
+      }
+      const cls = headingClasses[hMatch[1].length] || headingClasses[6]
       switch (hMatch[1].length) {
         case 1: out.push(<h1 key={i} className={cls} dangerouslySetInnerHTML={{ __html: html }} />); break
         case 2: out.push(<h2 key={i} className={cls} dangerouslySetInnerHTML={{ __html: html }} />); break
@@ -172,7 +194,7 @@ function Markdown({ text }: { text: string }): ReactNode {
     }
     // horizontal rule
     if (/^(-{3,}|_{3,}|\*{3,})\s*$/.test(line.trim())) {
-      out.push(<hr key={i} className="md-hr" />)
+      out.push(<hr key={i} className="border-t border-border my-3" />)
       i++; continue
     }
     // lists (unordered & ordered, with nesting)
@@ -184,7 +206,7 @@ function Markdown({ text }: { text: string }): ReactNode {
     // blank line
     if (line.trim() === '') { i++; continue }
     // paragraph
-    out.push(<p key={i} dangerouslySetInnerHTML={{ __html: inlineMd(line) }} />)
+    out.push(<p key={i} className="mb-2.5 last:mb-0" dangerouslySetInnerHTML={{ __html: inlineMd(line) }} />)
     i++
   }
   return <>{out}</>
@@ -193,39 +215,90 @@ function Markdown({ text }: { text: string }): ReactNode {
 // ── NodeCard ───────────────────────────────────────────────────────────────────
 
 function NodeCard({ node, isExit }: { node: NodeState; isExit: boolean }) {
+  const statusBorderClass = {
+    pending: 'ring-border',
+    running: 'ring-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.18),0_4px_24px_rgba(59,130,246,0.08)]',
+    complete: 'ring-emerald-500/40',
+  }[node.status]
+
+  const indicatorBg = {
+    pending: 'bg-muted',
+    running: 'bg-blue-500/20 text-blue-500',
+    complete: 'bg-emerald-500/15 text-emerald-500',
+  }[node.status]
+
+  const pillVariant = {
+    pending: 'bg-muted text-muted-foreground',
+    running: 'bg-blue-500/20 text-blue-500',
+    complete: 'bg-emerald-500/15 text-emerald-500',
+  }[node.status]
+
   return (
-    <div className={`gnode gnode-${node.status}${isExit ? ' gnode-exit' : ''}`}>
-      <div className="gnode-header">
-        <div className={`gnode-indicator gnode-indicator-${node.status}`}>
-          {node.status === 'running' && <><span className="gnode-ring" /><span className="gnode-spinner" /></>}
-          {node.status === 'complete' && <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.5L4 7.5L8 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-          {node.status === 'pending' && <span className="gnode-dot" />}
-        </div>
-        <span className="gnode-role">{node.role}</span>
-        {isExit && <span className="gnode-badge">SYNTHESIS</span>}
-        <span className={`gnode-status-pill gnode-pill-${node.status}`}>{node.status}</span>
-      </div>
-      <div className="gnode-id">{node.id}</div>
-      {node.tools.length > 0 && (
-        <div className="gnode-tools">
-          {node.tools.map(t => <span key={t} className="tool-chip">{t.split('.').pop()}</span>)}
-        </div>
+    <Card
+      size="sm"
+      className={cn(
+        'w-[260px] shrink-0 ring-1 transition-all duration-300',
+        statusBorderClass,
+        isExit && 'border-dashed'
       )}
-      {node.toolCalls.length > 0 && (
-        <div className="gnode-calls">
-          {node.toolCalls.map((c, i) => (
-            <div key={i} className="gnode-call-row">
-              <span className="gnode-call-arrow">›</span>
-              <span className="gnode-call-name">{c.tool}</span>
-              {c.result !== undefined && <span className="gnode-call-done">✓</span>}
-            </div>
-          ))}
+    >
+      <CardHeader className="gap-0 pb-0">
+        <div className="flex items-center gap-2">
+          {/* Status indicator circle */}
+          <div className={cn('relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full', indicatorBg)}>
+            {node.status === 'running' && (
+              <>
+                <span className="absolute inset-[-4px] animate-ping rounded-full border-[1.5px] border-blue-500 opacity-30" />
+                <Loader2 className="h-3 w-3 animate-spin" />
+              </>
+            )}
+            {node.status === 'complete' && (
+              <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.5L4 7.5L8 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            )}
+            {node.status === 'pending' && (
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+            )}
+          </div>
+          <span className="flex-1 truncate text-[13px] font-semibold text-foreground">{node.role}</span>
+          {isExit && (
+            <Badge variant="secondary" className="border border-purple-500/30 bg-purple-500/15 text-[10px] font-bold tracking-wide text-purple-400">
+              SYNTHESIS
+            </Badge>
+          )}
+          <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider', pillVariant)}>
+            {node.status}
+          </span>
         </div>
-      )}
-      {node.result && (
-        <div className="gnode-result">{node.result.replace(/\*\*/g, '').slice(0, 140)}{node.result.length > 140 ? '…' : ''}</div>
-      )}
-    </div>
+      </CardHeader>
+      <CardContent className="space-y-2.5 pt-0">
+        <div className="font-mono text-[11px] text-muted-foreground">{node.id}</div>
+        {node.tools.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {node.tools.map(t => (
+              <span key={t} className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 font-mono text-[10px] text-blue-300">
+                {t.split('.').pop()}
+              </span>
+            ))}
+          </div>
+        )}
+        {node.toolCalls.length > 0 && (
+          <div className="space-y-0.5 rounded-md border border-border bg-background p-2">
+            {node.toolCalls.map((c, i) => (
+              <div key={i} className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+                <ChevronRight className="h-2.5 w-2.5 shrink-0 text-blue-500" />
+                <span className="flex-1 text-foreground/70">{c.tool}</span>
+                {c.result !== undefined && <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />}
+              </div>
+            ))}
+          </div>
+        )}
+        {node.result && (
+          <div className="border-t border-border pt-2 text-[11px] italic leading-relaxed text-emerald-300">
+            {node.result.replace(/\*\*/g, '').slice(0, 140)}{node.result.length > 140 ? '...' : ''}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -245,47 +318,57 @@ function GraphView({ state }: { state: AppState }) {
   const phase = state.phase === 'complete' ? 'complete'
     : runningCount > 0 ? 'running' : 'planning'
 
+  const phaseBadgeClass = {
+    planning: 'bg-amber-500/15 text-amber-500',
+    running:  'bg-blue-500/20 text-blue-500',
+    complete: 'bg-emerald-500/15 text-emerald-500',
+  }[phase]
+
   return (
-    <section className="graph-section">
-      <div className="graph-header">
-        <div className="section-label" style={{ marginBottom: 0 }}>Task Graph</div>
-        <div className="graph-header-pills">
-          <span className="graph-count-pill">{doneCount}/{totalCount} done</span>
+    <section className="flex flex-col">
+      <div className="mb-2.5 flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Task Graph</span>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[11px] font-semibold text-muted-foreground">
+            {doneCount}/{totalCount} done
+          </Badge>
           {runningCount > 0 && (
-            <span className="graph-running-pill">
-              <span className="gnode-spinner" style={{ width: 8, height: 8 }} />
+            <Badge variant="outline" className="flex items-center gap-1.5 border-blue-500/30 bg-blue-500/20 text-[11px] font-semibold text-blue-500">
+              <Loader2 className="h-2 w-2 animate-spin" />
               {runningCount} running
-            </span>
+            </Badge>
           )}
-          <span className={`graph-phase-badge graph-phase-${phase}`}>{phase}</span>
+          <span className={cn('rounded px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider', phaseBadgeClass)}>
+            {phase}
+          </span>
         </div>
       </div>
-      <div className="graph-canvas">
+      <div className="flex items-stretch overflow-x-auto py-1 pb-3">
         {entries.length > 0 && (
-          <div className="graph-workers">
+          <div className="flex shrink-0 flex-col gap-2.5">
             {entries.map(id => <NodeCard key={id} node={nodes[id]} isExit={false} />)}
           </div>
         )}
         {exit && (
           <>
-            <div className="graph-pipe">
-              <div className="graph-pipe-track">
-                <svg className="graph-pipe-top" width="24" height="20" viewBox="0 0 24 20" fill="none">
-                  <path d="M0 20C0 9 12 0 24 0" stroke="var(--border-lit)" strokeWidth="1.5" strokeDasharray="4 2"/>
+            <div className="flex shrink-0 items-center gap-0 px-1">
+              <div className="flex w-6 shrink-0 flex-col items-end justify-center">
+                <svg className="block shrink-0" width="24" height="20" viewBox="0 0 24 20" fill="none">
+                  <path d="M0 20C0 9 12 0 24 0" stroke="currentColor" className="text-border" strokeWidth="1.5" strokeDasharray="4 2"/>
                 </svg>
-                <div className="graph-pipe-mid" />
-                <svg className="graph-pipe-bot" width="24" height="20" viewBox="0 0 24 20" fill="none">
-                  <path d="M0 0C0 11 12 20 24 20" stroke="var(--border-lit)" strokeWidth="1.5" strokeDasharray="4 2"/>
+                <div className="min-h-3 w-[1.5px] flex-1 self-end bg-[repeating-linear-gradient(to_bottom,currentColor_0px,currentColor_4px,transparent_4px,transparent_6px)] text-border" />
+                <svg className="block shrink-0" width="24" height="20" viewBox="0 0 24 20" fill="none">
+                  <path d="M0 0C0 11 12 20 24 20" stroke="currentColor" className="text-border" strokeWidth="1.5" strokeDasharray="4 2"/>
                 </svg>
               </div>
-              <div className="graph-pipe-arrow">
+              <div className="flex shrink-0 items-center px-1.5">
                 <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                  <circle cx="14" cy="14" r="13" stroke="var(--border-lit)" strokeWidth="1"/>
-                  <path d="M11 9L17 14L11 19" stroke="var(--border-lit)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx="14" cy="14" r="13" stroke="currentColor" className="text-border" strokeWidth="1"/>
+                  <path d="M11 9L17 14L11 19" stroke="currentColor" className="text-border" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
             </div>
-            <div className="graph-exit-col">
+            <div className="flex shrink-0 items-center">
               <NodeCard node={exit} isExit />
             </div>
           </>
@@ -303,46 +386,83 @@ function EnvConfigPanel({ missing, values, onChange, onSubmit }: {
 }) {
   const allFilled = missing.every(ev => (values[ev.var_name] || '').trim() !== '')
   return (
-    <section className="env-config">
-      <div className="section-label">API Keys Required</div>
-      <p className="env-hint">These credentials are sent only to your local KilnServer and never stored.</p>
-      <div className="env-fields">
+    <Card className="border-blue-500/30">
+      <CardHeader>
+        <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          API Keys Required
+        </CardTitle>
+        <CardDescription className="text-[13px] leading-relaxed">
+          These credentials are sent only to your local KilnServer and never stored.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
         {missing.map(ev => (
-          <div key={ev.var_name} className="env-row">
-            <div className="env-meta">
-              <span className="env-var">{ev.var_name}</span>
-              <span className="env-tool">{ev.tool_id.split('.').pop()}</span>
+          <div key={ev.var_name} className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[13px] font-semibold text-blue-300">{ev.var_name}</span>
+              <Badge variant="secondary" className="border border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-500">
+                {ev.tool_id.split('.').pop()}
+              </Badge>
             </div>
-            <p className="env-desc">{ev.description}</p>
-            <input className="env-input" type="password" placeholder={`Enter ${ev.var_name}`}
-              value={values[ev.var_name] || ''} onChange={e => onChange(ev.var_name, e.target.value)} autoComplete="off" />
+            <p className="text-xs text-muted-foreground">{ev.description}</p>
+            <Input
+              type="password"
+              placeholder={`Enter ${ev.var_name}`}
+              value={values[ev.var_name] || ''}
+              onChange={e => onChange(ev.var_name, e.target.value)}
+              autoComplete="off"
+              className="h-10 bg-background font-mono text-[13px]"
+            />
           </div>
         ))}
-      </div>
-      <button className="btn-primary" onClick={onSubmit} disabled={!allFilled}>Continue →</button>
-    </section>
+        <Button onClick={onSubmit} disabled={!allFilled} size="lg" className="mt-2 gap-1.5">
+          Continue <ArrowRight className="h-4 w-4" />
+        </Button>
+      </CardContent>
+    </Card>
   )
 }
 
 // ── StreamLog ──────────────────────────────────────────────────────────────────
 
+const LOG_TAG_COLORS: Record<string, string> = {
+  plan: 'text-purple-400',
+  node_start: 'text-blue-400',
+  node_retry: 'text-amber-400',
+  tool_call: 'text-yellow-400',
+  tool_result: 'text-emerald-400',
+  node_complete: 'text-emerald-300',
+  flow_complete: 'text-purple-400',
+  error: 'text-destructive',
+}
+
 function StreamLog({ logs }: { logs: LogEntry[] }) {
   const endRef = useRef<HTMLDivElement>(null)
   if (logs.length === 0) return null
   return (
-    <section className="panel">
-      <div className="section-label">Execution Log</div>
-      <div className="log-scroll">
-        {logs.map(e => (
-          <div key={e.id} className={`log-entry log-${e.type}`}>
-            <span className="log-tag">{e.type}</span>
-            {e.node_id && <span className="log-node">[{e.node_id}]</span>}
-            <span className="log-text">{e.text}</span>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          Execution Log
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="max-h-[360px] rounded-lg border border-border bg-background p-3">
+          <div className="font-mono text-[11px] leading-[1.7]">
+            {logs.map(e => (
+              <div key={e.id} className="flex gap-2 py-px">
+                <span className={cn('w-24 shrink-0 font-semibold', LOG_TAG_COLORS[e.type] || 'text-muted-foreground')}>
+                  {e.type}
+                </span>
+                {e.node_id && <span className="max-w-[130px] shrink-0 truncate text-blue-400">[{e.node_id}]</span>}
+                <span className="break-all text-muted-foreground">{e.text}</span>
+              </div>
+            ))}
+            <div ref={endRef} />
           </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-    </section>
+        </ScrollArea>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -359,38 +479,46 @@ const EXAMPLES = [
 
 function IdleLanding({ onSelect }: { onSelect: (q: string) => void }) {
   return (
-    <div className="idle-landing">
-      <div className="idle-hero">
-        <div className="idle-icon">⚡</div>
-        <h1 className="idle-title">Ask Kiln anything</h1>
-        <p className="idle-sub">Kiln plans, fetches, synthesizes, and answers — building new tools on the fly when needed.</p>
+    <div className="flex min-h-[480px] flex-1 flex-col items-center justify-center gap-8 px-6 py-12">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <Zap className="mb-1 h-10 w-10 text-blue-400" />
+        <h1 className="bg-gradient-to-br from-blue-400 to-purple-400 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent">
+          Ask Kiln anything
+        </h1>
+        <p className="max-w-[520px] text-[15px] leading-relaxed text-muted-foreground">
+          Kiln plans, fetches, synthesizes, and answers — building new tools on the fly when needed.
+        </p>
       </div>
-      <div className="idle-pills-label">Try an example</div>
-      <div className="idle-examples">
+
+      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+        Try an example
+      </span>
+
+      <div className="grid w-full max-w-[780px] grid-cols-3 gap-2.5 max-sm:grid-cols-2">
         {EXAMPLES.map(ex => (
-          <button key={ex.label} className="idle-example" onClick={() => onSelect(ex.q)}>
-            <span className="idle-example-label">{ex.label}</span>
-            <span className="idle-example-q">{ex.q}</span>
+          <button
+            key={ex.label}
+            className="group flex cursor-pointer flex-col gap-1.5 rounded-lg border border-border bg-card p-3 text-left transition-all hover:-translate-y-0.5 hover:border-blue-500 hover:shadow-lg"
+            onClick={() => onSelect(ex.q)}
+          >
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500">{ex.label}</span>
+            <span className="text-xs leading-relaxed text-muted-foreground">{ex.q}</span>
           </button>
         ))}
       </div>
-      <div className="idle-features">
-        <div className="idle-feature">
-          <span className="idle-feature-icon">🧠</span>
-          <span className="idle-feature-text">Mistral Large planner</span>
-        </div>
-        <div className="idle-feature">
-          <span className="idle-feature-icon">🔧</span>
-          <span className="idle-feature-text">Live tool synthesis</span>
-        </div>
-        <div className="idle-feature">
-          <span className="idle-feature-icon">📦</span>
-          <span className="idle-feature-text">Kiln tool registry</span>
-        </div>
-        <div className="idle-feature">
-          <span className="idle-feature-icon">🤖</span>
-          <span className="idle-feature-text">AG2 multi-agent</span>
-        </div>
+
+      <div className="flex flex-wrap justify-center gap-6">
+        {[
+          { icon: Brain,   text: 'Mistral Large planner' },
+          { icon: Wrench,  text: 'Live tool synthesis' },
+          { icon: Package, text: 'Kiln tool registry' },
+          { icon: Bot,     text: 'AG2 multi-agent' },
+        ].map(f => (
+          <div key={f.text} className="flex items-center gap-2">
+            <f.icon className="h-4 w-4 text-muted-foreground" />
+            <span className="text-xs font-medium text-muted-foreground">{f.text}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -422,45 +550,72 @@ function ToolsPage() {
     search === '' || t.name.includes(search) || t.id.includes(search) || t.description.toLowerCase().includes(search.toLowerCase())
   )
 
-  if (loading) return <div className="centered-msg"><span className="spinner" /> Loading tools…</div>
-  if (error)   return <div className="centered-msg error-text">{error}</div>
+  if (loading) return (
+    <div className="flex items-center justify-center gap-3 py-20 text-sm text-muted-foreground">
+      <Skeleton className="h-4 w-4 rounded-full" />
+      Loading tools...
+    </div>
+  )
+  if (error) return <div className="flex items-center justify-center py-20 text-sm text-destructive">{error}</div>
 
   return (
-    <div className="tools-page">
-      <div className="tools-toolbar">
-        <div className="tools-toolbar-left">
-          <span className="tools-count">{tools.length} tools registered</span>
-          <input className="search-input" placeholder="Search tools…" value={search} onChange={e => setSearch(e.target.value)} />
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="whitespace-nowrap text-[13px] text-muted-foreground">{tools.length} tools registered</span>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search tools..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="h-8 w-[220px] pl-8 text-[13px]"
+            />
+          </div>
         </div>
-        <button className="btn-outline" onClick={fetchTools}>↻ Refresh</button>
+        <Button variant="outline" size="sm" onClick={fetchTools} className="gap-1.5">
+          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+        </Button>
       </div>
-      <div className="tools-grid">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(290px,1fr))] gap-3.5">
         {filtered.map(tool => (
-          <div key={tool.id} className="tool-card">
-            <div className="tool-card-header">
-              <span className="tool-name">{tool.name}</span>
-              <span className="tool-version">v{tool.version}</span>
-            </div>
-            <div className="tool-id">{tool.id}</div>
-            <p className="tool-desc">{tool.description}</p>
-            {tool.params.length > 0 && (
-              <div className="tool-params">
-                <div className="params-label">Inputs</div>
-                {tool.params.map(p => (
-                  <div key={p.name} className="param-row">
-                    <span className="param-name">{p.name}</span>
-                    <span className="param-type">{p.type}</span>
-                    {!p.required && <span className="param-opt">optional</span>}
-                  </div>
+          <Card key={tool.id} className="transition-all hover:-translate-y-0.5 hover:border-blue-500 hover:shadow-lg">
+            <CardHeader className="pb-0">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-mono text-sm font-bold text-foreground">{tool.name}</span>
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">v{tool.version}</span>
+              </div>
+              <div className="font-mono text-[10px] text-muted-foreground">{tool.id}</div>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              <p className="text-xs leading-relaxed text-muted-foreground">{tool.description}</p>
+              {tool.params.length > 0 && (
+                <div className="flex flex-col gap-1.5 rounded-md bg-background p-2.5">
+                  <span className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Inputs</span>
+                  {tool.params.map(p => (
+                    <div key={p.name} className="flex items-center gap-2 text-[11px]">
+                      <span className="font-mono text-blue-300">{p.name}</span>
+                      <span className="font-mono text-yellow-400">{p.type}</span>
+                      {!p.required && <span className="text-[10px] text-muted-foreground">optional</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {tool.category && (
+                  <Badge variant="outline" className="text-[10px]">{tool.category}</Badge>
+                )}
+                {tool.author && (
+                  <Badge variant="outline" className="text-[10px]">{tool.author}</Badge>
+                )}
+                {tool.tags.map(t => (
+                  <Badge key={t} variant="secondary" className="border border-blue-500/20 bg-blue-500/10 text-[10px] text-blue-300">
+                    {t}
+                  </Badge>
                 ))}
               </div>
-            )}
-            <div className="tool-tags">
-              {tool.category && <span className="tag tag-meta">{tool.category}</span>}
-              {tool.author   && <span className="tag tag-meta">{tool.author}</span>}
-              {tool.tags.map(t => <span key={t} className="tag tag-blue">{t}</span>)}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
     </div>
@@ -471,11 +626,11 @@ function ToolsPage() {
 
 function CodeBlock({ code, lang = 'python' }: { code: string; lang?: string }) {
   return (
-    <div className="code-block">
-      <div className="code-block-header">
-        <span className="code-lang">{lang}</span>
+    <div className="overflow-hidden rounded-lg border border-border bg-background">
+      <div className="flex items-center justify-between border-b border-border bg-card px-3.5 py-2">
+        <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{lang}</span>
       </div>
-      <pre className="code-pre"><code>{code}</code></pre>
+      <pre className="overflow-x-auto p-4 font-mono text-xs leading-[1.7] text-foreground"><code>{code}</code></pre>
     </div>
   )
 }
@@ -733,114 +888,142 @@ result   = compiled.call({"location": "Singapore"})`
   }
 
   const LIFECYCLE_STEPS = [
-    { icon: '📝', label: 'spec.yaml', desc: 'Declare tool' },
-    { icon: '✓',  label: 'Validate',  desc: 'JSON Schema' },
-    { icon: '🧪', label: 'Test',      desc: 'Run fixtures' },
-    { icon: '📦', label: 'Register',  desc: 'Into registry' },
-    { icon: '⚡', label: 'Compile',   desc: 'To framework' },
-    { icon: '🤖', label: 'Execute',   desc: 'Agent calls' },
+    { icon: Code2,    label: 'spec.yaml', desc: 'Declare tool' },
+    { icon: CheckCircle2, label: 'Validate',  desc: 'JSON Schema' },
+    { icon: Hash,     label: 'Test',      desc: 'Run fixtures' },
+    { icon: Package,  label: 'Register',  desc: 'Into registry' },
+    { icon: Zap,      label: 'Compile',   desc: 'To framework' },
+    { icon: Bot,      label: 'Execute',   desc: 'Agent calls' },
   ]
 
   return (
-    <div className="docs-page">
+    <div className="flex w-full flex-col gap-8">
 
-      {/* ── Hero ── */}
-      <div className="docs-hero">
-        <h1 className="docs-title">The Kiln Tool Standard</h1>
-        <p className="docs-sub">
+      {/* Hero */}
+      <div className="flex flex-col gap-3">
+        <h1 className="bg-gradient-to-br from-blue-400 to-purple-400 bg-clip-text text-[28px] font-extrabold text-transparent">
+          The Kiln Tool Standard
+        </h1>
+        <p className="text-[15px] leading-[1.7] text-muted-foreground">
           Kiln is a universal tool specification layer for AI agents. Write a tool once — a YAML spec plus a Python function — and compile it instantly to any AI framework from a single source of truth.
         </p>
-        <div className="docs-pills-row">
+        <div className="mt-1.5 flex flex-wrap gap-2">
           {['Mistral', 'AG2 / AutoGen', 'Pydantic AI', 'LangChain'].map(f => (
-            <span key={f} className="docs-fw-pill">{f}</span>
+            <Badge key={f} variant="secondary" className="border border-blue-500/30 bg-blue-500/20 px-3 py-0.5 text-xs font-semibold text-blue-500">
+              {f}
+            </Badge>
           ))}
         </div>
       </div>
 
-      {/* ── Lifecycle ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Tool Lifecycle</div>
-        <div className="lifecycle-flow">
+      {/* Lifecycle */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Tool Lifecycle
+        </div>
+        <div className="flex flex-wrap items-start gap-1">
           {LIFECYCLE_STEPS.map((step, i) => (
-            <div key={step.label} className="lifecycle-flow-item">
-              <div className="lifecycle-step">
-                <div className="lifecycle-icon">{step.icon}</div>
-                <div className="lifecycle-label">{step.label}</div>
-                <div className="lifecycle-desc">{step.desc}</div>
+            <div key={step.label} className="flex items-center gap-1">
+              <div className="flex min-w-[80px] flex-col items-center gap-1 rounded-lg border border-border bg-card p-2.5 text-center">
+                <step.icon className="h-[18px] w-[18px] text-muted-foreground" />
+                <span className="text-[11px] font-bold text-foreground">{step.label}</span>
+                <span className="text-[10px] text-muted-foreground">{step.desc}</span>
               </div>
-              {i < LIFECYCLE_STEPS.length - 1 && <div className="lifecycle-arrow">›</div>}
+              {i < LIFECYCLE_STEPS.length - 1 && <ChevronRight className="h-4 w-4 shrink-0 text-border" />}
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Step 1: YAML spec ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Step 1 — Write a Kiln Spec</div>
-        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
-          Every Kiln tool starts with a <code className="inline-code">spec.yaml</code>. It declares the tool ID, inputs / outputs, implementation entrypoint, supported framework targets, and test fixtures — everything the compiler needs to generate bindings.
+      {/* Step 1: YAML spec */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Step 1 — Write a Kiln Spec
+        </div>
+        <p className="mb-1 text-[13px] leading-relaxed text-muted-foreground">
+          Every Kiln tool starts with a <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">spec.yaml</code>. It declares the tool ID, inputs / outputs, implementation entrypoint, supported framework targets, and test fixtures — everything the compiler needs to generate bindings.
         </p>
         <CodeBlock code={SPEC_YAML} lang="yaml" />
-        <div className="docs-note" style={{ marginTop: 12 }}>
-          <strong>Convention:</strong> Tool IDs follow reverse-DNS notation — <code className="inline-code">com.org.tools.name</code>. The <code className="inline-code">targets</code> list controls which framework adapters are compiled. Add or remove targets without touching tool logic.
+        <div className="mt-1 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3.5 text-[13px] leading-relaxed text-muted-foreground">
+          <strong className="text-blue-500">Convention:</strong> Tool IDs follow reverse-DNS notation — <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">com.org.tools.name</code>. The <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">targets</code> list controls which framework adapters are compiled. Add or remove targets without touching tool logic.
         </div>
       </div>
 
-      {/* ── Step 2: Framework adapters ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Step 2 — Adapt to Any Framework</div>
-        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
-          <code className="inline-code">KilnRuntime</code> compiles every registered tool into the right bindings for the chosen framework. Change <code className="inline-code">target=</code> and everything else stays the same — same tool IDs, same registry, same one-liner calls.
+      {/* Step 2: Framework adapters */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Step 2 — Adapt to Any Framework
+        </div>
+        <p className="mb-1 text-[13px] leading-relaxed text-muted-foreground">
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">KilnRuntime</code> compiles every registered tool into the right bindings for the chosen framework. Change <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">target=</code> and everything else stays the same — same tool IDs, same registry, same one-liner calls.
         </p>
-        <div className="fw-tabs">
+        <div className="mb-1 flex flex-wrap gap-1.5">
           {FW_TABS.map(t => (
             <button
               key={t.key}
-              className={`fw-tab-btn${fwTab === t.key ? ' fw-tab-active' : ''}`}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md border border-border bg-card px-3.5 py-1.5 text-[13px] font-semibold transition-all',
+                fwTab === t.key
+                  ? 'border-blue-500/50 bg-blue-500/20 text-blue-500'
+                  : 'text-muted-foreground hover:border-blue-500 hover:text-foreground'
+              )}
               onClick={() => setFwTab(t.key)}
             >
               {t.label}
-              <span className="fw-tab-badge">{t.badge}</span>
+              <span className={cn(
+                'rounded border border-border bg-background px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide',
+                fwTab === t.key ? 'border-blue-500/30 text-blue-500' : 'text-muted-foreground'
+              )}>
+                {t.badge}
+              </span>
             </button>
           ))}
         </div>
-        <p className="docs-step-desc fw-desc">{FW_DESCS[fwTab]}</p>
+        <p className="my-1 text-[13px] leading-relaxed text-muted-foreground">{FW_DESCS[fwTab]}</p>
         <CodeBlock code={FW_CODES[fwTab]} lang="python" />
       </div>
 
-      {/* ── Step 3: Register at runtime ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Step 3 — Register a New Tool at Runtime</div>
-        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
-          Use the <code className="inline-code">@kiln_tool</code> decorator to define a tool in pure Python — no YAML required. One <code className="inline-code">register()</code> call makes it immediately available across all framework adapters without restarting the server.
+      {/* Step 3: Register at runtime */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Step 3 — Register a New Tool at Runtime
+        </div>
+        <p className="mb-1 text-[13px] leading-relaxed text-muted-foreground">
+          Use the <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">@kiln_tool</code> decorator to define a tool in pure Python — no YAML required. One <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">register()</code> call makes it immediately available across all framework adapters without restarting the server.
         </p>
         <CodeBlock code={REGISTER_CODE} lang="python" />
-        <div className="docs-three-col" style={{ marginTop: 14 }}>
+        <div className="mt-1 grid grid-cols-3 gap-3 max-sm:grid-cols-1">
           {[
             ['One definition', 'Write the function once — Kiln derives the JSON schema automatically from type annotations and param_descriptions.'],
             ['All adapters', 'After register(), use the same tool with Mistral, AG2, and Pydantic AI — no per-framework boilerplate.'],
             ['Persistent', 'Registered tools survive across queries. The synthesiser saves them to the registry so future runs skip synthesis entirely.'],
           ].map(([title, desc]) => (
-            <div key={title} className="docs-feat-card">
-              <div className="docs-feat-title">{title}</div>
-              <div className="docs-feat-desc">{desc}</div>
-            </div>
+            <Card key={title}>
+              <CardContent className="pt-3.5">
+                <div className="text-[13px] font-bold text-foreground">{title}</div>
+                <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{desc}</div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </div>
 
-      {/* ── Step 4: Load from disk ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Step 4 — Load Tools from the Registry on Disk</div>
-        <p className="docs-step-desc" style={{ marginBottom: 14 }}>
-          <code className="inline-code">KilnLoader</code> validates a spec against the Kiln JSON Schema, runs test fixtures, and registers the tool — replicating exactly what the Vibe synthesiser does before publishing a generated tool.
+      {/* Step 4: Load from disk */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Step 4 — Load Tools from the Registry on Disk
+        </div>
+        <p className="mb-1 text-[13px] leading-relaxed text-muted-foreground">
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">KilnLoader</code> validates a spec against the Kiln JSON Schema, runs test fixtures, and registers the tool — replicating exactly what the Vibe synthesiser does before publishing a generated tool.
         </p>
         <CodeBlock code={LOADER_CODE} lang="python" />
       </div>
 
-      {/* ── Kiln end-to-end ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Using Kiln End-to-End</div>
+      {/* Kiln end-to-end */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Using Kiln End-to-End
+        </div>
         {[
           ['Type your question', 'Go to the Agent tab and ask anything. Kiln plans accordingly — simple queries get one agent; complex requests spawn a parallel task graph.'],
           ['Mistral plans the graph', 'KilnPlanner uses Mistral Large to decompose the request into a directed acyclic graph of agents, each assigned a role and a set of Kiln tools from the registry.'],
@@ -848,50 +1031,60 @@ result   = compiled.call({"location": "Singapore"})`
           ['Missing tools are synthesised on the fly', 'If Kiln needs a capability not in the registry, Mistral Codestral Vibe generates the spec + implementation, registers it, and uses it — all within the same request.'],
           ['Synthesis node delivers the answer', 'The exit node combines all agent results into a final formatted answer rendered with Markdown.'],
         ].map(([title, desc], i) => (
-          <div key={i} className="docs-step">
-            <div className="docs-step-num">{i + 1}</div>
+          <div key={i} className="flex gap-4 items-start">
+            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-500/40 bg-blue-500/20 text-xs font-bold text-blue-500">
+              {i + 1}
+            </div>
             <div>
-              <div className="docs-step-title">{title}</div>
-              <div className="docs-step-desc">{desc}</div>
+              <div className="mb-1 text-sm font-semibold text-foreground">{title}</div>
+              <div className="text-[13px] leading-relaxed text-muted-foreground">{desc}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* ── Example queries ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">Example Queries to Try</div>
-        <div className="docs-examples-grid">
+      {/* Example queries */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          Example Queries to Try
+        </div>
+        <div className="grid grid-cols-2 gap-2.5 max-sm:grid-cols-1">
           {EXAMPLES.map(ex => (
-            <div key={ex.label} className="docs-example">
-              <span className="docs-example-label">{ex.label}</span>
-              <span className="docs-example-q">{ex.q}</span>
+            <div key={ex.label} className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 text-[13px] leading-relaxed text-muted-foreground transition-colors hover:border-blue-500 hover:text-foreground">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500">{ex.label}</span>
+              <span className="text-xs leading-relaxed text-muted-foreground">{ex.q}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Registry note ── */}
-      <div className="docs-block">
-        <div className="docs-block-title">The Tool Registry</div>
-        <div className="docs-step">
-          <div className="docs-step-num">›</div>
+      {/* Registry note */}
+      <div className="flex flex-col gap-3.5">
+        <div className="border-b border-border pb-2 text-[13px] font-bold uppercase tracking-widest text-blue-500">
+          The Tool Registry
+        </div>
+        <div className="flex gap-4 items-start">
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-500/40 bg-blue-500/20 text-xs font-bold text-blue-500">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </div>
           <div>
-            <div className="docs-step-title">Browse available tools</div>
-            <div className="docs-step-desc">The Registry tab shows every tool Kiln can use — pre-built and synthesised. Search by name, ID, or description. Each card shows parameter types and metadata.</div>
+            <div className="mb-1 text-sm font-semibold text-foreground">Browse available tools</div>
+            <div className="text-[13px] leading-relaxed text-muted-foreground">The Registry tab shows every tool Kiln can use — pre-built and synthesised. Search by name, ID, or description. Each card shows parameter types and metadata.</div>
           </div>
         </div>
-        <div className="docs-step">
-          <div className="docs-step-num">›</div>
+        <div className="flex gap-4 items-start">
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-500/40 bg-blue-500/20 text-xs font-bold text-blue-500">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </div>
           <div>
-            <div className="docs-step-title">Tools grow over time</div>
-            <div className="docs-step-desc">Every synthesised tool is saved to disk under <code className="inline-code">registry/tools/</code> and is available for all future queries. Re-run the same query after synthesis for faster, more accurate results.</div>
+            <div className="mb-1 text-sm font-semibold text-foreground">Tools grow over time</div>
+            <div className="text-[13px] leading-relaxed text-muted-foreground">Every synthesised tool is saved to disk under <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-blue-300">registry/tools/</code> and is available for all future queries. Re-run the same query after synthesis for faster, more accurate results.</div>
           </div>
         </div>
       </div>
 
-      <div className="docs-note">
-        <strong>Tip:</strong> If a query triggers synthesis, the missing tool banner will say "synthesising via Vibe Coder". Once done, simply re-run the same query — Kiln executes it directly from the registry without synthesis.
+      <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3.5 text-[13px] leading-relaxed text-muted-foreground">
+        <strong className="text-blue-500">Tip:</strong> If a query triggers synthesis, the missing tool banner will say "synthesising via Vibe Coder". Once done, simply re-run the same query — Kiln executes it directly from the registry without synthesis.
       </div>
     </div>
   )
@@ -901,48 +1094,67 @@ result   = compiled.call({"location": "Singapore"})`
 
 function AboutPage() {
   return (
-    <div className="about-page">
-      <div className="about-hero">
-        <div className="about-logo">Kiln</div>
-        <p className="about-tagline">An AI assistant that doesn't say "I can't do that" — it builds the tool and does it.</p>
-        <span className="about-pill">Built in 48 hours · Mistral Hackathon</span>
+    <div className="flex w-full flex-col gap-10">
+      <div className="flex flex-col items-center gap-4 pt-12 pb-6 text-center">
+        <h1 className="bg-gradient-to-br from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-5xl font-black tracking-widest text-transparent">
+          Kiln
+        </h1>
+        <p className="max-w-[520px] text-lg font-medium leading-relaxed text-muted-foreground">
+          An AI assistant that doesn't say "I can't do that" — it builds the tool and does it.
+        </p>
+        <Badge variant="secondary" className="border border-purple-500/30 bg-purple-500/15 px-3.5 py-1 text-xs font-semibold tracking-wide text-purple-400">
+          Built in 48 hours · Mistral Hackathon
+        </Badge>
       </div>
 
-      <div className="about-cards">
+      <div className="grid grid-cols-2 gap-3.5 max-sm:grid-cols-1">
         {[
-          ['🧠', 'Adaptive by Design', 'When Kiln encounters a capability gap, Mistral Codestral Vibe synthesizes a new tool on the fly — spec, implementation, registration, and execution happen in a single request.'],
-          ['⚡', 'Multi-Agent Execution', 'Every request is broken into a directed task graph. Nodes run in parallel where dependencies allow, each powered by an AG2 agent pair with Mistral Large.'],
-          ['📦', 'Kiln Tool Standard', 'Every tool is described by a Kiln YAML spec. The compiler generates framework-native bindings for AG2, LangChain, and Pydantic-AI from one source of truth.'],
-          ['🔭', 'Observable by Default', 'Every tool call, node transition, and synthesis event is streamed live and logged to W&B Weave with registry hit rate and full execution traces.'],
-        ].map(([icon, title, body]) => (
-          <div key={title as string} className="about-card">
-            <span className="about-card-icon">{icon}</span>
-            <div className="about-card-title">{title}</div>
-            <div className="about-card-body">{body}</div>
-          </div>
-        ))}
+          [Brain, 'Adaptive by Design', 'When Kiln encounters a capability gap, Mistral Codestral Vibe synthesizes a new tool on the fly — spec, implementation, registration, and execution happen in a single request.'],
+          [Zap, 'Multi-Agent Execution', 'Every request is broken into a directed task graph. Nodes run in parallel where dependencies allow, each powered by an AG2 agent pair with Mistral Large.'],
+          [Package, 'Kiln Tool Standard', 'Every tool is described by a Kiln YAML spec. The compiler generates framework-native bindings for AG2, LangChain, and Pydantic-AI from one source of truth.'],
+          [BookOpen, 'Observable by Default', 'Every tool call, node transition, and synthesis event is streamed live and logged to W&B Weave with registry hit rate and full execution traces.'],
+        ].map(([IconComp, title, body]) => {
+          const Icon = IconComp as typeof Brain
+          return (
+            <Card key={title as string} className="transition-all hover:-translate-y-0.5 hover:border-muted-foreground/30">
+              <CardContent className="flex flex-col gap-2.5 pt-5">
+                <Icon className="h-6 w-6 text-muted-foreground" />
+                <div className="text-sm font-bold text-foreground">{title as string}</div>
+                <div className="text-[13px] leading-relaxed text-muted-foreground">{body as string}</div>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
 
-      <div className="about-team">
-        <div className="docs-block-title">The Team</div>
-        {[
-          ['E1', 'e1', 'Voice & Planning', 'Voxtral STT · Intent Parser · Mistral Large · Graph Validator'],
-          ['E2', 'e2', 'Kiln Tool Standard', 'Spec · Compiler · Registry · Runtime · CLI · Pre-built Tools'],
-          ['E3', 'e3', 'Execution & Synthesis', 'AG2 GraphFlow · Mistral Vibe · W&B Weave Observability'],
-          ['E4', 'e4', 'Frontend & Voice', 'React · AG-UI Event Stream · 11Labs TTS'],
-        ].map(([badge, cls, role, tech]) => (
-          <div key={badge as string} className="team-row">
-            <span className={`team-badge badge-${cls}`}>{badge}</span>
-            <div className="team-info">
-              <div className="team-role">{role}</div>
-              <div className="team-tech">{tech}</div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-[13px] font-bold uppercase tracking-widest text-blue-500">
+            The Team
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3.5">
+          {[
+            ['E1', 'bg-blue-500/15 text-blue-400 border-blue-500/30', 'Voice & Planning', 'Voxtral STT · Intent Parser · Mistral Large · Graph Validator'],
+            ['E2', 'bg-purple-500/15 text-purple-400 border-purple-500/30', 'Kiln Tool Standard', 'Spec · Compiler · Registry · Runtime · CLI · Pre-built Tools'],
+            ['E3', 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', 'Execution & Synthesis', 'AG2 GraphFlow · Mistral Vibe · W&B Weave Observability'],
+            ['E4', 'bg-amber-500/15 text-amber-400 border-amber-500/30', 'Frontend & Voice', 'React · AG-UI Event Stream · 11Labs TTS'],
+          ].map(([badge, badgeCls, role, tech]) => (
+            <div key={badge as string} className="flex items-start gap-3.5 rounded-lg border border-border bg-background p-3">
+              <span className={cn('mt-0.5 shrink-0 rounded border px-2.5 py-1 text-[11px] font-bold tracking-wider', badgeCls as string)}>
+                {badge as string}
+              </span>
+              <div className="flex flex-col gap-1">
+                <div className="text-[13px] font-semibold text-foreground">{role as string}</div>
+                <div className="font-mono text-xs text-muted-foreground">{tech as string}</div>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </CardContent>
+      </Card>
 
-      <div className="about-footer">
-        Powered by <strong>Mistral AI</strong> · <strong>AG2</strong> · <strong>Kiln</strong>
+      <div className="border-t border-border py-4 text-center text-[13px] text-muted-foreground">
+        Powered by <strong className="text-foreground/70">Mistral AI</strong> · <strong className="text-foreground/70">AG2</strong> · <strong className="text-foreground/70">Kiln</strong>
       </div>
     </div>
   )
@@ -1004,33 +1216,59 @@ function VibeStreamPanel({ job }: { job: SynthesisJob }) {
   const toolName = job.tool_id.split('.').pop() ?? job.tool_id
 
   return (
-    <div className={`vibe-panel${done ? ' vibe-panel-done' : ''}`}>
-      <div className="vibe-panel-header">
-        <span className="vibe-panel-title">
-          <span className={`vibe-mascot${done ? ' vibe-mascot-done' : ''}`}>{done ? '🏁' : '⚒️'}</span>
-          Synthesizing <span className="vibe-tool-name">{toolName}</span>
+    <div className={cn(
+      'overflow-hidden rounded-lg border transition-colors duration-300',
+      done ? 'border-emerald-500' : 'border-purple-500'
+    )}>
+      <div className={cn(
+        'flex items-center justify-between border-b px-3.5 py-2.5',
+        done
+          ? 'border-emerald-500 bg-emerald-500/15'
+          : 'border-purple-500 bg-purple-500/15'
+      )}>
+        <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+          <span className={cn('inline-block text-lg leading-none', !done && 'animate-bounce')}>
+            {done ? '\uD83C\uDFC1' : '\u2692\uFE0F'}
+          </span>
+          Synthesizing <span className="font-mono text-purple-400">{toolName}</span>
         </span>
-        <span className={`vibe-status-badge${done ? ' vibe-status-done' : ' vibe-status-active'}`}>
-          {done ? 'done' : <><span className="spinner vibe-spinner" /> building</>}
-        </span>
+        <Badge
+          variant="secondary"
+          className={cn(
+            'gap-1.5 text-[11px] font-semibold',
+            done
+              ? 'bg-emerald-500/15 text-emerald-500'
+              : 'bg-purple-500/15 text-purple-400'
+          )}
+        >
+          {done ? 'done' : (
+            <>
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              building
+            </>
+          )}
+        </Badge>
       </div>
-      <div className="vibe-body">
-        <div className="vibe-log">
+      <div className="flex items-stretch">
+        <ScrollArea className="max-h-[180px] flex-1 p-3.5 font-mono text-[11px] leading-[1.7]">
           {lines.map(l => (
-            <div key={l.id} className="vibe-log-entry">
-              <span className="vibe-stage">{l.stage}</span>
-              {l.message && <span className="vibe-msg">{l.message}</span>}
+            <div key={l.id} className="flex gap-2.5">
+              <span className="w-[110px] shrink-0 font-semibold text-purple-400">{l.stage}</span>
+              {l.message && <span className="break-words text-muted-foreground">{l.message}</span>}
             </div>
           ))}
           <div ref={endRef} />
-        </div>
-        <div className={`vibe-pixel-art${done ? ' vibe-pixel-art-done' : ''}`}>
-          <div className="pixel-char">
-            <div className="pixel-head" />
-            <div className="pixel-body-part" />
-            <div className="pixel-legs">
-              <div className="pixel-leg pixel-leg-l" />
-              <div className="pixel-leg pixel-leg-r" />
+        </ScrollArea>
+        <div className={cn(
+          'flex w-12 shrink-0 items-center justify-center border-l border-border',
+          done ? 'bg-emerald-500/15' : 'bg-purple-500/15'
+        )}>
+          <div className={cn('flex flex-col items-center', !done && 'animate-bounce')}>
+            <div className={cn('h-2.5 w-2.5 rounded-sm', done ? 'bg-emerald-500' : 'bg-purple-500')} />
+            <div className={cn('mt-0.5 h-2.5 w-3.5 rounded-[1px]', done ? 'bg-emerald-500' : 'bg-purple-500')} />
+            <div className="mt-0.5 flex gap-1">
+              <div className={cn('h-2 w-1 rounded-[1px]', done ? 'bg-emerald-500' : 'bg-purple-500')} />
+              <div className={cn('h-2 w-1 rounded-[1px]', done ? 'bg-emerald-500' : 'bg-purple-500')} />
             </div>
           </div>
         </div>
@@ -1038,10 +1276,6 @@ function VibeStreamPanel({ job }: { job: SynthesisJob }) {
     </div>
   )
 }
-
-// ── Spinner ────────────────────────────────────────────────────────────────────
-
-function Spinner() { return <span className="spinner" /> }
 
 // ── App ────────────────────────────────────────────────────────────────────────
 
@@ -1081,6 +1315,11 @@ export default function App() {
   // Sync theme to <html> so body background also responds to light/dark
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    if (dark) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
   }, [dark])
 
   // Cleanup EventSource on unmount to prevent memory leaks
@@ -1156,69 +1395,103 @@ export default function App() {
     } catch (err) { dispatch({ type: 'ERROR', payload: { message: String(err) } }) }
   }
 
-  const NAV: { key: View; label: string }[] = [
-    { key: 'kiln',  label: 'Agent' },
-    { key: 'tools', label: 'Registry' },
-    { key: 'howto', label: 'How to Use' },
-    { key: 'about', label: 'About' },
+  const NAV: { key: View; label: string; icon: typeof Play }[] = [
+    { key: 'kiln',  label: 'Agent',      icon: Play },
+    { key: 'tools', label: 'Registry',   icon: Package },
+    { key: 'howto', label: 'How to Use', icon: BookOpen },
+    { key: 'about', label: 'About',      icon: Info },
   ]
 
   return (
-    <div className="app" data-theme={dark ? 'dark' : 'light'}>
-      {/* ── Header ── */}
-      <header className="app-header">
-        <div className="header-brand">
-          <span className="aria-logo">Kiln</span>
-          <span className="header-sep" />
-          <span className="header-sub">Self-Evolving Tool Registry</span>
+    <div className={cn('flex min-h-screen w-full flex-col bg-background text-foreground transition-colors duration-300', dark && 'dark')}>
+      {/* Header */}
+      <header className="sticky top-0 z-50 flex h-14 items-center justify-between gap-4 border-b border-border bg-background/80 px-7 backdrop-blur-xl">
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="bg-gradient-to-br from-blue-400 to-purple-400 bg-clip-text text-lg font-extrabold tracking-[0.14em] text-transparent">
+            Kiln
+          </span>
+          <Separator orientation="vertical" className="h-4" />
+          <span className="truncate text-[11px] text-muted-foreground">
+            Self-Evolving Tool Registry
+          </span>
         </div>
-        <nav className="app-nav">
+
+        <nav className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-muted p-[3px]">
           {NAV.map(n => (
-            <button key={n.key} className={`nav-btn${view === n.key ? ' nav-active' : ''}`} onClick={() => setView(n.key)}>
+            <Button
+              key={n.key}
+              variant={view === n.key ? 'secondary' : 'ghost'}
+              size="sm"
+              className={cn(
+                'gap-1.5 text-[13px]',
+                view === n.key
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground'
+              )}
+              onClick={() => setView(n.key)}
+            >
               {n.label}
-            </button>
+            </Button>
           ))}
         </nav>
-        <div className="header-right">
-          <span className="powered-badge">Kiln · Mistral · AG2</span>
-          <button className="theme-toggle" onClick={() => setDark(d => !d)} title="Toggle theme">
-            {dark ? '☀' : '☾'}
-          </button>
+
+        <div className="flex shrink-0 items-center gap-2.5">
+          <Badge variant="outline" className="whitespace-nowrap text-[11px]">
+            Kiln · Mistral · AG2
+          </Badge>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => setDark(d => !d)}
+            title="Toggle theme"
+          >
+            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
           {isSignedIn && <UserButton afterSignOutUrl="/" />}
         </div>
       </header>
 
-      {/* ── Pages ── */}
-      {view === 'tools' && <main className="app-main"><ToolsPage /></main>}
-      {view === 'howto' && <main className="app-main"><HowToUsePage /></main>}
-      {view === 'about' && <main className="app-main"><AboutPage /></main>}
+      {/* Pages */}
+      {view === 'tools' && <main className="flex flex-1 flex-col gap-4 px-10 py-7 max-sm:px-4"><ToolsPage /></main>}
+      {view === 'howto' && <main className="flex flex-1 flex-col gap-4 px-10 py-7 max-sm:px-4"><HowToUsePage /></main>}
+      {view === 'about' && <main className="flex flex-1 flex-col gap-4 px-10 py-7 max-sm:px-4"><AboutPage /></main>}
 
       {view === 'kiln' && (
-        <main className="app-main">
+        <main className="flex flex-1 flex-col gap-4 px-10 py-7 max-sm:px-4">
           {/* Auth gate for chat — sign in required to run queries */}
           <SignedOut>
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem 0' }}>
+            <div className="flex justify-center py-16">
               <SignIn routing="hash" />
             </div>
           </SignedOut>
           <SignedIn>
-          {/* Query bar — always on top */}
-          <form onSubmit={submit} className="query-form">
+          {/* Query bar */}
+          <form onSubmit={submit} className="flex items-center gap-2 rounded-xl border border-border bg-card p-1.5 pl-5 transition-all focus-within:border-blue-500 focus-within:ring-[3px] focus-within:ring-blue-500/20">
             <input
-              className="query-input"
+              className="min-w-0 flex-1 border-none bg-transparent py-2.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Ask Kiln anything — e.g. Get the latest Bitcoin price and predict tomorrow's trend"
               disabled={isRunning}
             />
             {isActive && (
-              <button type="button" className="btn-ghost" onClick={() => { dispatch({ type: 'RESET' }); setQuery(''); setSynthesisJobs([]) }}>
-                Clear
-              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => { dispatch({ type: 'RESET' }); setQuery(''); setSynthesisJobs([]) }}
+                className="gap-1.5 text-muted-foreground"
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Clear
+              </Button>
             )}
-            <button className="btn-primary" type="submit" disabled={isRunning || !query.trim()}>
-              {isRunning ? <><Spinner /> Running</> : 'Run →'}
-            </button>
+            <Button type="submit" disabled={isRunning || !query.trim()} size="lg" className="gap-1.5">
+              {isRunning ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Running</>
+              ) : (
+                <>Run <ArrowRight className="h-4 w-4" /></>
+              )}
+            </Button>
           </form>
 
           {/* Idle state */}
@@ -1226,13 +1499,17 @@ export default function App() {
 
           {/* Missing tools banner */}
           {state.missingTools.length > 0 && (
-            <div className="banner-warn">
-              <span className="banner-icon">⚠</span>
-              <span className="banner-label">Missing tools:</span>
-              {state.missingTools.map(t => <span key={t.id} className="tool-chip">{t.id.split('.').pop()}</span>)}
-              <span className="banner-status">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/15 px-4 py-2.5 text-[13px] text-amber-300">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span className="font-semibold">Missing tools:</span>
+              {state.missingTools.map(t => (
+                <span key={t.id} className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 font-mono text-[10px] text-blue-300">
+                  {t.id.split('.').pop()}
+                </span>
+              ))}
+              <span className="text-xs opacity-80">
                 {synthesisJobs.length > 0
-                  ? `⟳ Synthesizing ${synthesisJobs.length} tool${synthesisJobs.length > 1 ? 's' : ''} via Vibe Coder — re-run this query when done`
+                  ? `Synthesizing ${synthesisJobs.length} tool${synthesisJobs.length > 1 ? 's' : ''} via Vibe Coder — re-run this query when done`
                   : 'Start Vibe Coder to auto-build these tools'}
               </span>
             </div>
@@ -1254,25 +1531,38 @@ export default function App() {
 
           {/* Log + Answer row */}
           {(state.logs.length > 0 || state.phase === 'complete' || state.phase === 'error') && (
-            <div className="results-row">
+            <div className="grid grid-cols-2 items-start gap-4 max-md:grid-cols-1">
               <StreamLog logs={state.logs} />
               {(state.phase === 'complete' || state.phase === 'error') && (
-                <section className="panel">
-                  <div className="section-label">{state.phase === 'complete' ? 'Final Answer' : 'Error'}</div>
-                  <div className={`answer-box${state.phase === 'error' ? ' answer-error' : ''}`}>
-                    {state.phase === 'complete' ? <Markdown text={state.finalAnswer} /> : state.error}
-                  </div>
-                  {audioUrls.length > 0 && (
-                    <div className="audio-player-section">
-                      {audioUrls.map((url, i) => (
-                        <div key={i} className="audio-player-row">
-                          <span className="audio-label">Generated Audio {audioUrls.length > 1 ? `#${i + 1}` : ''}</span>
-                          <audio controls src={url} className="audio-player" />
-                        </div>
-                      ))}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      {state.phase === 'complete' ? 'Final Answer' : 'Error'}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className={cn(
+                      'max-h-[360px] overflow-y-auto rounded-lg border p-4 text-sm leading-[1.8] text-foreground',
+                      state.phase === 'error'
+                        ? 'border-destructive/30 text-red-300'
+                        : 'border-emerald-500/30 bg-background'
+                    )}>
+                      {state.phase === 'complete' ? <Markdown text={state.finalAnswer} /> : state.error}
                     </div>
-                  )}
-                </section>
+                    {audioUrls.length > 0 && (
+                      <div className="mt-3.5 flex flex-col gap-2.5">
+                        {audioUrls.map((url, i) => (
+                          <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-background p-2.5">
+                            <span className="whitespace-nowrap text-[11px] font-semibold text-purple-400">
+                              Generated Audio {audioUrls.length > 1 ? `#${i + 1}` : ''}
+                            </span>
+                            <audio controls src={url} className="h-9 min-w-0 flex-1 rounded-md" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               )}
             </div>
           )}
