@@ -7,7 +7,9 @@ services:
       - "8002:8002"
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - KILN_CALLBACK_URL=http://host.docker.internal:8766/synthesis/callback
+      - KILN_SYNTHESIS_MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - KILN_SYNTHESIS_CALLBACK_URL=http://host.docker.internal:8766/synthesis/callback
+      - KILN_SYNTHESIS_INTERNAL_SECRET=${KILN_INTERNAL_SECRET:-}
     volumes:
       - ./packages/synthesis_service/logs:/app/logs
     healthcheck:

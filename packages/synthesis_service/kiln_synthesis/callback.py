@@ -1,7 +1,7 @@
 """
 kiln_synthesis.callback
 ---------------------------------
-Posts synthesis results back to the Kiln webhook.
+Posts synthesis results back to the Kiln registry webhook.
 """
 
 from __future__ import annotations
@@ -12,7 +12,17 @@ from pathlib import Path
 
 import httpx
 
+from kiln_synthesis.config import get_settings
+
 logger = logging.getLogger(__name__)
+
+
+def _auth_headers() -> dict[str, str]:
+    """Build headers with internal service-to-service auth secret."""
+    secret = get_settings().internal_secret
+    if secret:
+        return {"X-Internal-Secret": secret}
+    return {}
 
 
 async def notify_success(
@@ -22,16 +32,8 @@ async def notify_success(
     impl_path: Path,
     env_vars: list[dict[str, str]] | None = None,
 ) -> None:
-    """POST multipart form with spec.yaml and impl.py to the Kiln webhook.
-
-    Args:
-        callback_url: The webhook URL (e.g. http://localhost:8766/synthesis/callback).
-        tool_id: The Kiln tool ID (e.g. com.kiln.tools.weather).
-        spec_path: Path to the generated spec.yaml.
-        impl_path: Path to the generated impl.py.
-        env_vars: List of env var names the tool requires (extracted from impl.py).
-    """
-    logger.info("Sending synthesized tool %s to %s (env_vars=%s)", tool_id, callback_url, env_vars)
+    """POST multipart form with spec.yaml and impl.py to the Kiln registry."""
+    logger.info("Sending synthesized tool %s to %s", tool_id, callback_url)
 
     form_data = {"tool_id": tool_id}
     if env_vars:
@@ -45,6 +47,7 @@ async def notify_success(
                 "spec": ("spec.yaml", spec_path.read_bytes(), "application/x-yaml"),
                 "impl": ("impl.py", impl_path.read_bytes(), "text/x-python"),
             },
+            headers=_auth_headers(),
         )
         response.raise_for_status()
         logger.info("Tool %s registered successfully: %s", tool_id, response.json())
@@ -55,13 +58,7 @@ async def notify_failure(
     tool_id: str,
     error: str,
 ) -> None:
-    """POST a JSON error to the Kiln webhook on synthesis failure.
-
-    Args:
-        callback_url: The webhook URL.
-        tool_id: The attempted tool ID.
-        error: Description of what went wrong.
-    """
+    """POST a JSON error to the Kiln registry on synthesis failure."""
     logger.warning("Notifying failure for %s: %s", tool_id, error)
 
     async with httpx.AsyncClient(timeout=15) as client:
@@ -69,7 +66,8 @@ async def notify_failure(
             response = await client.post(
                 callback_url,
                 json={"tool_id": tool_id, "status": "failed", "error": error},
+                headers=_auth_headers(),
             )
             response.raise_for_status()
         except httpx.HTTPStatusError:
-            logger.warning("Callback endpoint rejected failure notification (expected for multipart-only endpoints)")
+            logger.warning("Callback endpoint rejected failure notification")
