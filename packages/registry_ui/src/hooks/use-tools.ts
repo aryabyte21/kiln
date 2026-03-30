@@ -96,6 +96,25 @@ export function useTool(toolId: string) {
   })
 }
 
+export interface ToolStats {
+  total: number
+  categories: Record<string, number>
+  tags: Record<string, number>
+  unique_authors: number
+}
+
+export function useToolStats() {
+  return useQuery({
+    queryKey: ["tools", "stats"],
+    queryFn: async (): Promise<ToolStats> => {
+      const res = await fetch("/tools/stats")
+      if (!res.ok) throw new Error("Failed to fetch stats")
+      return res.json()
+    },
+    staleTime: 60_000,
+  })
+}
+
 export function useExecuteTool() {
   const queryClient = useQueryClient()
   return useMutation({
