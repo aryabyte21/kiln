@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { ClerkProvider, Show, UserButton, SignInButton } from "@clerk/nextjs"
 import { Geist, Geist_Mono } from "next/font/google"
 import Link from "next/link"
-import { Flame, LayoutGrid, Upload, Settings } from "lucide-react"
+import { Flame, LayoutGrid, Upload, Settings, MessageSquare } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -18,6 +18,7 @@ export const metadata: Metadata = {
 
 const nav = [
   { href: "/", label: "Registry", icon: LayoutGrid },
+  { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/publish", label: "Publish", icon: Upload },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const
