@@ -97,8 +97,12 @@ services:
     volumes:
       - ./packages/chat_ui/src:/app/src
       - ./packages/chat_ui/index.html:/app/index.html
+      - ./packages/chat_ui/vite.config.ts:/app/vite.config.ts
     environment:
       - VITE_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      - VITE_REGISTRY_API=http://registry_api:8766
+      - VITE_CHAT_BACKEND=http://chat_backend:8765
+      - VITE_SYNTHESIS_API=http://synthesis_service:8002
     depends_on:
       - registry_api
       - chat_backend
