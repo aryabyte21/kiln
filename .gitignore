@@ -11,4 +11,5 @@ uv.lock
 babel_registry.db
 kiln_registry.db
 *.db
+kiln_async.db
 .vite/

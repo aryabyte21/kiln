@@ -1,4 +1,23 @@
 services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: kiln_registry
+      POSTGRES_USER: kiln
+      POSTGRES_PASSWORD: kiln_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiln -d kiln_registry"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Synthesis Service ───────────────────────────────────────────────────────
   synthesis_service:
     build:
       context: ./packages/synthesis_service
@@ -18,3 +37,6 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+
+volumes:
+  pgdata:
