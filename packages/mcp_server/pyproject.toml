@@ -1,12 +1,13 @@
 [project]
 name = "kiln-mcp-server"
 version = "1.0.0"
-description = "Kiln MCP Server - placeholder for MCP protocol phase"
+description = "Kiln MCP Server - bridges MCP JSON-RPC to the Registry API"
 requires-python = ">=3.12"
 dependencies = [
     "kiln-shared",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.30.0",
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
 ]
 
 [build-system]

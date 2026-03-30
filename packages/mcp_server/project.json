@@ -3,7 +3,13 @@
   "root": "packages/mcp_server",
   "targets": {
     "dev": {
-      "command": "uv run uvicorn kiln_mcp.main:app --host 127.0.0.1 --port 8768 --reload"
+      "command": "uv run python -m kiln_mcp.main streamable-http"
+    },
+    "dev:stdio": {
+      "command": "uv run python -m kiln_mcp.main stdio"
+    },
+    "lint": {
+      "command": "uv run ruff check packages/mcp_server"
     }
   }
 }
