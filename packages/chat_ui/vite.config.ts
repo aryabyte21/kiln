@@ -1,17 +1,18 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
+import { defineConfig } from "vite"
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
     proxy: {
-      '/kiln':        'http://localhost:8765',
-      '/tools':       'http://localhost:8766',
-      '/health':      'http://localhost:8766',
-      '/audio':       'http://localhost:8766',
-      '/auth':        'http://localhost:8766',
-      '/synthesis':   'http://localhost:8002',
+      "/kiln": "http://localhost:8765",
+      "/tools": "http://localhost:8766",
+      "/health": "http://localhost:8766",
+      "/audio": "http://localhost:8766",
+      "/auth": "http://localhost:8766",
+      "/synthesis": "http://localhost:8002",
     },
   },
 })
