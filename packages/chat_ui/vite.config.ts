@@ -10,6 +10,7 @@ export default defineConfig({
       '/tools':       'http://localhost:8766',
       '/health':      'http://localhost:8766',
       '/audio':       'http://localhost:8766',
+      '/auth':        'http://localhost:8766',
       '/synthesis':   'http://localhost:8002',
     },
   },
