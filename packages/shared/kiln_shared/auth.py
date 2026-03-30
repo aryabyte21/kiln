@@ -99,10 +99,14 @@ async def _verify_jwt(token: str) -> KilnUser:
             options={"verify_aud": False},
         )
 
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing 'sub' claim")
+
         return KilnUser(
-            user_id=payload.get("sub", ""),
-            email=payload.get("email", payload.get("email_address", "")),
-            name=payload.get("name", payload.get("first_name", "")),
+            user_id=user_id,
+            email=payload.get("email") or payload.get("email_address") or "",
+            name=payload.get("name") or payload.get("first_name") or "",
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired") from None
@@ -133,12 +137,19 @@ async def _verify_api_key(api_key: str) -> KilnUser:
             return user
         del _api_key_cache[api_key]
 
-    # Parse key format: kiln_<user_id>_<hex>
-    parts = api_key.split("_", 2)
-    if len(parts) != 3 or parts[0] != "kiln":
+    # Parse key format: kiln_<user_id>_<32-char-hex>
+    # user_id may contain underscores (e.g., user_2abc123), so we extract
+    # the last 32 chars as hex and everything between "kiln_" and the hex as user_id
+    if not api_key.startswith("kiln_") or len(api_key) < 38:  # "kiln_" + at least 1 char + "_" + 32 hex
         raise HTTPException(status_code=401, detail="Invalid API key format") from None
 
-    user_id = parts[1]
+    # Last 32 chars are the hex token, preceded by an underscore
+    hex_part = api_key[-32:]
+    middle = api_key[5:-32]  # everything between "kiln_" and the hex
+    if not middle.endswith("_") or not all(c in "0123456789abcdef" for c in hex_part):
+        raise HTTPException(status_code=401, detail="Invalid API key format") from None
+
+    user_id = middle[:-1]  # strip trailing underscore
 
     # Fetch user from Clerk Backend API
     try:

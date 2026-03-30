@@ -462,7 +462,7 @@ print(result)`
   const curlSnippet = `curl -X POST \\
   https://registry.kiln.dev/tools/${toolId}/execute \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
     "args": {
 
