@@ -87,9 +87,18 @@ async def _verify_jwt(token: str) -> KilnUser:
 
     try:
         jwks_data = await _get_jwks(config.clerk_domain)
-        jwks_client = jwt.PyJWKClient.__new__(jwt.PyJWKClient)
-        jwks_client.jwk_set = jwt.PyJWKSet.from_dict(jwks_data)
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        jwk_set = jwt.PyJWKSet.from_dict(jwks_data)
+
+        # Match the signing key from JWKS to the token's kid header
+        token_header = jwt.get_unverified_header(token)
+        kid = token_header.get("kid")
+        signing_key = None
+        for key in jwk_set.keys:
+            if key.key_id == kid:
+                signing_key = key
+                break
+        if signing_key is None:
+            raise HTTPException(status_code=401, detail="No matching signing key found")
 
         payload = jwt.decode(
             token,

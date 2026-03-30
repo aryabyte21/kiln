@@ -2,17 +2,26 @@
 kiln_synthesis.config
 --------------------
 Settings via pydantic-settings, loaded from environment variables.
+
+Env var mapping (prefix: KILN_SYNTHESIS_):
+  KILN_SYNTHESIS_CALLBACK_URL      → callback_url
+  KILN_SYNTHESIS_INTERNAL_SECRET   → internal_secret
+  KILN_SYNTHESIS_WORKSPACE_DIR     → workspace_dir
+  KILN_SYNTHESIS_LOG_DIR           → log_dir
+  KILN_SYNTHESIS_MAX_TURNS         → max_turns
+  KILN_SYNTHESIS_MAX_PRICE         → max_price
+
+Special: MISTRAL_API_KEY is read without prefix (shared with Vibe CLI).
 """
 
 from __future__ import annotations
+
+import os
 
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Mistral API key — also read by Vibe CLI from MISTRAL_API_KEY directly
-    mistral_api_key: str = ""
-
     # Vibe CLI limits
     max_turns: int = 50
     max_price: float = 2.00
@@ -30,6 +39,11 @@ class Settings(BaseSettings):
     log_dir: str = "/app/logs"
 
     model_config = {"env_prefix": "KILN_SYNTHESIS_"}
+
+    @property
+    def mistral_api_key(self) -> str:
+        """Read MISTRAL_API_KEY directly from env (no prefix — shared with Vibe CLI)."""
+        return os.environ.get("MISTRAL_API_KEY", "")
 
 
 _settings: Settings | None = None
