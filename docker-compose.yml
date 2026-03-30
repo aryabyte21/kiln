@@ -15,9 +15,95 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
 
-  # ── Synthesis Service ───────────────────────────────────────────────────────
+  # ── Registry API (Python — port 8766) ───────────────────────────────────────
+  registry_api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.python
+    command: uv run uvicorn kiln_registry.main:app --host 0.0.0.0 --port 8766 --reload
+    ports:
+      - "8766:8766"
+    volumes:
+      - ./packages/shared/kiln_shared:/app/packages/shared/kiln_shared
+      - ./packages/registry_api/kiln_registry:/app/packages/registry_api/kiln_registry
+      - ./registry:/app/registry
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://kiln:kiln_dev@postgres:5432/kiln_registry
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Chat Backend (Python — port 8765) ───────────────────────────────────────
+  chat_backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.python
+    command: uv run uvicorn kiln_chat_backend.main:app --host 0.0.0.0 --port 8765 --reload
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./packages/shared/kiln_shared:/app/packages/shared/kiln_shared
+      - ./packages/chat_backend/kiln_chat_backend:/app/packages/chat_backend/kiln_chat_backend
+      - ./packages/registry_api/kiln_registry:/app/packages/registry_api/kiln_registry
+      - ./registry:/app/registry
+    env_file: .env
+
+  # ── MCP Server (Python — port 8768) ─────────────────────────────────────────
+  mcp_server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.python
+    command: uv run python -m kiln_mcp.main streamable-http
+    ports:
+      - "8768:8768"
+    volumes:
+      - ./packages/shared/kiln_shared:/app/packages/shared/kiln_shared
+      - ./packages/mcp_server/kiln_mcp:/app/packages/mcp_server/kiln_mcp
+    env_file: .env
+    environment:
+      - KILN_REGISTRY_URL=http://registry_api:8766
+      - KILN_MCP_HOST=0.0.0.0
+    depends_on:
+      - registry_api
+
+  # ── Registry UI (Next.js — port 3000) ───────────────────────────────────────
+  registry_ui:
+    build:
+      context: ./packages/registry_ui
+      dockerfile: ../../docker/Dockerfile.nextjs
+    command: npm run dev -- -H 0.0.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./packages/registry_ui/src:/app/src
+      - ./packages/registry_ui/public:/app/public
+    environment:
+      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
+      - NEXT_PUBLIC_REGISTRY_URL=http://localhost:8766
+    depends_on:
+      - registry_api
+
+  # ── Chat UI (Vite — port 5173) ─────────────────────────────────────────────
+  chat_ui:
+    build:
+      context: ./packages/chat_ui
+      dockerfile: ../../docker/Dockerfile.vite
+    command: npx vite --host 0.0.0.0 --port 5173
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./packages/chat_ui/src:/app/src
+      - ./packages/chat_ui/index.html:/app/index.html
+    environment:
+      - VITE_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    depends_on:
+      - registry_api
+      - chat_backend
+
+  # ── Synthesis Service (Docker — port 8002) ──────────────────────────────────
   synthesis_service:
     build:
       context: ./packages/synthesis_service
@@ -25,18 +111,15 @@ services:
     ports:
       - "8002:8002"
     environment:
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - KILN_SYNTHESIS_MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - KILN_SYNTHESIS_CALLBACK_URL=http://host.docker.internal:8766/synthesis/callback
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILN_SYNTHESIS_MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILN_SYNTHESIS_CALLBACK_URL=http://registry_api:8766/synthesis/callback
       - KILN_SYNTHESIS_INTERNAL_SECRET=${KILN_INTERNAL_SECRET:-}
     volumes:
-      - ./packages/synthesis_service/logs:/app/logs
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+      - synthesis_logs:/app/logs
+    depends_on:
+      - registry_api
 
 volumes:
   pgdata:
+  synthesis_logs:
