@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { useAuth, UserProfile } from "@clerk/nextjs"
-import { Show } from "@clerk/nextjs"
+import { useAuth, UserProfile, Show } from "@clerk/nextjs"
+import { dark } from "@clerk/themes"
 import {
   Key,
   Copy,
@@ -287,6 +287,7 @@ function SettingsContent() {
           <UserProfile
             routing="hash"
             appearance={{
+              baseTheme: dark,
               elements: {
                 rootBox: "w-full",
                 card: "shadow-none w-full",

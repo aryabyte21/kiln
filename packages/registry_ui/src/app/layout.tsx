@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { ClerkProvider, Show, UserButton, SignInButton } from "@clerk/nextjs"
+import { dark } from "@clerk/themes"
 import { Geist, Geist_Mono } from "next/font/google"
 import Link from "next/link"
 import { Flame } from "lucide-react"
@@ -28,9 +29,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="flex min-h-full flex-col bg-background text-foreground">
-        <ClerkProvider>
+        <ClerkProvider appearance={{ baseTheme: dark }}>
           {/* ── Navbar ─────────────────────────────────────────────── */}
           <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-background/60 backdrop-blur-xl">
             <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-6">
@@ -68,6 +70,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <div className="ring-1 ring-white/[0.08] rounded-full p-[2px] transition-all hover:ring-white/[0.16]">
                     <UserButton
                       appearance={{
+                        baseTheme: dark,
                         elements: {
                           avatarBox: "h-7 w-7",
                         },
