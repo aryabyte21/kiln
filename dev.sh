@@ -23,61 +23,69 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# Source env vars for Python services
-set -a
-source .env
-set +a
+# Source root env vars
+set -a; source .env; set +a
 
 # Kill background processes on exit
+PIDS=()
 cleanup() {
   echo ""
   echo -e "${YELLOW}Shutting down all services...${NC}"
-  kill $(jobs -p) 2>/dev/null
+  for pid in "${PIDS[@]}"; do
+    kill "$pid" 2>/dev/null
+  done
   wait 2>/dev/null
   echo -e "${GREEN}All services stopped.${NC}"
 }
 trap cleanup EXIT INT TERM
 
 # 1. Registry API (Python — port 8766)
-echo -e "${BLUE}[1/5] Starting Registry API on :8766${NC}"
-uv run uvicorn kiln_registry.main:app --host 127.0.0.1 --port 8766 --reload &
-sleep 2
+echo -e "${BLUE}[1/5] Registry API → :8766${NC}"
+cd "$ROOT"
+uv run uvicorn kiln_registry.main:app --host 0.0.0.0 --port 8766 --reload &
+PIDS+=($!)
+sleep 3
 
 # 2. Chat Backend (Python — port 8765)
-echo -e "${BLUE}[2/5] Starting Chat Backend on :8765${NC}"
-uv run uvicorn kiln_chat_backend.main:app --host 127.0.0.1 --port 8765 --reload &
+echo -e "${BLUE}[2/5] Chat Backend → :8765${NC}"
+cd "$ROOT"
+uv run uvicorn kiln_chat_backend.main:app --host 0.0.0.0 --port 8765 --reload &
+PIDS+=($!)
 sleep 1
 
 # 3. MCP Server (Python — port 8768)
-echo -e "${BLUE}[3/5] Starting MCP Server on :8768${NC}"
+echo -e "${BLUE}[3/5] MCP Server → :8768${NC}"
+cd "$ROOT"
 uv run python -m kiln_mcp.main streamable-http &
+PIDS+=($!)
 sleep 1
 
-# 4. Chat UI (Vite + React — port 5173)
-echo -e "${BLUE}[4/5] Starting Chat UI on :5173${NC}"
-cd packages/chat_ui && npm run dev -- --host 127.0.0.1 &
+# 4. Chat UI (Vite — port 5173)
+echo -e "${BLUE}[4/5] Chat UI → :5173${NC}"
+cd "$ROOT/packages/chat_ui"
+npx vite --host 0.0.0.0 --port 5173 &
+PIDS+=($!)
 cd "$ROOT"
 sleep 1
 
 # 5. Registry UI (Next.js — port 3000)
-echo -e "${BLUE}[5/5] Starting Registry UI on :3000${NC}"
-cd packages/registry_ui && npm run dev &
+echo -e "${BLUE}[5/5] Registry UI → :3000${NC}"
+cd "$ROOT/packages/registry_ui"
+npx next dev --hostname 0.0.0.0 --port 3000 &
+PIDS+=($!)
 cd "$ROOT"
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}🔥 Kiln is running!${NC}"
 echo ""
-echo -e "  Registry UI   ${BLUE}http://localhost:3000${NC}        (Next.js)"
-echo -e "  Chat UI       ${BLUE}http://localhost:5173${NC}        (Vite + OpenUI)"
-echo -e "  Registry API  ${BLUE}http://localhost:8766/tools${NC}  (FastAPI)"
-echo -e "  Chat Backend  ${BLUE}http://localhost:8765/health${NC} (FastAPI)"
-echo -e "  MCP Server    ${BLUE}http://localhost:8768/mcp${NC}    (MCP protocol)"
-echo ""
-echo -e "  MCP config:   ${YELLOW}{\"mcpServers\":{\"kiln\":{\"url\":\"http://localhost:8768/mcp\"}}}${NC}"
+echo -e "  Registry UI   ${BLUE}http://localhost:3000${NC}"
+echo -e "  Chat UI       ${BLUE}http://localhost:5173${NC}"
+echo -e "  Registry API  ${BLUE}http://localhost:8766/tools${NC}"
+echo -e "  Chat Backend  ${BLUE}http://localhost:8765/health${NC}"
+echo -e "  MCP Server    ${BLUE}http://localhost:8768/mcp${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo "Press Ctrl+C to stop all services."
 
-# Wait for all background processes
 wait
