@@ -3,7 +3,10 @@
  * Used in API routes and Server Components.
  */
 
-const REGISTRY_URL = process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766"
+// Server-side uses internal Docker network, client-side uses localhost
+const REGISTRY_URL = typeof window === "undefined"
+  ? (process.env.REGISTRY_API_INTERNAL || process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766")
+  : (process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766")
 
 export interface ToolParam {
   name: string
