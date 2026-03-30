@@ -7,7 +7,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint . --config eslint.config.mjs --max-warnings=0"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.143",

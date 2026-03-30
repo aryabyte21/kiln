@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { Check, Code, Copy, Loader2, Play } from "lucide-react"
 
@@ -21,6 +21,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const TAB_VALUES = ["overview", "playground", "integration"] as const
+
+type TabValue = (typeof TAB_VALUES)[number]
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 const REGISTRY_URL =
   process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766"
@@ -44,6 +51,13 @@ function coerceValue(raw: unknown, type: string): unknown {
   if (type === "float" || type === "number") return Number(raw)
   if (type === "bool" || type === "boolean") return Boolean(raw)
   return raw
+}
+
+function getTabValueFromHash(hash: string): TabValue {
+  const value = hash.replace(/^#/, "")
+  return (TAB_VALUES as readonly string[]).includes(value)
+    ? (value as TabValue)
+    : "overview"
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +88,7 @@ function CopyButton({
       onClick={handleCopy}
     >
       {copied ? (
-        <Check className="size-3.5" />
+        <Check className="size-3.5 text-emerald-400" />
       ) : (
         <Copy className="size-3.5" />
       )}
@@ -83,20 +97,199 @@ function CopyButton({
 }
 
 // ---------------------------------------------------------------------------
-// CodeBlock
+// CodeBlock with syntax highlighting via Tailwind
 // ---------------------------------------------------------------------------
+
+function highlightCode(code: string, language: string): React.ReactNode[] {
+  const lines = code.split("\n")
+  return lines.map((line, i) => {
+    let highlighted: React.ReactNode
+
+    if (language === "python") {
+      highlighted = highlightPython(line)
+    } else if (language === "bash") {
+      highlighted = highlightBash(line)
+    } else if (language === "json") {
+      highlighted = highlightJson(line)
+    } else {
+      highlighted = line
+    }
+
+    return (
+      <div key={i} className="leading-relaxed">
+        {highlighted}
+      </div>
+    )
+  })
+}
+
+function highlightPython(line: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  // Simple regex-based highlighting
+  const regex =
+    /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(from|import|def|class|return|if|else|elif|for|while|with|as|try|except|raise|print|True|False|None)\b/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(line.slice(lastIndex, match.index))
+    }
+
+    if (match[1]) {
+      // Comment
+      parts.push(
+        <span key={match.index} className="text-muted-foreground/60 italic">
+          {match[1]}
+        </span>
+      )
+    } else if (match[2]) {
+      // String
+      parts.push(
+        <span key={match.index} className="text-emerald-400">
+          {match[2]}
+        </span>
+      )
+    } else if (match[3]) {
+      // Keyword
+      parts.push(
+        <span key={match.index} className="text-violet-400 font-medium">
+          {match[3]}
+        </span>
+      )
+    }
+
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < line.length) {
+    parts.push(line.slice(lastIndex))
+  }
+
+  return <>{parts}</>
+}
+
+function highlightBash(line: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  const regex =
+    /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(curl|POST|GET|PUT|DELETE)\b|(-[A-Za-z]+|--[a-z-]+)|(\\$)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(line.slice(lastIndex, match.index))
+    }
+
+    if (match[1]) {
+      parts.push(
+        <span key={match.index} className="text-muted-foreground/60 italic">
+          {match[1]}
+        </span>
+      )
+    } else if (match[2]) {
+      parts.push(
+        <span key={match.index} className="text-emerald-400">
+          {match[2]}
+        </span>
+      )
+    } else if (match[3]) {
+      parts.push(
+        <span key={match.index} className="text-blue-400 font-medium">
+          {match[3]}
+        </span>
+      )
+    } else if (match[4]) {
+      parts.push(
+        <span key={match.index} className="text-amber-400">
+          {match[4]}
+        </span>
+      )
+    } else if (match[5]) {
+      parts.push(
+        <span key={match.index} className="text-muted-foreground/50">
+          {match[5]}
+        </span>
+      )
+    }
+
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < line.length) {
+    parts.push(line.slice(lastIndex))
+  }
+
+  return <>{parts}</>
+}
+
+function highlightJson(line: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  const regex =
+    /("(?:[^"\\]|\\.)*")\s*(:?)|\b(true|false|null)\b|(-?\d+\.?\d*)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(line.slice(lastIndex, match.index))
+    }
+
+    if (match[1] && match[2]) {
+      // Key
+      parts.push(
+        <span key={match.index} className="text-blue-400">
+          {match[1]}
+        </span>
+      )
+      parts.push(match[2])
+    } else if (match[1]) {
+      // String value
+      parts.push(
+        <span key={match.index} className="text-emerald-400">
+          {match[1]}
+        </span>
+      )
+    } else if (match[3]) {
+      // Boolean/null
+      parts.push(
+        <span key={match.index} className="text-amber-400">
+          {match[3]}
+        </span>
+      )
+    } else if (match[4]) {
+      // Number
+      parts.push(
+        <span key={match.index} className="text-orange-400">
+          {match[4]}
+        </span>
+      )
+    }
+
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < line.length) {
+    parts.push(line.slice(lastIndex))
+  }
+
+  return <>{parts}</>
+}
 
 function CodeBlock({ code, language }: { code: string; language: string }) {
   return (
-    <div className="group/code relative rounded-lg border border-border bg-muted/50 dark:bg-muted/30">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="group/code relative overflow-hidden rounded-xl border border-border/70 bg-card/70 ring-1 ring-border/70">
+      <div className="flex items-center justify-between border-b border-border/70 bg-muted/35 px-4 py-2">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">
           {language}
         </span>
-        <CopyButton text={code} />
+        <CopyButton
+          text={code}
+          className="opacity-0 transition-opacity duration-200 group-hover/code:opacity-100"
+        />
       </div>
-      <pre className="overflow-x-auto p-4 text-sm leading-relaxed">
-        <code className="text-foreground/90">{code}</code>
+      <pre className="overflow-x-auto p-4 text-sm font-mono">
+        <code className="text-foreground/90">{highlightCode(code, language)}</code>
       </pre>
     </div>
   )
@@ -109,61 +302,82 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
 function OverviewTab({ params }: { params: ToolParam[] }) {
   if (params.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        This tool does not define any input parameters.
-      </p>
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <div className="flex size-12 items-center justify-center rounded-xl bg-muted/50 ring-1 ring-border/70">
+          <Code className="size-5 text-muted-foreground/50" />
+        </div>
+        <p className="text-sm text-muted-foreground">
+          This tool does not define any input parameters.
+        </p>
+      </div>
     )
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="mb-3 text-base font-semibold">Input Parameters</h3>
-        <div className="overflow-x-auto rounded-lg border border-border">
+        <h3 className="mb-4 text-base font-semibold">Input Parameters</h3>
+        <div className="overflow-x-auto rounded-xl border border-border/70 ring-1 ring-border/70">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border bg-muted/50 dark:bg-muted/30">
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
+              <tr className="border-b border-border/70 bg-muted/35">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                   Name
                 </th>
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                   Type
                 </th>
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                   Required
                 </th>
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                   Default
                 </th>
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                   Description
                 </th>
               </tr>
             </thead>
             <tbody>
-              {params.map((p) => (
+              {params.map((p, index) => (
                 <tr
                   key={p.name}
-                  className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
+                  className={`border-b border-border/50 transition-colors duration-200 last:border-0 hover:bg-muted/30 ${
+                    index % 2 === 1 ? "bg-muted/15" : ""
+                  }`}
                 >
-                  <td className="px-4 py-2.5 font-mono text-xs font-medium">
-                    {p.name}
+                  <td className="px-4 py-3">
+                    <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-xs font-medium text-primary">
+                      {p.name}
+                    </code>
                   </td>
-                  <td className="px-4 py-2.5">
-                    <Badge variant="secondary">{p.type}</Badge>
+                  <td className="px-4 py-3">
+                    <Badge variant="secondary" className="bg-violet-500/10 text-violet-400 text-[11px]">
+                      {p.type}
+                    </Badge>
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className="px-4 py-3">
                     {p.required ? (
-                      <Badge variant="destructive">required</Badge>
+                      <Badge className="bg-red-500/10 text-red-400 text-[11px] border-0">
+                        required
+                      </Badge>
                     ) : (
-                      <span className="text-muted-foreground">optional</span>
+                      <span className="text-xs text-muted-foreground/60">optional</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
-                    {p.default !== undefined ? String(p.default) : "\u2014"}
+                  <td className="px-4 py-3">
+                    {p.default !== undefined ? (
+                      <code className="font-mono text-xs text-muted-foreground">
+                        {String(p.default)}
+                      </code>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/40">{"\u2014"}</span>
+                    )}
                   </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {p.description || "\u2014"}
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {p.description || (
+                      <span className="text-muted-foreground/40">{"\u2014"}</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -240,7 +454,7 @@ function PlaygroundTab({
 
   if (!isSignedIn) {
     return (
-      <Card>
+      <Card className="section-surface border-0 py-0">
         <CardHeader>
           <CardTitle>Authentication Required</CardTitle>
           <CardDescription>
@@ -253,9 +467,12 @@ function PlaygroundTab({
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="section-surface border-0 py-0">
         <CardHeader>
-          <CardTitle>Parameters</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Play className="size-4 text-muted-foreground" />
+            Parameters
+          </CardTitle>
           <CardDescription>
             Fill in the parameters below and click Execute to run this tool.
           </CardDescription>
@@ -266,23 +483,25 @@ function PlaygroundTab({
               This tool has no parameters.
             </p>
           ) : (
-            <div className="grid gap-4">
+            <div className="grid gap-5">
               {params.map((p) => (
                 <div key={p.name} className="grid gap-1.5">
                   <label
                     htmlFor={`param-${p.name}`}
                     className="flex items-center gap-2 text-sm font-medium"
                   >
-                    <span className="font-mono">{p.name}</span>
-                    <Badge variant="outline" className="text-[10px]">
+                    <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-xs text-primary">
+                      {p.name}
+                    </code>
+                    <Badge variant="outline" className="border-border/70 bg-card/70 text-[10px]">
                       {p.type}
                     </Badge>
                     {p.required && (
-                      <span className="text-xs text-destructive">*</span>
+                      <span className="text-xs text-red-400">*</span>
                     )}
                   </label>
                   {p.description && (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground/70">
                       {p.description}
                     </p>
                   )}
@@ -302,7 +521,7 @@ function PlaygroundTab({
         size="lg"
         onClick={handleExecute}
         disabled={isExecuting}
-        className="w-full gap-2 sm:w-auto"
+        className="w-full gap-2 bg-gradient-to-r from-primary to-primary/80 shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-primary/20 sm:w-auto"
       >
         {isExecuting ? (
           <Loader2 className="size-4 animate-spin" />
@@ -313,12 +532,12 @@ function PlaygroundTab({
       </Button>
 
       {error && (
-        <Card className="border-destructive/50">
+        <Card className="section-surface border-red-500/35 bg-red-500/10 py-0">
           <CardHeader>
-            <CardTitle className="text-destructive">Error</CardTitle>
+            <CardTitle className="text-red-300">Error</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-sm text-red-200/90">{error}</p>
           </CardContent>
         </Card>
       )}
@@ -329,11 +548,10 @@ function PlaygroundTab({
             <h3 className="text-sm font-semibold">Result</h3>
             <CopyButton text={JSON.stringify(result, null, 2)} />
           </div>
-          <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-4 text-sm leading-relaxed dark:bg-muted/30">
-            <code className="text-foreground/90">
-              {JSON.stringify(result, null, 2)}
-            </code>
-          </pre>
+          <CodeBlock
+            code={JSON.stringify(result, null, 2)}
+            language="json"
+          />
         </div>
       )}
     </div>
@@ -358,7 +576,7 @@ function FieldInput({
         id={id}
         value={String(value ?? "")}
         onChange={(e) => onChange(param.name, e.target.value)}
-        className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+        className="h-9 w-full rounded-xl border border-border/70 bg-card/70 px-3 text-sm outline-none ring-1 ring-border/70 transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary/30"
       >
         <option value="">Select...</option>
         {param.enum.map((opt) => (
@@ -403,6 +621,7 @@ function FieldInput({
         value={String(value ?? "")}
         onChange={(e) => onChange(param.name, e.target.value)}
         placeholder={param.default !== undefined ? String(param.default) : ""}
+        className="rounded-xl border-border/70 bg-card/70 ring-1 ring-border/70 transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary/30"
       />
     )
   }
@@ -415,6 +634,7 @@ function FieldInput({
       value={String(value ?? "")}
       onChange={(e) => onChange(param.name, e.target.value)}
       placeholder={param.default !== undefined ? String(param.default) : ""}
+      className="rounded-xl border-border/70 bg-card/70 ring-1 ring-border/70 transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary/30"
     />
   )
 }
@@ -455,10 +675,10 @@ print(result)`
   const jsonSchema = JSON.stringify(toolDef, null, 2)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
         <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <Code className="size-4" />
+          <Code className="size-4 text-violet-400" />
           Python
         </h3>
         <CodeBlock code={pythonSnippet} language="python" />
@@ -466,7 +686,7 @@ print(result)`
 
       <div>
         <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <Code className="size-4" />
+          <Code className="size-4 text-blue-400" />
           HTTP (curl)
         </h3>
         <CodeBlock code={curlSnippet} language="bash" />
@@ -474,16 +694,18 @@ print(result)`
 
       <div>
         <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <Code className="size-4" />
+          <Code className="size-4 text-amber-400" />
           Tool Definition (JSON Schema)
         </h3>
         <CodeBlock code={jsonSchema} language="json" />
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground/70">
         Replace{" "}
-        <code className="rounded bg-muted px-1 py-0.5">YOUR_API_KEY</code> with
-        your actual API key. You can generate one in your account settings.
+        <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-primary/90">
+          YOUR_API_KEY
+        </code>{" "}
+        with your actual API key. You can generate one in your account settings.
       </p>
     </div>
   )
@@ -502,8 +724,37 @@ export function ToolDetailTabs({
   params: ToolParam[]
   toolDef: Record<string, unknown>
 }) {
+  const [activeTab, setActiveTab] = useState<TabValue>("overview")
+
+  useIsomorphicLayoutEffect(() => {
+    const syncFromHash = () => {
+      setActiveTab(getTabValueFromHash(window.location.hash))
+    }
+
+    syncFromHash()
+    window.addEventListener("hashchange", syncFromHash)
+
+    return () => {
+      window.removeEventListener("hashchange", syncFromHash)
+    }
+  }, [])
+
+  const handleTabChange = useCallback((value: string) => {
+    const nextTab = getTabValueFromHash(value)
+    setActiveTab(nextTab)
+
+    const nextHash = `#${nextTab}`
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${window.location.search}${nextHash}`
+      )
+    }
+  }, [])
+
   return (
-    <Tabs defaultValue="overview">
+    <Tabs value={activeTab} onValueChange={handleTabChange}>
       <TabsList variant="line">
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="playground">
