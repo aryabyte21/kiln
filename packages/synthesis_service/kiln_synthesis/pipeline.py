@@ -79,7 +79,7 @@ async def run_synthesis_pipeline(job_id: str, request: SynthesizeRequest) -> Non
     GET /synthesize/{job_id}/events.
     """
     settings = get_settings()
-    callback_url = request.callback_url or settings.kiln_callback_url
+    callback_url = request.callback_url or settings.callback_url
     tool_id = f"com.kiln.tools.{request.tool_name}"
 
     try:
