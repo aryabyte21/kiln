@@ -57,9 +57,10 @@ app = FastAPI(
 # Allow requests from the React dev server (localhost:5173) and any local origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 @app.on_event("startup")

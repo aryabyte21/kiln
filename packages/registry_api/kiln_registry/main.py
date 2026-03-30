@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -66,9 +67,10 @@ app = FastAPI(
 # Allow requests from the React dev server (localhost:5173) and any local origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -196,6 +198,29 @@ def serve_audio(path: str):
     suffix = file.suffix.lower()
     media_types = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac"}
     return FileResponse(file, media_type=media_types.get(suffix, "application/octet-stream"))
+
+
+@app.get("/tools/stats", summary="Registry statistics")
+def tool_stats():
+    """Returns tool count, categories breakdown, and tag distribution."""
+    registry = get_global_registry()
+    tools = registry.list()
+    categories: dict[str, int] = {}
+    tags: dict[str, int] = {}
+    authors: set[str] = set()
+    for t in tools:
+        cat = t.spec.category or "uncategorized"
+        categories[cat] = categories.get(cat, 0) + 1
+        for tag in t.spec.tags:
+            tags[tag] = tags.get(tag, 0) + 1
+        if t.spec.author:
+            authors.add(t.spec.author)
+    return {
+        "total": len(tools),
+        "categories": dict(sorted(categories.items(), key=lambda x: -x[1])),
+        "tags": dict(sorted(tags.items(), key=lambda x: -x[1])[:20]),
+        "unique_authors": len(authors),
+    }
 
 
 @app.get("/tools", summary="List all registered tools")
