@@ -346,7 +346,13 @@ def main():
     logger.info("Loaded %d tools from registry (%s)", count, REGISTRY_URL)
     logger.info("Starting Kiln MCP Server on %s:%s (transport: %s)", host, port, transport)
 
-    mcp.run(transport=transport, host=host, port=port)
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        # For HTTP transports, get the ASGI app and run with uvicorn directly
+        import uvicorn
+        app = mcp.streamable_http_app()
+        uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
