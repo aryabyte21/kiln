@@ -544,6 +544,7 @@ async def kiln_stream(run_id: str):
         finally:
             with _run_lock:
                 _run_queues.pop(run_id, None)
+                _run_plans.pop(run_id, None)
 
     return StreamingResponse(
         _generate(),

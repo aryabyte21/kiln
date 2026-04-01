@@ -219,8 +219,8 @@ def verify_internal_secret(request: Request) -> None:
 
 async def require_auth(request: Request) -> KilnUser:
     """
-    FastAPI dependency: authenticate via JWT or API key.
-    Raises 401 if neither is valid.
+    FastAPI dependency: authenticate via JWT, API key, or internal secret.
+    Raises 401 if none are valid.
     """
     # Try JWT first
     auth_header = request.headers.get("Authorization", "")
@@ -232,6 +232,13 @@ async def require_auth(request: Request) -> KilnUser:
     api_key = request.headers.get("X-API-Key", "")
     if api_key:
         return await _verify_api_key(api_key)
+
+    # Fall back to internal service secret (for service-to-service calls)
+    internal_secret = request.headers.get("X-Internal-Secret", "")
+    if internal_secret:
+        config = get_config()
+        if config.internal_secret and internal_secret == config.internal_secret:
+            return KilnUser(user_id="internal", email="", name="internal-service")
 
     raise HTTPException(
         status_code=401,
