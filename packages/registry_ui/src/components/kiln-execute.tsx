@@ -126,6 +126,7 @@ export function KilnExecute() {
       abortRef.current = new AbortController()
       const streamResp = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`, {
         signal: abortRef.current.signal,
+        headers,
       })
 
       if (!streamResp.ok || !streamResp.body) {

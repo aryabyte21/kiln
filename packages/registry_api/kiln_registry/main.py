@@ -426,10 +426,17 @@ def _read_tool_source(tool_id: str) -> tuple[str, str, list[str]] | None:
     if tool_dir is None:
         return None
 
-    spec_raw = yaml.safe_load((tool_dir / "spec.yaml").read_text())
+    try:
+        spec_raw = yaml.safe_load((tool_dir / "spec.yaml").read_text())
+    except Exception:
+        return None
+
     entrypoint = spec_raw.get("implementation", {}).get("entrypoint", "impl.py")
     function_name = spec_raw.get("tool", {}).get("name", "")
     deps = spec_raw.get("implementation", {}).get("dependencies", [])
+
+    if not function_name:
+        return None
 
     impl_path = tool_dir / entrypoint
     if not impl_path.exists():

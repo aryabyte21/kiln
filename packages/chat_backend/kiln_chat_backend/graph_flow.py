@@ -118,6 +118,7 @@ def _make_http_tool(
         r = requests.post(
             f"{url}/tools/{tid}/execute",
             json={"args": args},
+            headers={"X-Internal-Secret": os.environ.get("KILN_INTERNAL_SECRET", "")},
             timeout=30,
         )
         r.raise_for_status()
