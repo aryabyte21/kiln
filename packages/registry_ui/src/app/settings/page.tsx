@@ -270,30 +270,49 @@ function ApiKeySection() {
             </div>
 
             {isServerMaskedKey && (
-              <p className="text-xs text-muted-foreground">
-                Existing keys are masked by default. Regenerate to get a new
-                plaintext key for copying.
-              </p>
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-400">
+                Your key is masked for security. Click <strong>Reveal &amp; Copy</strong> to
+                get a fresh key you can copy. This will replace your current key.
+              </div>
             )}
 
             <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={regenerateApiKey}
-                disabled={isRegenerating}
-                className="gap-1.5"
-              >
-                {isRegenerating ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-3.5" />
-                )}
-                Regenerate
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                This will invalidate your current key
-              </p>
+              {isServerMaskedKey ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={regenerateApiKey}
+                  disabled={isRegenerating}
+                  className="gap-1.5"
+                >
+                  {isRegenerating ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Key className="size-3.5" />
+                  )}
+                  Reveal &amp; Copy
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={regenerateApiKey}
+                  disabled={isRegenerating}
+                  className="gap-1.5"
+                >
+                  {isRegenerating ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  Regenerate
+                </Button>
+              )}
+              {!isServerMaskedKey && (
+                <p className="text-xs text-muted-foreground">
+                  This will invalidate your current key
+                </p>
+              )}
             </div>
           </>
         ) : (
