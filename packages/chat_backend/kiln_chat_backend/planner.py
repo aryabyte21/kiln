@@ -154,6 +154,8 @@ class KilnPlanner:
             ) from None
 
     def _call_planner(self, user_request: str, tools: list[dict]) -> dict:
+        import time
+
         tool_summary = "\n".join(
             f"  - {t['id']}: {t['description'][:80]}"
             for t in tools
@@ -165,14 +167,30 @@ class KilnPlanner:
             "Produce the task graph JSON now."
         )
 
-        response = self._client.chat.complete(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": PLANNER_SYSTEM},
-                {"role": "user",   "content": user_msg},
-            ],
-            response_format={"type": "json_object"},
-        )
+        # Retry on rate limit (429) with exponential backoff
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = self._client.chat.complete(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": PLANNER_SYSTEM},
+                        {"role": "user",   "content": user_msg},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                err_str = str(exc)
+                if "429" in err_str or "rate" in err_str.lower() or "capacity" in err_str.lower():
+                    wait = 2 ** attempt * 2  # 2s, 4s, 8s
+                    logger.warning("Mistral rate limited (attempt %d/3), retrying in %ds", attempt + 1, wait)
+                    time.sleep(wait)
+                    continue
+                raise  # non-retryable error
+        else:
+            raise last_error  # type: ignore[misc]
 
         raw = response.choices[0].message.content
 

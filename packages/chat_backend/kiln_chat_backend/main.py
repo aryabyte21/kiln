@@ -359,7 +359,19 @@ async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
         ) from exc
 
     planner = KilnPlanner(registry_url=REGISTRY_URL, api_key=api_key)
-    graph   = planner.plan(user_request, tools=tools_list)
+    try:
+        graph = planner.plan(user_request, tools=tools_list)
+    except Exception as exc:
+        err_str = str(exc)
+        if "429" in err_str or "rate" in err_str.lower() or "capacity" in err_str.lower():
+            raise HTTPException(
+                status_code=429,
+                detail="LLM rate limit exceeded. Please wait a moment and try again.",
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Planner failed: {err_str[:200]}",
+        ) from exc
 
     run_id = str(uuid.uuid4())
     _run_plans[run_id]  = graph
