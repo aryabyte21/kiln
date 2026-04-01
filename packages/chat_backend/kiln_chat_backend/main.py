@@ -41,9 +41,9 @@ load_dotenv()
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REGISTRY_DIR          = Path(__file__).parent.parent.parent.parent / "registry" / "tools"
-REGISTRY_URL          = "http://localhost:8766"
-SYNTHESIS_URL         = "http://localhost:8002"
-KILN_CALLBACK_URL     = "http://host.docker.internal:8766/synthesis/callback"
+REGISTRY_URL          = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
+SYNTHESIS_URL         = os.environ.get("KILN_SYNTHESIS_URL", "http://localhost:8002")
+KILN_CALLBACK_URL     = os.environ.get("KILN_CALLBACK_URL", "http://host.docker.internal:8766/synthesis/callback")
 
 app = FastAPI(
     title="KilnChatBackend",
@@ -489,7 +489,8 @@ def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_k
             q.put({"type": "error", "message": str(exc)})
         finally:
             q.put(None)  # sentinel — stream is done
-            _run_plans.pop(run_id, None)
+            with _run_lock:
+                _run_plans.pop(run_id, None)
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -512,7 +513,8 @@ async def kiln_stream(run_id: str):
         const src = new EventSource('/kiln/stream/<run_id>')
         src.onmessage = (e) => handleEvent(JSON.parse(e.data))
     """
-    q = _run_queues.get(run_id)
+    with _run_lock:
+        q = _run_queues.get(run_id)
     if q is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
@@ -528,7 +530,8 @@ async def kiln_stream(run_id: str):
         except Empty:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Timed out'})}\n\n"
         finally:
-            _run_queues.pop(run_id, None)
+            with _run_lock:
+                _run_queues.pop(run_id, None)
 
     return StreamingResponse(
         _generate(),

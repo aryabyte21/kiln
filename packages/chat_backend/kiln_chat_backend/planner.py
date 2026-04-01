@@ -39,9 +39,12 @@ Triggering synthesis is the caller's responsibility.
 from __future__ import annotations
 
 import json
+import logging
 
 import requests
 from mistralai.client import Mistral
+
+logger = logging.getLogger(__name__)
 
 PLANNER_SYSTEM = """\
 You are Kiln's task planner. Your job is to decompose a user request into a \
@@ -172,6 +175,28 @@ class KilnPlanner:
         )
 
         raw = response.choices[0].message.content
-        graph = json.loads(raw)
+
+        try:
+            graph = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.error("Mistral returned invalid JSON: %s", raw[:300])
+            # Return a minimal single-node graph so execution can still proceed
+            return {
+                "task": user_request,
+                "nodes": [
+                    {
+                        "id": "fallback",
+                        "role": "GeneralAgent",
+                        "task": user_request,
+                        "tools": [],
+                    }
+                ],
+                "edges": [],
+                "entry_nodes": ["fallback"],
+                "exit_node": "fallback",
+                "missing_tools": [],
+                "_parse_error": str(exc),
+            }
+
         graph["task"] = user_request      # ensure original request is preserved
         return graph

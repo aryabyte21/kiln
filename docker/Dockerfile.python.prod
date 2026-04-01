@@ -1,0 +1,70 @@
+# Multi-stage production Dockerfile for Kiln Python services.
+#
+# Usage:
+#   docker build -f docker/Dockerfile.python.prod \
+#     --build-arg SERVICE=registry_api \
+#     --build-arg MODULE=kiln_registry.main:app \
+#     --build-arg PORT=8766 \
+#     -t kiln-registry-api .
+
+# ── Stage 1: Install dependencies ──────────────────────────────────────────
+FROM python:3.13-slim AS builder
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# Copy dependency files first (cache layer)
+COPY pyproject.toml uv.lock ./
+COPY packages/shared/pyproject.toml packages/shared/pyproject.toml
+COPY packages/registry_api/pyproject.toml packages/registry_api/pyproject.toml
+COPY packages/chat_backend/pyproject.toml packages/chat_backend/pyproject.toml
+COPY packages/synthesis_service/pyproject.toml packages/synthesis_service/pyproject.toml
+COPY packages/tool_executor/pyproject.toml packages/tool_executor/pyproject.toml
+COPY packages/mcp_server/pyproject.toml packages/mcp_server/pyproject.toml
+
+# Install all workspace dependencies
+RUN uv sync --no-dev --frozen 2>/dev/null || uv sync --no-dev
+
+# ── Stage 2: Production image ──────────────────────────────────────────────
+FROM python:3.13-slim AS runtime
+
+ARG SERVICE=registry_api
+ARG MODULE=kiln_registry.main:app
+ARG PORT=8766
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=${PORT}
+
+# Install runtime deps (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r kiln && useradd -r -g kiln -d /app kiln
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Copy source code
+COPY packages/shared/ packages/shared/
+COPY packages/${SERVICE}/ packages/${SERVICE}/
+
+# Copy registry tools (only needed by registry_api and chat_backend)
+COPY registry/ registry/
+
+# Own everything by kiln user
+RUN chown -R kiln:kiln /app
+
+USER kiln
+
+EXPOSE ${PORT}
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD curl -f http://localhost:${PORT}/health || exit 1
+
+CMD ["sh", "-c", "uvicorn ${MODULE} --host 0.0.0.0 --port ${PORT}"]

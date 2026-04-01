@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REGISTRY_DIR         = Path(__file__).parent.parent.parent.parent / "registry" / "tools"
-KILN_CALLBACK_URL    = "http://host.docker.internal:8766/synthesis/callback"
+KILN_CALLBACK_URL    = os.environ.get("KILN_CALLBACK_URL", "http://host.docker.internal:8766/synthesis/callback")
 
 app = FastAPI(
     title="KilnRegistryAPI",
@@ -409,19 +409,49 @@ async def register_tool(
     )
 
 
+TOOL_EXECUTOR_URL = os.environ.get("TOOL_EXECUTOR_URL", "http://localhost:8767")
+
+
+def _read_tool_source(tool_id: str) -> tuple[str, str, list[str]] | None:
+    """Read a tool's source code, function name, and requirements from disk.
+
+    Returns (code, function_name, requirements) or None if not found.
+    """
+    tool_dir = None
+    for candidate in sorted(REGISTRY_DIR.glob(f"{tool_id}/*/"), reverse=True):
+        if (candidate / "spec.yaml").exists():
+            tool_dir = candidate
+            break
+
+    if tool_dir is None:
+        return None
+
+    spec_raw = yaml.safe_load((tool_dir / "spec.yaml").read_text())
+    entrypoint = spec_raw.get("implementation", {}).get("entrypoint", "impl.py")
+    function_name = spec_raw.get("tool", {}).get("name", "")
+    deps = spec_raw.get("implementation", {}).get("dependencies", [])
+
+    impl_path = tool_dir / entrypoint
+    if not impl_path.exists():
+        return None
+
+    return impl_path.read_text(), function_name, deps
+
+
 @app.post("/tools/{tool_id:path}/execute", summary="Execute a registered tool")
-def execute_tool(tool_id: str, body: dict, _user: KilnUser = Depends(require_auth)):
+async def execute_tool(tool_id: str, body: dict, _user: KilnUser = Depends(require_auth)):
     """
     Execute a registered tool with the provided arguments.
 
     Body:
-        {"args": {"location": "Singapore", "units": "celsius"}}
+        {"args": {"location": "Singapore", "units": "celsius"},
+         "env_vars": {"API_KEY": "..."}}   # optional
+
+    Delegates execution to the Tool Executor service for isolated subprocess
+    execution. Falls back to in-process execution if the executor is unavailable.
 
     Returns:
         {"success": true, "tool_id": "...", "result": {...}}
-
-    Agents call this after the LLM picks a tool and provides arguments.
-    This is the hot path — keep it fast.
     """
     registry = get_global_registry()
     tool = registry.get(tool_id)
@@ -429,7 +459,40 @@ def execute_tool(tool_id: str, body: dict, _user: KilnUser = Depends(require_aut
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
 
     args = body.get("args", {})
+    env_vars = body.get("env_vars", {})
 
+    # Try delegating to the Tool Executor service
+    source = _read_tool_source(tool_id)
+    if source is not None:
+        code, function_name, requirements = source
+        config = get_config()
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    f"{TOOL_EXECUTOR_URL}/execute",
+                    json={
+                        "tool_id": tool_id,
+                        "function_name": function_name,
+                        "code": code,
+                        "args": args,
+                        "requirements": requirements,
+                        "timeout": 30,
+                        "env_vars": env_vars,
+                    },
+                    headers={"X-Internal-Secret": config.internal_secret},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success"):
+                        return {"success": True, "tool_id": tool_id, "result": data["result"]}
+                    else:
+                        raise HTTPException(status_code=500, detail=data.get("error", "Executor error"))
+        except httpx.ConnectError:
+            logger.debug("Tool Executor unavailable, falling back to in-process execution")
+        except httpx.TimeoutException:
+            logger.warning("Tool Executor timed out for %s", tool_id)
+
+    # Fallback: in-process execution (local dev without executor running)
     try:
         result = tool.fn(**args)
     except TypeError as exc:
