@@ -1,7 +1,7 @@
 """
 kiln_chat_backend/graph_flow.py
 ───────────────────────────────
-KilnGraphFlow — Phase 4.
+KilnGraphFlow — Phase 4 (AG2 multi-agent execution).
 
 Takes the task graph produced by KilnPlanner and executes it as a
 directed AG2 multi-agent workflow.
