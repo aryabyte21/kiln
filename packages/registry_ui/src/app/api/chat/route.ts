@@ -1,21 +1,34 @@
 /**
- * /api/chat — Bridge between AI SDK useChat and Kiln's chat backend.
+ * /api/chat — Bridge between AI SDK v6 useChat and Kiln's chat backend.
  *
  * AI SDK v6 useChat + DefaultChatTransport sends: { messages: [...] }
  * We extract the last user message, call /kiln/start, connect to the SSE
- * stream, and convert Kiln events to AI SDK's UIMessageStream format.
+ * stream, and convert Kiln events to AI SDK UIMessageStream format.
+ *
+ * UIMessageStream protocol (SSE):
+ *   data: {"type":"text-start","id":"<partId>"}\n\n
+ *   data: {"type":"text-delta","id":"<partId>","delta":"text"}\n\n
+ *   data: {"type":"text-end","id":"<partId>"}\n\n
+ *   data: [DONE]\n\n
+ *
+ * Header: x-vercel-ai-ui-message-stream: v1
  */
 
 const CHAT_BACKEND = process.env.CHAT_BACKEND_INTERNAL || process.env.NEXT_PUBLIC_CHAT_BACKEND || "http://localhost:8765"
 
+const UI_STREAM_HEADERS = {
+  "content-type": "text/event-stream",
+  "cache-control": "no-cache",
+  "connection": "keep-alive",
+  "x-vercel-ai-ui-message-stream": "v1",
+  "x-accel-buffering": "no",
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
-
-  // AI SDK v6 sends messages array
   const messages = body.messages || []
   const lastUser = [...messages].reverse().find((m: { role: string }) => m.role === "user")
 
-  // Extract text from content (could be string or parts array)
   let query = ""
   if (typeof lastUser?.content === "string") {
     query = lastUser.content
@@ -24,10 +37,9 @@ export async function POST(req: Request) {
   }
 
   if (!query.trim()) {
-    return uiStream("Please provide a query.")
+    return uiTextResponse("Please provide a query.")
   }
 
-  // Forward auth header to chat backend
   const authHeader = req.headers.get("authorization")
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (authHeader) headers["Authorization"] = authHeader
@@ -42,13 +54,13 @@ export async function POST(req: Request) {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: `Error ${res.status}` }))
       const msg = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail)
-      return uiStream(`Error: ${msg}`)
+      return uiTextResponse(`Error: ${msg}`)
     }
 
     const data = await res.json()
 
     if (data.status === "needs_config") {
-      // Auto-execute with empty env vars — let tools handle missing keys
+      // Auto-execute with empty env vars
       const execRes = await fetch(`${CHAT_BACKEND}/kiln/execute/${data.run_id}`, {
         method: "POST",
         headers,
@@ -56,71 +68,65 @@ export async function POST(req: Request) {
       })
       if (!execRes.ok) {
         const missing = data.missing_envs?.map((e: { var_name: string }) => e.var_name).join(", ")
-        return uiStream(`Missing API keys: ${missing}\n\nPlease configure them in the server environment.`)
+        return uiTextResponse(`Missing API keys: ${missing}\n\nPlease configure them in the server environment.`)
       }
     }
 
-    // Stream execution events as AI SDK UIMessageStream
     return streamKilnAsUIMessage(data.run_id)
   } catch (err) {
-    return uiStream(`Error connecting to Kiln backend: ${err}`)
+    return uiTextResponse(`Error connecting to Kiln backend: ${err}`)
   }
 }
 
-/**
- * Send a single text response as AI SDK UIMessageStream format.
- *
- * UIMessageStream protocol:
- *   2:<json>\n  → text part append
- *   d:<json>\n  → finish message
- */
-function uiStream(text: string): Response {
+/** Emit a complete text response using UIMessageStream SSE protocol */
+function uiTextResponse(text: string): Response {
+  const partId = `part-${Date.now()}`
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     start(controller) {
-      // Text part
-      controller.enqueue(encoder.encode(`2:${JSON.stringify(text)}\n`))
-      // Finish
-      controller.enqueue(encoder.encode(`d:${JSON.stringify({ finishReason: "stop", usage: { promptTokens: 0, completionTokens: 0 } })}\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-start", id: partId })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: partId, delta: text })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: partId })}\n\n`))
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"))
       controller.close()
     },
   })
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "X-Vercel-AI-Data-Stream": "v1",
-    },
-  })
+  return new Response(stream, { headers: UI_STREAM_HEADERS })
 }
 
-/**
- * Connect to Kiln's SSE stream and convert to AI SDK UIMessageStream.
- *
- * Kiln events → human-readable text streamed via UIMessageStream protocol.
- */
+/** Connect to Kiln's SSE stream and convert to UIMessageStream SSE protocol */
 function streamKilnAsUIMessage(runId: string): Response {
+  const partId = `part-${runId}`
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false
+      let started = false
 
-      function sendText(text: string) {
+      function sendDelta(text: string) {
         if (closed) return
-        controller.enqueue(encoder.encode(`2:${JSON.stringify(text)}\n`))
+        if (!started) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-start", id: partId })}\n\n`))
+          started = true
+        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: partId, delta: text })}\n\n`))
       }
 
       function finish() {
         if (closed) return
         closed = true
-        controller.enqueue(encoder.encode(`d:${JSON.stringify({ finishReason: "stop", usage: { promptTokens: 0, completionTokens: 0 } })}\n`))
+        if (started) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: partId })}\n\n`))
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
       }
 
       try {
         const sseRes = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`)
         if (!sseRes.ok || !sseRes.body) {
-          sendText("Error: Could not connect to execution stream")
+          sendDelta("Error: Could not connect to execution stream")
           finish()
           return
         }
@@ -129,7 +135,7 @@ function streamKilnAsUIMessage(runId: string): Response {
         const decoder = new TextDecoder()
         let buffer = ""
 
-        sendText("Planning and executing...\n\n")
+        sendDelta("Planning and executing...\n\n")
 
         while (true) {
           const { done, value } = await reader.read()
@@ -151,33 +157,33 @@ function streamKilnAsUIMessage(runId: string): Response {
                 case "plan_ready":
                 case "plan_updated": {
                   const nodes = ev.nodes?.map((n: { role: string }) => n.role).join(" → ") || ""
-                  sendText(`**Plan:** ${nodes}\n\n`)
+                  sendDelta(`**Plan:** ${nodes}\n\n`)
                   break
                 }
                 case "synthesis_wait":
-                  sendText(`Synthesizing missing tools...\n`)
+                  sendDelta("Synthesizing missing tools...\n")
                   break
                 case "tool_ready":
-                  sendText(`Tool ready: ${ev.tool_id}\n`)
+                  sendDelta(`Tool ready: ${ev.tool_id}\n`)
                   break
                 case "node_start":
-                  sendText(`**${ev.node_id}** starting...\n`)
+                  sendDelta(`**${ev.node_id}** starting...\n`)
                   break
                 case "tool_call":
-                  sendText(`  → Calling \`${ev.tool}\`\n`)
+                  sendDelta(`  → Calling \`${ev.tool}\`\n`)
                   break
                 case "tool_result":
-                  sendText(`  ← Result received\n`)
+                  sendDelta("  ← Result received\n")
                   break
                 case "node_complete":
-                  sendText(`**${ev.node_id}** done\n\n`)
+                  sendDelta(`**${ev.node_id}** done\n\n`)
                   break
                 case "flow_complete":
-                  sendText(`\n---\n\n${ev.final_answer}`)
+                  sendDelta(`\n---\n\n${ev.final_answer}`)
                   finish()
                   return
                 case "error":
-                  sendText(`\nError: ${ev.message}`)
+                  sendDelta(`\nError: ${ev.message}`)
                   finish()
                   return
               }
@@ -189,16 +195,11 @@ function streamKilnAsUIMessage(runId: string): Response {
 
         if (!closed) finish()
       } catch (err) {
-        sendText(`\nStream error: ${err}`)
+        sendDelta(`\nStream error: ${err}`)
         finish()
       }
     },
   })
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "X-Vercel-AI-Data-Stream": "v1",
-    },
-  })
+  return new Response(stream, { headers: UI_STREAM_HEADERS })
 }
