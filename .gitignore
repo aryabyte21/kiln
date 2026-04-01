@@ -43,3 +43,14 @@ packages/synthesis_service/logs/
 *.tar.gz
 .next/
 packages/registry_ui/.next/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/terraform.tfvars
+infra/terraform/.terraform.lock.hcl
+
+# Tanka vendor (installed via jb install)
+infra/tanka/vendor/
+infra/tanka/jsonnetfile.lock.json

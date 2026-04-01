@@ -1,0 +1,9 @@
+# Copy this to terraform.tfvars and fill in your values
+project_id           = "kiln-cs5224"
+region               = "asia-southeast1"
+environment          = "dev"
+db_password_registry = "CHANGE_ME"
+db_password_chat     = "CHANGE_ME"
+clerk_domain         = "your-app.clerk.accounts.dev"
+clerk_secret_key     = "sk_test_..."
+mistral_api_key      = "..."

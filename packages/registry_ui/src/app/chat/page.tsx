@@ -15,11 +15,14 @@ import {
   Wrench,
   Zap,
   BookOpen,
+  MessageSquare,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { KilnExecute } from "@/components/kiln-execute"
 
 const EXAMPLE_QUERIES = [
   { icon: Search, text: "Find tools for web scraping" },
@@ -64,7 +67,6 @@ function MarkdownContent({ content }: { content: string }) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
 
-      // Unordered list
       if (/^\s*[-*]\s+/.test(line)) {
         if (listType !== "ul") flushList()
         listType = "ul"
@@ -72,7 +74,6 @@ function MarkdownContent({ content }: { content: string }) {
         continue
       }
 
-      // Ordered list
       if (/^\s*\d+\.\s+/.test(line)) {
         if (listType !== "ol") flushList()
         listType = "ol"
@@ -82,7 +83,6 @@ function MarkdownContent({ content }: { content: string }) {
 
       flushList()
 
-      // Code block delimiter
       if (line.startsWith("```")) {
         const codeLines: string[] = []
         i++
@@ -101,7 +101,6 @@ function MarkdownContent({ content }: { content: string }) {
         continue
       }
 
-      // Headings
       if (line.startsWith("### ")) {
         elements.push(
           <p key={`h3-${elements.length}`} className="mt-3 mb-1 text-sm font-semibold">
@@ -119,13 +118,11 @@ function MarkdownContent({ content }: { content: string }) {
         continue
       }
 
-      // Empty line
       if (line.trim() === "") {
         elements.push(<div key={`br-${elements.length}`} className="h-2" />)
         continue
       }
 
-      // Normal paragraph
       elements.push(
         <p key={`p-${elements.length}`} className="text-sm leading-relaxed">
           <InlineMarkdown text={line} />
@@ -141,28 +138,23 @@ function MarkdownContent({ content }: { content: string }) {
 }
 
 function InlineMarkdown({ text }: { text: string }) {
-  // Process inline markdown: **bold**, `code`, *italic*
   const parts: React.ReactNode[] = []
-  // Match bold, inline code, and italic
   const regex = /(\*\*(.+?)\*\*|`([^`]+)`|\*(.+?)\*)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
 
   while ((match = regex.exec(text)) !== null) {
-    // Text before the match
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index))
     }
 
     if (match[2]) {
-      // Bold
       parts.push(
         <strong key={match.index} className="font-semibold text-foreground">
           {match[2]}
         </strong>
       )
     } else if (match[3]) {
-      // Inline code
       parts.push(
         <code
           key={match.index}
@@ -172,7 +164,6 @@ function InlineMarkdown({ text }: { text: string }) {
         </code>
       )
     } else if (match[4]) {
-      // Italic
       parts.push(
         <em key={match.index} className="italic text-foreground/80">
           {match[4]}
@@ -183,7 +174,6 @@ function InlineMarkdown({ text }: { text: string }) {
     lastIndex = match.index + match[0].length
   }
 
-  // Remaining text
   if (lastIndex < text.length) {
     parts.push(text.slice(lastIndex))
   }
@@ -218,7 +208,26 @@ export default function ChatPage() {
         </div>
       </Show>
       <Show when="signed-in">
-        <KilnChat />
+        <Tabs defaultValue="execute">
+          <div className="flex justify-center pt-2 pb-1">
+            <TabsList variant="line">
+              <TabsTrigger value="execute">
+                <Flame className="size-3.5" />
+                Execute
+              </TabsTrigger>
+              <TabsTrigger value="chat">
+                <MessageSquare className="size-3.5" />
+                Chat
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="execute">
+            <KilnExecute />
+          </TabsContent>
+          <TabsContent value="chat">
+            <KilnChat />
+          </TabsContent>
+        </Tabs>
       </Show>
     </>
   )
@@ -235,14 +244,12 @@ function KilnChat() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages])
 
-  // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
@@ -272,15 +279,12 @@ function KilnChat() {
   }
 
   return (
-    <div className="section-surface flex h-[calc(100vh-12.5rem)] min-h-[38rem] flex-col overflow-hidden">
-      {/* Messages area */}
+    <div className="section-surface flex h-[calc(100vh-14rem)] min-h-[34rem] flex-col overflow-hidden">
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
           <div ref={scrollRef} className="h-full overflow-y-auto">
             {!hasMessages ? (
-              /* Welcome state */
-              <div className="flex flex-col items-center justify-center h-full min-h-[60vh] px-6 py-12">
-                {/* Animated flame icon with glow */}
+              <div className="flex flex-col items-center justify-center h-full min-h-[50vh] px-6 py-12">
                 <div className="relative mb-8">
                   <span className="absolute -inset-4 animate-pulse rounded-3xl bg-gradient-to-br from-primary/30 to-primary/10 blur-2xl" />
                   <span className="absolute -inset-2 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 blur-xl" />
@@ -310,15 +314,8 @@ function KilnChat() {
                     </button>
                   ))}
                 </div>
-
-                {/* Powered by Kiln watermark */}
-                <div className="mt-12 flex items-center gap-1.5 text-xs text-muted-foreground/40">
-                  <Flame className="size-3 text-primary/65" />
-                  <span>Powered by Kiln</span>
-                </div>
               </div>
             ) : (
-              /* Message list */
               <div className="mx-auto max-w-3xl space-y-6 px-6 py-6 pb-4">
                 {messages.map((message) => (
                   <div key={message.id}>
@@ -341,7 +338,6 @@ function KilnChat() {
                   </div>
                 ))}
 
-                {/* Loading indicator */}
                 {isLoading &&
                   messages.length > 0 &&
                   messages[messages.length - 1].role === "user" && (
@@ -361,7 +357,6 @@ function KilnChat() {
         </ScrollArea>
       </div>
 
-      {/* Input bar */}
       <div className="shrink-0 border-t border-border/70 bg-background/85 px-6 py-4 backdrop-blur-xl">
         <form
           onSubmit={(e) => { e.preventDefault(); handleSend() }}
