@@ -348,11 +348,20 @@ class KilnGraphFlow:
             is_termination_msg=lambda m: "TERMINATE" in (m.get("content") or ""),
         )
 
-        # ── Strip 'name' from messages before LLM call (Mistral rejects it) ────
-        assistant.register_hook(
-            "process_all_messages_before_reply",
-            lambda messages: [{k: v for k, v in m.items() if k != "name"} for m in messages],
-        )
+        # ── Clean messages before LLM call (Mistral compatibility) ────────────
+        # Mistral rejects: (1) 'name' field, (2) assistant messages with
+        # content=None and no tool_calls.
+        def _clean_messages(messages):
+            cleaned = []
+            for m in messages:
+                m = {k: v for k, v in m.items() if k != "name"}
+                # Mistral requires content OR tool_calls on assistant messages
+                if m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls"):
+                    m = {**m, "content": ""}
+                cleaned.append(m)
+            return cleaned
+
+        assistant.register_hook("process_all_messages_before_reply", _clean_messages)
 
         # ── Register Kiln tools via HTTP bridge ──────────────────────────────
         for tool_id in tool_ids:
