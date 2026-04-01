@@ -1,35 +1,38 @@
 /**
- * /api/chat — Bridge between OpenUI's chat format and Kiln's backend.
+ * /api/chat — Bridge between AI SDK useChat and Kiln's chat backend.
  *
- * OpenUI sends: { messages: [...] }
- * We extract the last user message, call /kiln/start, connect to the SSE stream,
- * and convert Kiln events to OpenAI-compatible SSE format that OpenUI can render.
+ * AI SDK v6 useChat + DefaultChatTransport sends: { messages: [...] }
+ * We extract the last user message, call /kiln/start, connect to the SSE
+ * stream, and convert Kiln events to AI SDK's UIMessageStream format.
  */
 
 const CHAT_BACKEND = process.env.CHAT_BACKEND_INTERNAL || process.env.NEXT_PUBLIC_CHAT_BACKEND || "http://localhost:8765"
 
 export async function POST(req: Request) {
-  const { messages } = await req.json()
+  const body = await req.json()
 
-  // Extract last user message
+  // AI SDK v6 sends messages array
+  const messages = body.messages || []
   const lastUser = [...messages].reverse().find((m: { role: string }) => m.role === "user")
-  const query = typeof lastUser?.content === "string"
-    ? lastUser.content
-    : Array.isArray(lastUser?.content)
-      ? lastUser.content.find((p: { type: string; text?: string }) => p.type === "text")?.text || ""
-      : ""
 
-  if (!query.trim()) {
-    return streamText("Please provide a query.")
+  // Extract text from content (could be string or parts array)
+  let query = ""
+  if (typeof lastUser?.content === "string") {
+    query = lastUser.content
+  } else if (Array.isArray(lastUser?.content)) {
+    query = lastUser.content.find((p: { type: string; text?: string }) => p.type === "text")?.text || ""
   }
 
-  // Forward auth header
+  if (!query.trim()) {
+    return uiStream("Please provide a query.")
+  }
+
+  // Forward auth header to chat backend
   const authHeader = req.headers.get("authorization")
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (authHeader) headers["Authorization"] = authHeader
 
   try {
-    // Call Kiln backend
     const res = await fetch(`${CHAT_BACKEND}/kiln/start`, {
       method: "POST",
       headers,
@@ -39,80 +42,85 @@ export async function POST(req: Request) {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: `Error ${res.status}` }))
       const msg = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail)
-      return streamText(`Error: ${msg}`)
+      return uiStream(`Error: ${msg}`)
     }
 
     const data = await res.json()
 
     if (data.status === "needs_config") {
-      const missing = data.missing_envs?.map((e: { var_name: string }) => e.var_name).join(", ")
-      return streamText(`⚠️ Missing API keys: ${missing}\n\nPlease configure them in the server environment.`)
+      // Auto-execute with empty env vars — let tools handle missing keys
+      const execRes = await fetch(`${CHAT_BACKEND}/kiln/execute/${data.run_id}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ env_vars: {} }),
+      })
+      if (!execRes.ok) {
+        const missing = data.missing_envs?.map((e: { var_name: string }) => e.var_name).join(", ")
+        return uiStream(`Missing API keys: ${missing}\n\nPlease configure them in the server environment.`)
+      }
     }
 
-    // Stream execution events in OpenAI SSE format
-    return streamKilnExecution(data.run_id)
+    // Stream execution events as AI SDK UIMessageStream
+    return streamKilnAsUIMessage(data.run_id)
   } catch (err) {
-    return streamText(`Error: ${err}`)
+    return uiStream(`Error connecting to Kiln backend: ${err}`)
   }
 }
 
-/** Stream a simple text response in OpenAI SSE format */
-function streamText(text: string): Response {
+/**
+ * Send a single text response as AI SDK UIMessageStream format.
+ *
+ * UIMessageStream protocol:
+ *   2:<json>\n  → text part append
+ *   d:<json>\n  → finish message
+ */
+function uiStream(text: string): Response {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     start(controller) {
-      const chunk = {
-        id: `chatcmpl-${Date.now()}`,
-        object: "chat.completion.chunk",
-        choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: "stop" }],
-      }
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`))
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+      // Text part
+      controller.enqueue(encoder.encode(`2:${JSON.stringify(text)}\n`))
+      // Finish
+      controller.enqueue(encoder.encode(`d:${JSON.stringify({ finishReason: "stop", usage: { promptTokens: 0, completionTokens: 0 } })}\n`))
       controller.close()
     },
   })
   return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Vercel-AI-Data-Stream": "v1",
+    },
   })
 }
 
-/** Connect to Kiln's SSE stream and convert to OpenAI format */
-function streamKilnExecution(runId: string): Response {
+/**
+ * Connect to Kiln's SSE stream and convert to AI SDK UIMessageStream.
+ *
+ * Kiln events → human-readable text streamed via UIMessageStream protocol.
+ */
+function streamKilnAsUIMessage(runId: string): Response {
   const encoder = new TextEncoder()
-  const id = `chatcmpl-${runId}`
 
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false
 
-      function sendDelta(content: string) {
+      function sendText(text: string) {
         if (closed) return
-        const chunk = {
-          id,
-          object: "chat.completion.chunk",
-          choices: [{ index: 0, delta: { content }, finish_reason: null }],
-        }
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`))
+        controller.enqueue(encoder.encode(`2:${JSON.stringify(text)}\n`))
       }
 
       function finish() {
         if (closed) return
         closed = true
-        const chunk = {
-          id,
-          object: "chat.completion.chunk",
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-        }
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`))
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+        controller.enqueue(encoder.encode(`d:${JSON.stringify({ finishReason: "stop", usage: { promptTokens: 0, completionTokens: 0 } })}\n`))
         controller.close()
       }
 
-      // Connect to Kiln SSE
       try {
         const sseRes = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`)
         if (!sseRes.ok || !sseRes.body) {
-          sendDelta("Error: Could not connect to execution stream")
+          sendText("Error: Could not connect to execution stream")
           finish()
           return
         }
@@ -121,7 +129,7 @@ function streamKilnExecution(runId: string): Response {
         const decoder = new TextDecoder()
         let buffer = ""
 
-        sendDelta("🔄 Planning and executing...\n\n")
+        sendText("Planning and executing...\n\n")
 
         while (true) {
           const { done, value } = await reader.read()
@@ -133,29 +141,45 @@ function streamKilnExecution(runId: string): Response {
 
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue
-            const data = line.slice(6).trim()
-            if (!data || data === "[DONE]") continue
+            const raw = line.slice(6).trim()
+            if (!raw || raw === "[DONE]") continue
 
             try {
-              const ev = JSON.parse(data)
+              const ev = JSON.parse(raw)
 
-              if (ev.type === "plan_ready" || ev.type === "plan_updated") {
-                const nodes = ev.nodes?.map((n: { role: string }) => n.role).join(" → ") || ""
-                sendDelta(`📋 **Plan:** ${nodes}\n\n`)
-              } else if (ev.type === "node_start") {
-                sendDelta(`▸ Starting **${ev.node_id}**...\n`)
-              } else if (ev.type === "tool_call") {
-                sendDelta(`  → Calling \`${ev.tool}\`\n`)
-              } else if (ev.type === "node_complete") {
-                sendDelta(`  ✓ **${ev.node_id}** done\n\n`)
-              } else if (ev.type === "flow_complete") {
-                sendDelta(`\n---\n\n${ev.final_answer}`)
-                finish()
-                return
-              } else if (ev.type === "error") {
-                sendDelta(`\n❌ ${ev.message}`)
-                finish()
-                return
+              switch (ev.type) {
+                case "plan_ready":
+                case "plan_updated": {
+                  const nodes = ev.nodes?.map((n: { role: string }) => n.role).join(" → ") || ""
+                  sendText(`**Plan:** ${nodes}\n\n`)
+                  break
+                }
+                case "synthesis_wait":
+                  sendText(`Synthesizing missing tools...\n`)
+                  break
+                case "tool_ready":
+                  sendText(`Tool ready: ${ev.tool_id}\n`)
+                  break
+                case "node_start":
+                  sendText(`**${ev.node_id}** starting...\n`)
+                  break
+                case "tool_call":
+                  sendText(`  → Calling \`${ev.tool}\`\n`)
+                  break
+                case "tool_result":
+                  sendText(`  ← Result received\n`)
+                  break
+                case "node_complete":
+                  sendText(`**${ev.node_id}** done\n\n`)
+                  break
+                case "flow_complete":
+                  sendText(`\n---\n\n${ev.final_answer}`)
+                  finish()
+                  return
+                case "error":
+                  sendText(`\nError: ${ev.message}`)
+                  finish()
+                  return
               }
             } catch {
               // skip malformed events
@@ -163,16 +187,18 @@ function streamKilnExecution(runId: string): Response {
           }
         }
 
-        // Stream ended without flow_complete
         if (!closed) finish()
       } catch (err) {
-        sendDelta(`\n❌ Stream error: ${err}`)
+        sendText(`\nStream error: ${err}`)
         finish()
       }
     },
   })
 
   return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Vercel-AI-Data-Stream": "v1",
+    },
   })
 }
