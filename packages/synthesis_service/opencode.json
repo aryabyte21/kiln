@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "nim": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "NVIDIA NIM",
+      "options": {
+        "baseURL": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "{env:NVIDIA_API_KEY}"
+      },
+      "models": {
+        "meta/llama-3.3-70b-instruct": {
+          "name": "Llama 3.3 70B Instruct"
+        }
+      }
+    }
+  },
+  "model": "nim/meta/llama-3.3-70b-instruct"
+}

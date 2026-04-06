@@ -13,6 +13,9 @@ import {
   EyeOff,
   Settings,
   ShieldCheck,
+  Trash2,
+  Plus,
+  Wrench,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -352,6 +355,212 @@ function ApiKeySection() {
 }
 
 // ---------------------------------------------------------------------------
+// Tool Environment Variables
+// ---------------------------------------------------------------------------
+
+function ToolEnvVarsSection() {
+  const { getToken } = useAuth()
+  const [envVars, setEnvVars] = useState<Record<string, string>>({})
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [deletingKey, setDeletingKey] = useState<string | null>(null)
+
+  // Add form state
+  const [newName, setNewName] = useState("")
+  const [newValue, setNewValue] = useState("")
+  const [isSaving, setIsSaving] = useState(false)
+  const [showAddForm, setShowAddForm] = useState(false)
+
+  const getErrorMessage = useCallback((err: unknown) => {
+    return err instanceof Error ? err.message : "Unknown error"
+  }, [])
+
+  // Fetch saved env vars on mount
+  useEffect(() => {
+    async function load() {
+      try {
+        const token = await getToken()
+        const res = await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) {
+          if (res.status === 404) {
+            setEnvVars({})
+            return
+          }
+          throw new Error(`Failed to load: ${res.status}`)
+        }
+        const data = await res.json()
+        setEnvVars(data.env_vars || {})
+      } catch (err) {
+        setError(getErrorMessage(err))
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    load()
+  }, [getToken, getErrorMessage])
+
+  const handleDelete = async (varName: string) => {
+    setDeletingKey(varName)
+    try {
+      const token = await getToken()
+      const res = await fetch(`${REGISTRY_URL}/auth/tool-env-vars/${varName}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error(`Delete failed: ${res.status}`)
+      setEnvVars((prev) => {
+        const next = { ...prev }
+        delete next[varName]
+        return next
+      })
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setDeletingKey(null)
+    }
+  }
+
+  const handleAdd = async () => {
+    if (!newName.trim() || !newValue.trim()) return
+    setIsSaving(true)
+    setError(null)
+    try {
+      const token = await getToken()
+      const res = await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ env_vars: { [newName.trim()]: newValue.trim() } }),
+      })
+      if (!res.ok) throw new Error(`Save failed: ${res.status}`)
+
+      // Show masked version locally
+      const val = newValue.trim()
+      const masked = val.length > 4 ? "*".repeat(val.length - 4) + val.slice(-4) : "****"
+      setEnvVars((prev) => ({ ...prev, [newName.trim()]: masked }))
+      setNewName("")
+      setNewValue("")
+      setShowAddForm(false)
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const hasVars = Object.keys(envVars).length > 0
+
+  return (
+    <Card className="border border-border/70 bg-card/40">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Wrench className="size-4 text-primary" />
+          <CardTitle className="text-lg">Tool API Keys</CardTitle>
+        </div>
+        <CardDescription>
+          API keys for third-party services used by tools (e.g. SERPER_API_KEY). These are
+          automatically prompted in chat when a tool needs them.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Loading...
+          </div>
+        ) : hasVars ? (
+          <div className="space-y-2">
+            {Object.entries(envVars).map(([name, maskedValue]) => (
+              <div
+                key={name}
+                className="flex items-center justify-between rounded-lg border border-border/50 bg-white/[0.02] px-3 py-2.5"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Key className="size-3.5 shrink-0 text-muted-foreground/60" />
+                  <span className="text-sm font-medium">{name}</span>
+                  <span className="truncate text-xs text-muted-foreground font-mono">
+                    {maskedValue}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                  onClick={() => handleDelete(name)}
+                  disabled={deletingKey === name}
+                >
+                  {deletingKey === name ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-3.5" />
+                  )}
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No tool API keys saved yet. They will be added automatically when prompted in chat.
+          </p>
+        )}
+
+        {/* Add key form */}
+        {showAddForm ? (
+          <div className="space-y-3 rounded-lg border border-border/50 bg-white/[0.02] p-3">
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value.toUpperCase())}
+              placeholder="Variable name (e.g. SERPER_API_KEY)"
+              className="font-mono text-sm"
+            />
+            <Input
+              type="password"
+              value={newValue}
+              onChange={(e) => setNewValue(e.target.value)}
+              placeholder="API key value"
+              className="text-sm"
+            />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleAdd} disabled={isSaving || !newName.trim() || !newValue.trim()}>
+                {isSaving ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setShowAddForm(false); setNewName(""); setNewValue("") }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAddForm(true)}
+            className="gap-1.5"
+          >
+            <Plus className="size-3.5" />
+            Add Key
+          </Button>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -402,6 +611,11 @@ function SettingsContent() {
 
       {/* API Key */}
       <ApiKeySection />
+
+      <Separator />
+
+      {/* Tool Environment Variables */}
+      <ToolEnvVarsSection />
 
       <Separator />
 

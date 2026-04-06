@@ -1,7 +1,7 @@
 """
-kiln_synthesis.vibe_runner
-------------------------------------
-Spawns the Mistral Vibe CLI as an async subprocess with streaming output.
+kiln_synthesis.opencode_runner
+--------------------------------------
+Spawns the OpenCode CLI as an async subprocess with streaming JSON output.
 
 NOTE: Uses asyncio.create_subprocess_exec (not shell exec) for safe
 process spawning without shell injection risk.
@@ -22,8 +22,8 @@ from kiln_synthesis.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-class VibeError(Exception):
-    """Raised when Vibe CLI fails or times out."""
+class OpenCodeError(Exception):
+    """Raised when OpenCode CLI fails or times out."""
     pass
 
 
@@ -41,39 +41,37 @@ async def _drain_stderr(stream: asyncio.StreamReader) -> str:
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
-async def run_vibe(
+async def run_opencode(
     prompt: str,
     workdir: Path,
     on_event: Callable[[dict], None] | None = None,
 ) -> None:
-    """Spawn `vibe` CLI in streaming mode and forward events via callback.
+    """Spawn `opencode run` in JSON streaming mode and forward events via callback.
 
     Uses asyncio.create_subprocess_exec for safe process spawning (no shell).
 
     Args:
-        prompt: The task prompt for Vibe CLI.
-        workdir: Working directory where Vibe will create files.
-        on_event: Optional callback invoked for each NDJSON line from Vibe stdout.
+        prompt: The task prompt for OpenCode CLI.
+        workdir: Working directory where OpenCode will create files.
+        on_event: Optional callback invoked for each NDJSON line from stdout.
 
     Raises:
-        VibeError: If Vibe CLI exits with non-zero code or times out.
+        OpenCodeError: If OpenCode CLI exits with non-zero code or times out.
     """
     settings = get_settings()
 
     cmd = [
-        "vibe",
-        "-p", prompt,
-        "--output", "streaming",
-        "--max-turns", str(settings.max_turns),
-        "--max-price", str(settings.max_price),
-        "--workdir", str(workdir),
+        "opencode", "run",
+        "--format", "json",
+        "-m", settings.opencode_model,
+        "--", prompt,
     ]
 
     # Suppress TUI rendering in subprocess — no TTY, no color
     env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1"}
 
-    logger.info("Spawning Vibe CLI in %s", workdir)
-    logger.info("Command: %s", " ".join(cmd))
+    logger.info("Spawning OpenCode CLI in %s", workdir)
+    logger.info("Command: opencode run <prompt> --format json --quiet --model %s", settings.opencode_model)
 
     try:
         # asyncio.create_subprocess_exec spawns the process directly (no shell)
@@ -87,15 +85,15 @@ async def run_vibe(
         )
 
         # CRITICAL: Drain stderr concurrently to prevent pipe buffer deadlock.
-        # Vibe CLI writes TUI escape codes to stderr which can fill the 64KB
-        # OS pipe buffer, blocking the process from writing to stdout.
+        # OpenCode may write progress/TUI codes to stderr which can fill the
+        # 64KB OS pipe buffer, blocking the process from writing to stdout.
         stderr_task = asyncio.create_task(_drain_stderr(proc.stderr))
 
-        # Read stdout line-by-line (NDJSON streaming)
+        # Read stdout line-by-line (NDJSON streaming via --format json)
         while True:
             line = await asyncio.wait_for(
                 proc.stdout.readline(),
-                timeout=300,  # 5 min max between lines (Vibe can be slow)
+                timeout=300,  # 5 min max between lines
             )
             if not line:
                 break
@@ -104,18 +102,26 @@ async def run_vibe(
             if not line_str:
                 continue
 
-            logger.debug("Vibe stdout: %s", line_str[:200])
+            logger.debug("OpenCode stdout: %s", line_str[:200])
 
             # Forward to event callback
             if on_event is not None:
                 try:
                     event = json.loads(line_str)
-                    on_event({"type": "vibe", **event})
+                    on_event({"type": "opencode", **event})
                 except json.JSONDecodeError:
-                    on_event({"type": "vibe", "raw": line_str})
+                    on_event({"type": "opencode", "raw": line_str})
 
-        # Wait for process to finish
-        await asyncio.wait_for(proc.wait(), timeout=60)
+        # Wait for process to finish.
+        # Known issue: OpenCode may hang after completing work (GitHub #17516).
+        # Use a shorter timeout and force-kill if it hangs — output is already
+        # captured from stdout so this is safe.
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=30)
+        except TimeoutError:
+            logger.warning("OpenCode process hung after stdout EOF, force-killing (known issue)")
+            proc.kill()
+            await asyncio.wait_for(proc.wait(), timeout=5)
 
         # Collect stderr
         stderr_str = await stderr_task
@@ -126,13 +132,13 @@ async def run_vibe(
         stderr_str = ""
         with contextlib.suppress(Exception):
             stderr_str = await asyncio.wait_for(stderr_task, timeout=5)
-        logger.error("Vibe CLI timed out. stderr tail: %s", stderr_str[-2000:] if stderr_str else "(empty)")
-        raise VibeError("Vibe CLI timed out") from None
+        logger.error("OpenCode CLI timed out. stderr tail: %s", stderr_str[-2000:] if stderr_str else "(empty)")
+        raise OpenCodeError("OpenCode CLI timed out") from None
 
     if proc.returncode != 0:
-        logger.error("Vibe CLI exited with code %d\nstderr: %s", proc.returncode, stderr_str[:2000])
-        raise VibeError(
-            f"Vibe CLI exited with code {proc.returncode}: {stderr_str[:500]}"
+        logger.error("OpenCode CLI exited with code %d\nstderr: %s", proc.returncode, stderr_str[:2000])
+        raise OpenCodeError(
+            f"OpenCode CLI exited with code {proc.returncode}: {stderr_str[:500]}"
         )
 
-    logger.info("Vibe CLI completed successfully in %s", workdir)
+    logger.info("OpenCode CLI completed successfully in %s", workdir)

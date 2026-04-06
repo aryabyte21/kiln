@@ -69,9 +69,9 @@ services:
       - ./registry:/app/registry
     env_file: .env
     environment:
-      - KILN_REGISTRY_URL=http://registry_api:8766
-      - KILN_SYNTHESIS_URL=http://synthesis_service:8002
-      - KILN_CALLBACK_URL=http://registry_api:8766/synthesis/callback
+      - REGISTRY_URL=http://registry_api:8766
+      - SYNTHESIS_URL=http://synthesis_service:8002
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
     depends_on:
       - registry_api
 
@@ -119,10 +119,10 @@ services:
     ports:
       - "8002:8002"
     environment:
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - KILN_SYNTHESIS_MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - KILN_SYNTHESIS_CALLBACK_URL=http://registry_api:8766/synthesis/callback
       - KILN_SYNTHESIS_INTERNAL_SECRET=${KILN_INTERNAL_SECRET:-}
+      - KILN_SYNTHESIS_OPENCODE_MODEL=${KILN_SYNTHESIS_OPENCODE_MODEL:-nim/meta/llama-3.3-70b-instruct}
     volumes:
       - synthesis_logs:/app/logs
     depends_on:

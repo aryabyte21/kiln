@@ -1,7 +1,7 @@
 """
 kiln_synthesis.main
 -------------------
-FastAPI application — tool synthesis service powered by Mistral Vibe CLI.
+FastAPI application — tool synthesis service powered by OpenCode CLI.
 
 Run from the synthesis_service/ directory:
     python kiln_synthesis/main.py
@@ -36,7 +36,7 @@ app = FastAPI(
     title="Kiln Synthesis",
     description=(
         "Kiln Synthesis service — generates missing tools on demand "
-        "using Mistral Vibe CLI, then registers them via webhook."
+        "using OpenCode CLI, then registers them via webhook."
     ),
     version="1.0.0",
 )

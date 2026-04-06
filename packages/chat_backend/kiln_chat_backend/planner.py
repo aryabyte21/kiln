@@ -111,7 +111,7 @@ class KilnPlanner:
         model: str = "mistral-large-latest",
     ):
         self._server_url = registry_url.rstrip("/")
-        self._client     = Mistral(api_key=api_key)
+        self._client     = Mistral(api_key=api_key, timeout_ms=120_000)
         self._model      = model
 
     # ── Public API ─────────────────────────────────────────────────────────────

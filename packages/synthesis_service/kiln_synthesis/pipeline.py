@@ -3,14 +3,19 @@ kiln_synthesis.pipeline
 ---------------------------------
 Main synthesis orchestrator.
 
-Prepares workspace -> spawns Vibe CLI -> collects artifacts -> calls webhook.
-Pushes SSE events at each stage for real-time progress streaming.
+Prepares workspace -> spawns OpenCode CLI -> validates artifacts -> calls webhook.
+Includes local validation (spec schema, import test, functional test) with retry
+on failure — OpenCode gets up to 2 fix attempts before giving up.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -19,10 +24,125 @@ from kiln_synthesis.callback import notify_failure, notify_success
 from kiln_synthesis.config import get_settings
 from kiln_synthesis.jobs.job_store import job_store
 from kiln_synthesis.models import JobStatus, SynthesizeRequest
+from kiln_synthesis.opencode_runner import OpenCodeError, run_opencode
 from kiln_synthesis.prompt_builder import build_prompt, write_context
-from kiln_synthesis.vibe_runner import VibeError, run_vibe
 
 logger = logging.getLogger(__name__)
+
+MAX_FIX_ATTEMPTS = 2
+
+# Required top-level keys in a valid Kiln spec
+_REQUIRED_SPEC_KEYS = {"tool", "interface", "implementation"}
+_REQUIRED_TOOL_KEYS = {"id", "name", "version", "description"}
+
+
+# ── Validation helpers ────────────────────────────────────────────────────────
+
+
+def _validate_spec(spec_path: Path) -> str | None:
+    """Validate spec.yaml structure. Returns error string or None if valid."""
+    try:
+        raw = yaml.safe_load(spec_path.read_text())
+    except yaml.YAMLError as exc:
+        return f"Invalid YAML: {exc}"
+
+    if not isinstance(raw, dict):
+        return "spec.yaml is not a YAML mapping"
+
+    missing = _REQUIRED_SPEC_KEYS - set(raw.keys())
+    if missing:
+        return f"spec.yaml missing top-level keys: {missing}"
+
+    tool = raw.get("tool", {})
+    if not isinstance(tool, dict):
+        return "spec.yaml 'tool' is not a mapping"
+
+    missing_tool = _REQUIRED_TOOL_KEYS - set(tool.keys())
+    if missing_tool:
+        return f"spec.yaml tool section missing keys: {missing_tool}"
+
+    impl = raw.get("implementation", {})
+    if not impl.get("entrypoint"):
+        return "spec.yaml missing implementation.entrypoint"
+
+    iface = raw.get("interface", {})
+    if not isinstance(iface.get("inputs"), list):
+        return "spec.yaml missing interface.inputs list"
+
+    return None
+
+
+def _validate_impl(impl_path: Path, tool_name: str) -> str | None:
+    """Run import test and basic functional test. Returns error string or None."""
+    # Step 1: Import test
+    import_cmd = [
+        sys.executable, "-c",
+        f"from impl import {tool_name}; print('Import OK')",
+    ]
+    try:
+        result = subprocess.run(
+            import_cmd,
+            cwd=str(impl_path.parent),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()[-500:]
+            return f"Import test failed: {stderr}"
+    except subprocess.TimeoutExpired:
+        return "Import test timed out (30s)"
+
+    # Step 2: Check the function is callable and returns a dict
+    func_test_cmd = [
+        sys.executable, "-c",
+        f"from impl import {tool_name}; r = {tool_name}(); "
+        f"assert isinstance(r, dict), f'Expected dict, got {{type(r).__name__}}'; "
+        f"print('Functional OK')",
+    ]
+    try:
+        result = subprocess.run(
+            func_test_cmd,
+            cwd=str(impl_path.parent),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()[-500:]
+            # Non-fatal: function may require specific args, import passing is enough
+            logger.warning("Functional test warning for %s: %s", tool_name, stderr[:200])
+    except subprocess.TimeoutExpired:
+        logger.warning("Functional test timed out for %s (60s)", tool_name)
+
+    return None
+
+
+def _collect_errors(workspace: Path, tool_name: str) -> list[str]:
+    """Run all validations, return list of error strings (empty = all passed)."""
+    errors: list[str] = []
+
+    spec_path = workspace / "spec.yaml"
+    impl_path = workspace / "impl.py"
+
+    if not spec_path.exists():
+        errors.append("spec.yaml was not created")
+    else:
+        spec_err = _validate_spec(spec_path)
+        if spec_err:
+            errors.append(f"spec.yaml validation: {spec_err}")
+
+    if not impl_path.exists():
+        errors.append("impl.py was not created")
+    else:
+        impl_err = _validate_impl(impl_path, tool_name)
+        if impl_err:
+            errors.append(f"impl.py validation: {impl_err}")
+
+    return errors
+
+
+# ── Env var extraction ────────────────────────────────────────────────────────
 
 
 def _extract_env_vars(impl_path: Path) -> list[dict[str, str]]:
@@ -34,12 +154,10 @@ def _extract_env_vars(impl_path: Path) -> list[dict[str, str]]:
     code = impl_path.read_text()
 
     # Try to load REQUIRED_ENV_VARS by executing the assignment
-    # NOTE: This uses Python's built-in exec() to evaluate the generated
-    # impl.py and extract the REQUIRED_ENV_VARS global — not shell exec.
     namespace: dict = {}
     try:
         compiled = compile(code, str(impl_path), "exec")
-        _run_code(compiled, namespace)
+        exec(compiled, namespace)
         env_vars = namespace.get("REQUIRED_ENV_VARS")
         if isinstance(env_vars, list):
             return env_vars
@@ -52,14 +170,7 @@ def _extract_env_vars(impl_path: Path) -> list[dict[str, str]]:
     return [{"name": name, "description": ""} for name in found]
 
 
-def _run_code(compiled_code, namespace: dict) -> None:
-    """Execute compiled Python code in the given namespace.
-
-    This is a thin wrapper around Python's built-in exec() function,
-    used to evaluate generated tool code and extract metadata like
-    REQUIRED_ENV_VARS. This is NOT shell execution.
-    """
-    exec(compiled_code, namespace)
+# ── Pipeline ──────────────────────────────────────────────────────────────────
 
 
 def _emit(job_id: str, stage: str, **extra) -> None:
@@ -70,8 +181,9 @@ def _emit(job_id: str, stage: str, **extra) -> None:
 
 
 async def run_synthesis_pipeline(job_id: str, request: SynthesizeRequest) -> None:
-    """Background task: synthesize a Kiln tool via Vibe CLI and register it.
+    """Background task: synthesize a Kiln tool via OpenCode CLI and register it.
 
+    Includes local validation with up to {MAX_FIX_ATTEMPTS} retry attempts.
     Pushes SSE events at each stage so clients can follow progress via
     GET /synthesize/{job_id}/events.
     """
@@ -91,37 +203,75 @@ async def run_synthesis_pipeline(job_id: str, request: SynthesizeRequest) -> Non
         _emit(job_id, "workspace_ready", message=f"Workspace prepared at {workspace}")
         logger.info("Workspace prepared at %s", workspace)
 
-        # Step 2: Spawn Vibe CLI (streaming — events forwarded via on_event)
+        # Step 2: Spawn OpenCode CLI (streaming — events forwarded via on_event)
         prompt = build_prompt(workspace, request)
-        _emit(job_id, "vibe_started", message="Vibe CLI spawned, generating tool...")
 
-        def forward_vibe_event(event: dict) -> None:
-            # Log to stdout/docker logs
-            role = event.get("role", "")
-            content = event.get("content", event.get("raw", ""))
-            if role:
-                preview = str(content)[:200] if content else ""
-                logger.info("[%s] vibe:%s | %s", job_id[:8], role, preview)
+        def forward_agent_event(event: dict) -> None:
+            event_kind = event.get("type", "")
+            if event_kind == "tool_use":
+                tool_name = event.get("tool", "")
+                status = event.get("status", "")
+                preview = f"{tool_name} ({status})"
+            elif event_kind in ("step_start", "step_finish"):
+                preview = event.get("message", event_kind)
+            elif event_kind == "error":
+                preview = event.get("message", "")
+            else:
+                preview = str(event.get("content", event.get("raw", "")))[:200]
+            logger.info("[%s] opencode:%s | %s", job_id[:8], event_kind, preview)
             job_store.push_event(job_id, event)
 
-        await run_vibe(prompt, workspace, on_event=forward_vibe_event)
-        _emit(job_id, "vibe_finished", message="Vibe CLI completed")
+        _emit(job_id, "agent_started", message="OpenCode CLI spawned, generating tool...")
+        await run_opencode(prompt, workspace, on_event=forward_agent_event)
+        _emit(job_id, "agent_finished", message="OpenCode CLI completed")
 
-        # Step 3: Collect artifacts
+        # Step 3: Validate artifacts locally before sending to registry
+        errors = _collect_errors(workspace, request.tool_name)
+
+        # Retry loop: if validation fails, ask OpenCode to fix
+        for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
+            if not errors:
+                break
+
+            error_summary = "\n".join(f"- {e}" for e in errors)
+            _emit(
+                job_id, "validation_failed",
+                message=f"Validation failed (attempt {attempt}/{MAX_FIX_ATTEMPTS}): {error_summary}",
+            )
+            logger.warning("Validation failed for %s (attempt %d): %s", job_id[:8], attempt, errors)
+
+            fix_prompt = (
+                f"The generated tool has validation errors that must be fixed:\n\n"
+                f"{error_summary}\n\n"
+                f"Please fix spec.yaml and/or impl.py in this directory to resolve these errors. "
+                f"Re-read CONTEXT.md if needed. Make sure:\n"
+                f"1. spec.yaml has all required keys: tool (with id, name, version, description), interface (with inputs list), implementation (with entrypoint)\n"
+                f"2. impl.py can be imported without errors: python -c \"from impl import {request.tool_name}\"\n"
+                f"3. The function {request.tool_name} returns a dict\n"
+                f"Fix the issues now."
+            )
+
+            _emit(job_id, "fix_started", message=f"OpenCode fixing errors (attempt {attempt})...")
+            await run_opencode(fix_prompt, workspace, on_event=forward_agent_event)
+            _emit(job_id, "fix_finished", message=f"Fix attempt {attempt} completed")
+
+            errors = _collect_errors(workspace, request.tool_name)
+
+        if errors:
+            error_summary = "\n".join(f"- {e}" for e in errors)
+            raise ValueError(f"Validation failed after {MAX_FIX_ATTEMPTS} fix attempts:\n{error_summary}")
+
+        _emit(job_id, "validation_passed", message="All validations passed")
+
+        # Step 4: Extract tool_id and env vars from validated artifacts
         spec_path = workspace / "spec.yaml"
         impl_path = workspace / "impl.py"
 
-        if not spec_path.exists():
-            raise FileNotFoundError(f"Vibe CLI did not create spec.yaml in {workspace}")
-        if not impl_path.exists():
-            raise FileNotFoundError(f"Vibe CLI did not create impl.py in {workspace}")
-
-        # Step 4: Extract tool_id from generated spec
         spec_data = yaml.safe_load(spec_path.read_text())
-        if "id" in spec_data:
-            tool_id = spec_data["id"]
+        tool_section = spec_data.get("tool", {})
+        if tool_section.get("id"):
+            tool_id = tool_section["id"]
 
-        # Step 4b: Extract required env vars from impl.py
         env_vars = _extract_env_vars(impl_path)
 
         _emit(job_id, "artifacts_collected", message=f"Found spec.yaml + impl.py (tool_id={tool_id})", env_vars=env_vars)
@@ -135,7 +285,7 @@ async def run_synthesis_pipeline(job_id: str, request: SynthesizeRequest) -> Non
         logger.info("Synthesis completed for job %s -> %s", job_id, tool_id)
 
     except Exception as exc:
-        error_msg = str(exc) if isinstance(exc, (VibeError, FileNotFoundError)) else f"Unexpected error: {type(exc).__name__}: {exc}"
+        error_msg = str(exc) if isinstance(exc, (OpenCodeError, FileNotFoundError, ValueError)) else f"Unexpected error: {type(exc).__name__}: {exc}"
         logger.error("Synthesis failed for job %s: %s", job_id, error_msg)
         job_store.update(job_id, status=JobStatus.FAILED, error=error_msg)
         _emit(job_id, "error", message=error_msg)

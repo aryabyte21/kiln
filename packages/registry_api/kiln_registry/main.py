@@ -769,3 +769,103 @@ async def regenerate_api_key(user: KilnUser = Depends(require_jwt_auth)):
         resp.raise_for_status()
 
     return {"api_key": api_key, "message": "API key regenerated"}
+
+
+# ── Tool Environment Variables (per-user, stored in Clerk metadata) ─────────
+
+
+@app.get("/auth/tool-env-vars", summary="Get saved tool env vars (masked)")
+async def get_tool_env_vars(user: KilnUser = Depends(require_jwt_auth)):
+    """Returns all saved tool environment variables with values masked."""
+    config = get_config()
+    if not config.clerk_secret_key:
+        raise HTTPException(status_code=500, detail="CLERK_SECRET_KEY not configured")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"https://api.clerk.com/v1/users/{user.user_id}",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+        )
+        resp.raise_for_status()
+        user_data = resp.json()
+
+    env_vars = user_data.get("private_metadata", {}).get("tool_env_vars", {})
+    masked = {}
+    for name, value in env_vars.items():
+        if len(value) > 4:
+            masked[name] = "*" * (len(value) - 4) + value[-4:]
+        else:
+            masked[name] = "****"
+    return {"env_vars": masked}
+
+
+@app.put("/auth/tool-env-vars", summary="Save tool env vars for the authenticated user")
+async def put_tool_env_vars(body: dict, user: KilnUser = Depends(require_jwt_auth)):
+    """
+    Merge new tool env vars into the user's saved set.
+    Body: {"env_vars": {"SERPER_API_KEY": "...", "NEWS_API_KEY": "..."}}
+    """
+    config = get_config()
+    if not config.clerk_secret_key:
+        raise HTTPException(status_code=500, detail="CLERK_SECRET_KEY not configured")
+
+    new_vars = body.get("env_vars", {})
+    if not new_vars or not isinstance(new_vars, dict):
+        raise HTTPException(status_code=422, detail="'env_vars' dict is required")
+
+    # Read existing metadata to merge (Clerk PATCH merges top-level but replaces nested)
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"https://api.clerk.com/v1/users/{user.user_id}",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+        )
+        resp.raise_for_status()
+        user_data = resp.json()
+
+    existing = user_data.get("private_metadata", {}).get("tool_env_vars", {})
+    merged = {**existing, **new_vars}
+
+    # Write back
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.patch(
+            f"https://api.clerk.com/v1/users/{user.user_id}/metadata",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+            json={"private_metadata": {"tool_env_vars": merged}},
+        )
+        resp.raise_for_status()
+
+    return {"message": f"Saved {len(new_vars)} env var(s)", "saved": list(new_vars.keys())}
+
+
+@app.delete("/auth/tool-env-vars/{var_name}", summary="Delete a saved tool env var")
+async def delete_tool_env_var(var_name: str, user: KilnUser = Depends(require_jwt_auth)):
+    """Remove a single tool env var from the user's saved set."""
+    config = get_config()
+    if not config.clerk_secret_key:
+        raise HTTPException(status_code=500, detail="CLERK_SECRET_KEY not configured")
+
+    # Read existing
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"https://api.clerk.com/v1/users/{user.user_id}",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+        )
+        resp.raise_for_status()
+        user_data = resp.json()
+
+    existing = user_data.get("private_metadata", {}).get("tool_env_vars", {})
+    if var_name not in existing:
+        raise HTTPException(status_code=404, detail=f"Env var '{var_name}' not found")
+
+    del existing[var_name]
+
+    # Write back
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.patch(
+            f"https://api.clerk.com/v1/users/{user.user_id}/metadata",
+            headers={"Authorization": f"Bearer {config.clerk_secret_key}"},
+            json={"private_metadata": {"tool_env_vars": existing}},
+        )
+        resp.raise_for_status()
+
+    return {"message": f"Deleted '{var_name}'"}

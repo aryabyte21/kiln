@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /Users/shivansh/Desktop/kiln/packages/*/*/**.py)",
+      "WebSearch",
+      "WebFetch(domain:opencode.ai)"
+    ]
+  }
+}

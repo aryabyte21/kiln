@@ -1,7 +1,7 @@
 """
 kiln_synthesis.prompt_builder
 ---------------------------------------
-Builds the --prompt string for Vibe CLI and writes CONTEXT.md into the workspace.
+Builds the prompt string for OpenCode CLI and writes CONTEXT.md into the workspace.
 """
 
 from __future__ import annotations
@@ -222,7 +222,7 @@ Create these two files in the current directory (`{workspace}`):
 
 
 def build_prompt(workspace: Path, request: SynthesizeRequest) -> str:
-    """Build the --prompt string for Vibe CLI."""
+    """Build the prompt string for OpenCode CLI."""
     test_input = _build_test_input(request)
 
     return (

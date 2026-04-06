@@ -89,10 +89,23 @@ class JobStore:
                 stage = event.get("stage", "")
                 msg = event.get("message", stage)
                 line = f"[{ts}] [pipeline] {stage} — {msg}"
-            elif event_type == "vibe":
-                role = event.get("role", "")
-                content = str(event.get("content", event.get("raw", "")))[:500]
-                line = f"[{ts}] [vibe:{role}] {content}"
+            elif event_type == "opencode":
+                kind = event.get("type", "")
+                if kind == "tool_use":
+                    tool = event.get("tool", "")
+                    status = event.get("status", "")
+                    output = str(event.get("output", ""))[:500]
+                    line = f"[{ts}] [opencode:tool_use:{tool}] {status} — {output}"
+                elif kind == "step_finish":
+                    cost = event.get("cost", "")
+                    tokens = event.get("tokens", "")
+                    line = f"[{ts}] [opencode:step_finish] cost={cost} tokens={tokens}"
+                elif kind == "error":
+                    msg = str(event.get("message", ""))[:500]
+                    line = f"[{ts}] [opencode:error] {msg}"
+                else:
+                    content = str(event.get("content", event.get("raw", "")))[:500]
+                    line = f"[{ts}] [opencode:{kind}] {content}"
             else:
                 line = f"[{ts}] [{event_type}] {json.dumps(event)}"
             try:

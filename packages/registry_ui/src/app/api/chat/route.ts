@@ -1,142 +1,149 @@
 /**
- * /api/chat — Bridge between AI SDK v6 useChat and Kiln's chat backend.
+ * /api/chat — Bridge between AI SDK v6 chat and Kiln's backend.
  *
- * AI SDK v6 useChat + DefaultChatTransport sends: { messages: [...] }
- * We extract the last user message, call /kiln/start, connect to the SSE
- * stream, and convert Kiln events to AI SDK UIMessageStream format.
- *
- * UIMessageStream protocol (SSE):
- *   data: {"type":"text-start","id":"<partId>"}\n\n
- *   data: {"type":"text-delta","id":"<partId>","delta":"text"}\n\n
- *   data: {"type":"text-end","id":"<partId>"}\n\n
- *   data: [DONE]\n\n
- *
- * Header: x-vercel-ai-ui-message-stream: v1
+ * AI SDK sends: { messages: [{ parts: [...], role: "user" }] }
+ * We extract the last user message, call /kiln/start, connect to the SSE stream,
+ * and convert Kiln events to AI SDK UI Message Stream Protocol (text-start/text-delta/text-end).
  */
 
 const CHAT_BACKEND = process.env.CHAT_BACKEND_INTERNAL || process.env.NEXT_PUBLIC_CHAT_BACKEND || "http://localhost:8765"
 
-const UI_STREAM_HEADERS = {
-  "content-type": "text/event-stream",
-  "cache-control": "no-cache",
-  "connection": "keep-alive",
+const SSE_HEADERS = {
+  "Content-Type": "text/event-stream",
+  "Cache-Control": "no-cache",
   "x-vercel-ai-ui-message-stream": "v1",
-  "x-accel-buffering": "no",
 }
 
 export async function POST(req: Request) {
-  const body = await req.json()
-  const messages = body.messages || []
-  const lastUser = [...messages].reverse().find((m: { role: string }) => m.role === "user")
+  const { messages } = await req.json()
 
+  // Extract last user message (handles both AI SDK v6 `parts` and legacy `content` format)
+  const lastUser = [...messages].reverse().find((m: { role: string }) => m.role === "user")
   let query = ""
   if (typeof lastUser?.content === "string") {
     query = lastUser.content
   } else if (Array.isArray(lastUser?.content)) {
     query = lastUser.content.find((p: { type: string; text?: string }) => p.type === "text")?.text || ""
+  } else if (Array.isArray(lastUser?.parts)) {
+    query = lastUser.parts.find((p: { type: string; text?: string }) => p.type === "text")?.text || ""
   }
 
   if (!query.trim()) {
-    return uiTextResponse("Please provide a query.")
+    return streamSimpleText("Please provide a query.")
   }
 
+  // Build conversation history from last 10 messages for context
+  const history = buildHistory(messages)
+
+  // Forward auth header
   const authHeader = req.headers.get("authorization")
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (authHeader) headers["Authorization"] = authHeader
 
   try {
+    // Call Kiln backend with current query + conversation history
     const res = await fetch(`${CHAT_BACKEND}/kiln/start`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ request: query }),
+      body: JSON.stringify({ request: query, history }),
     })
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: `Error ${res.status}` }))
       const msg = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail)
-      return uiTextResponse(`Error: ${msg}`)
+      return streamSimpleText(`Error: ${msg}`)
     }
 
     const data = await res.json()
 
     if (data.status === "needs_config") {
-      // Auto-execute with empty env vars
-      const execRes = await fetch(`${CHAT_BACKEND}/kiln/execute/${data.run_id}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ env_vars: {} }),
+      const payload = JSON.stringify({
+        type: "needs_config",
+        run_id: data.run_id,
+        missing_envs: data.missing_envs,
       })
-      if (!execRes.ok) {
-        const missing = data.missing_envs?.map((e: { var_name: string }) => e.var_name).join(", ")
-        return uiTextResponse(`Missing API keys: ${missing}\n\nPlease configure them in the server environment.`)
-      }
+      return streamSimpleText(`__KILN_CONFIG__${payload}`)
     }
 
-    return streamKilnAsUIMessage(data.run_id)
+    // Stream execution events
+    return streamKilnExecution(data.run_id)
   } catch (err) {
-    return uiTextResponse(`Error connecting to Kiln backend: ${err}`)
+    return streamSimpleText(`Error: ${err}`)
   }
 }
 
-/** Emit a complete text response using UIMessageStream SSE protocol */
-function uiTextResponse(text: string): Response {
-  const partId = `part-${Date.now()}`
+/** Stream a simple text response using AI SDK UI Message Stream Protocol */
+function streamSimpleText(text: string): Response {
   const encoder = new TextEncoder()
+  const msgId = `msg_${Date.now()}`
   const stream = new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-start", id: partId })}\n\n`))
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: partId, delta: text })}\n\n`))
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: partId })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-start", id: msgId })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: msgId, delta: text })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: msgId })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "finish" })}\n\n`))
       controller.enqueue(encoder.encode("data: [DONE]\n\n"))
       controller.close()
     },
   })
-  return new Response(stream, { headers: UI_STREAM_HEADERS })
+  return new Response(stream, { headers: SSE_HEADERS })
 }
 
-/** Connect to Kiln's SSE stream and convert to UIMessageStream SSE protocol */
-function streamKilnAsUIMessage(runId: string): Response {
-  const partId = `part-${runId}`
+/** Connect to Kiln's SSE stream and convert to AI SDK UI Message Stream Protocol */
+function streamKilnExecution(runId: string): Response {
   const encoder = new TextEncoder()
+  const msgId = `msg_${runId}`
 
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false
       let started = false
 
-      function sendDelta(text: string) {
-        if (closed) return
+      function ensureStarted() {
         if (!started) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-start", id: partId })}\n\n`))
           started = true
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-start", id: msgId })}\n\n`))
         }
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: partId, delta: text })}\n\n`))
+      }
+
+      function sendDelta(content: string) {
+        if (closed) return
+        ensureStarted()
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: msgId, delta: content })}\n\n`))
       }
 
       function finish() {
         if (closed) return
         closed = true
-        if (started) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: partId })}\n\n`))
-        }
+        ensureStarted()
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: msgId })}\n\n`))
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "finish" })}\n\n`))
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
       }
 
-      try {
-        const sseRes = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`)
-        if (!sseRes.ok || !sseRes.body) {
-          sendDelta("Error: Could not connect to execution stream")
-          finish()
-          return
+      // Connect to Kiln SSE
+      const sseRes = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`)
+      if (!sseRes.ok || !sseRes.body) {
+        sendDelta("Error: Could not connect to execution stream")
+        finish()
+        return
+      }
+
+      const reader = sseRes.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      sendDelta("🔄 Planning and executing...\n\n")
+
+      // Keep-alive: send SSE comment every 30s to prevent proxy/connection timeout
+      const keepAlive = setInterval(() => {
+        if (!closed) {
+          controller.enqueue(encoder.encode(": keepalive\n\n"))
         }
+      }, 30_000)
 
-        const reader = sseRes.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-
-        sendDelta("Planning and executing...\n\n")
-
+      try {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
@@ -197,9 +204,34 @@ function streamKilnAsUIMessage(runId: string): Response {
       } catch (err) {
         sendDelta(`\nStream error: ${err}`)
         finish()
+      } finally {
+        clearInterval(keepAlive)
       }
     },
   })
 
-  return new Response(stream, { headers: UI_STREAM_HEADERS })
+  return new Response(stream, { headers: SSE_HEADERS })
+}
+
+/** Extract text from last 10 messages as conversation history */
+function buildHistory(messages: Array<{ role: string; content?: string | Array<{ type: string; text?: string }>; parts?: Array<{ type: string; text?: string }> }>): string[] {
+  // Take last 10 messages (excluding the very last user message which is the current query)
+  const recent = messages.slice(-11, -1)
+  return recent
+    .map((m) => {
+      let text = ""
+      if (typeof m.content === "string") {
+        text = m.content
+      } else if (Array.isArray(m.content)) {
+        text = m.content.find((p) => p.type === "text")?.text || ""
+      } else if (Array.isArray(m.parts)) {
+        text = m.parts.find((p) => p.type === "text")?.text || ""
+      }
+      // Skip config messages
+      if (text.startsWith("__KILN_CONFIG__")) return null
+      // Truncate long messages
+      if (text.length > 500) text = text.slice(0, 500) + "..."
+      return text ? `${m.role}: ${text}` : null
+    })
+    .filter((line): line is string => line !== null)
 }

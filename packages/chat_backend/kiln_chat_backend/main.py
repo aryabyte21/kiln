@@ -22,6 +22,7 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
 
+import httpx
 import requests
 import yaml
 from dotenv import load_dotenv
@@ -41,8 +42,8 @@ load_dotenv()
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REGISTRY_DIR          = Path(__file__).parent.parent.parent.parent / "registry" / "tools"
-REGISTRY_URL          = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
-SYNTHESIS_URL         = os.environ.get("KILN_SYNTHESIS_URL", "http://localhost:8002")
+REGISTRY_URL          = os.environ.get("REGISTRY_URL", "http://localhost:8766")
+SYNTHESIS_URL         = os.environ.get("SYNTHESIS_URL", "http://localhost:8002")
 KILN_CALLBACK_URL     = os.environ.get("KILN_CALLBACK_URL", "http://host.docker.internal:8766/synthesis/callback")
 
 app = FastAPI(
@@ -157,6 +158,25 @@ def _tool_def(tool) -> dict:
             },
         },
     }
+
+
+async def _fetch_user_tool_env_vars(user_id: str) -> dict[str, str]:
+    """Fetch the user's saved tool env vars from Clerk private_metadata."""
+    clerk_secret = os.environ.get("CLERK_SECRET_KEY", "").strip()
+    if not clerk_secret:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.clerk.com/v1/users/{user_id}",
+                headers={"Authorization": f"Bearer {clerk_secret}"},
+            )
+            resp.raise_for_status()
+            user_data = resp.json()
+        return user_data.get("private_metadata", {}).get("tool_env_vars", {})
+    except Exception:
+        logger.warning("Failed to fetch user tool env vars for %s", user_id)
+        return {}
 
 
 def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
@@ -345,7 +365,19 @@ async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
     if not user_request:
         raise HTTPException(status_code=422, detail="'request' field is required")
 
+    # Build conversation context from history (last 10 messages)
+    history: list[str] = body.get("history", []) or []
+    if history:
+        context = "\n".join(history[-10:])
+        full_request = f"Conversation so far:\n{context}\n\nCurrent request: {user_request}"
+    else:
+        full_request = user_request
+
     provided_env: dict[str, str] = body.get("env_vars", {}) or {}
+
+    # Fetch user's saved tool env vars from Clerk and merge
+    saved_env = await _fetch_user_tool_env_vars(_user.user_id)
+    provided_env = {**saved_env, **provided_env}  # explicit overrides saved
 
     # Build tool list by fetching from the registry API
     try:
@@ -360,7 +392,7 @@ async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
 
     planner = KilnPlanner(registry_url=REGISTRY_URL, api_key=api_key)
     try:
-        graph = planner.plan(user_request, tools=tools_list)
+        graph = planner.plan(full_request, tools=tools_list)
     except Exception as exc:
         err_str = str(exc)
         if "429" in err_str or "rate" in err_str.lower() or "capacity" in err_str.lower():
