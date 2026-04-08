@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 
+from kiln_shared.httpx_client import async_client
 from kiln_synthesis.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ async def notify_success(
     if env_vars:
         form_data["env_vars"] = json.dumps(env_vars)
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with async_client(timeout=30) as client:
         response = await client.post(
             callback_url,
             data=form_data,
@@ -61,7 +62,7 @@ async def notify_failure(
     """POST a JSON error to the Kiln registry on synthesis failure."""
     logger.warning("Notifying failure for %s: %s", tool_id, error)
 
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with async_client(timeout=15) as client:
         try:
             response = await client.post(
                 callback_url,

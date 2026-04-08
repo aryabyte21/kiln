@@ -14,10 +14,34 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from typing import Protocol, runtime_checkable
 
 from kiln_shared.spec import KilnTool
 
 from .sqlite_registry import SQLiteRegistry
+
+
+@runtime_checkable
+class RegistryProtocol(Protocol):
+    """Public surface every Kiln registry backend must expose.
+
+    Both ``KilnRegistry`` (in-memory) and ``SQLiteRegistry`` (persistent)
+    satisfy this Protocol via structural typing — no inheritance required.
+    Use this in function signatures (e.g. ``get_global_registry()``) so
+    the registry implementation can be swapped without churn.
+    """
+
+    def register(self, tool: KilnTool) -> None: ...
+    def unregister(self, tool_id: str) -> None: ...
+    def get(self, tool_id: str) -> KilnTool | None: ...
+    def query(self, name: str) -> KilnTool | None: ...
+    def has(self, tool_id: str) -> bool: ...
+    def list_all(self) -> list[KilnTool]: ...
+    def list_ids(self) -> list[str]: ...
+    def by_category(self, category: str) -> list[KilnTool]: ...
+    def by_tag(self, tag: str) -> list[KilnTool]: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[KilnTool]: ...
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +54,7 @@ class KilnRegistry:
         registry = KilnRegistry()
         registry.register(my_tool)
         tool = registry.get("com.kiln.tools.weather")
-        all_tools = registry.list()
+        all_tools = registry.list_all()
     """
 
     def __init__(self):
@@ -73,7 +97,7 @@ class KilnRegistry:
     def has(self, tool_id: str) -> bool:
         return tool_id in self._tools
 
-    def list(self) -> list[KilnTool]:
+    def list_all(self) -> list[KilnTool]:
         return list(self._tools.values())
 
     def list_ids(self) -> list[str]:
@@ -114,10 +138,10 @@ class KilnRegistry:
 # Tools decorated with @kiln_tool can auto-register here.
 # Or you can create your own registry instance for isolation.
 
-_global_registry = SQLiteRegistry()
+_global_registry: RegistryProtocol = SQLiteRegistry()
 
 
-def get_global_registry() -> KilnRegistry:
+def get_global_registry() -> RegistryProtocol:
     return _global_registry
 
 

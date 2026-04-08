@@ -1,14 +1,15 @@
 "use client"
 
-import { useRef, useEffect, useState, useMemo, useCallback } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
 import { Show, SignInButton, useAuth } from "@clerk/nextjs"
+
+import { ChatSidebar } from "./_components/chat-sidebar"
+import { useChatStore } from "@/lib/chat-store"
 import {
   Flame,
-  Bot,
   Send,
-  Loader2,
   Sparkles,
   Search,
   Code,
@@ -18,14 +19,44 @@ import {
   Key,
   Eye,
   EyeOff,
+  Brain,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card } from "@/components/ui/card"
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation"
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message"
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning"
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+  type PromptInputMessage,
+} from "@/components/ai-elements/prompt-input"
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
+import { Loader } from "@/components/ai-elements/loader"
 
 const REGISTRY_URL =
   process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766"
+
+// Use [\s\S] instead of `.` + /s flag so we don't require ES2018 dotAll.
+const TRACE_RE = /^__KILN_TRACE__([\s\S]+?)__END__/
+const CONFIG_PREFIX = "__KILN_CONFIG__"
 
 const EXAMPLE_QUERIES = [
   { icon: Search, text: "Find tools for web scraping" },
@@ -36,172 +67,62 @@ const EXAMPLE_QUERIES = [
   { icon: Sparkles, text: "Suggest tools for data analysis" },
 ]
 
-const CONFIG_PREFIX = "__KILN_CONFIG__"
+// ── Trace types — must match the server-side route.ts shape ────────────────
 
-// ---------------------------------------------------------------------------
-// Simple markdown renderer (handles bold, code, inline code, lists)
-// ---------------------------------------------------------------------------
+type TraceEvent =
+  | { kind: "plan"; nodes: { id: string; role: string; tools: string[] }[] }
+  | { kind: "synthesis_wait"; tool_ids: string[] }
+  | { kind: "tool_ready"; tool_id: string }
+  | { kind: "node_start"; node_id: string; role?: string }
+  | { kind: "tool_call"; tool: string; node_id?: string }
+  | { kind: "tool_result"; node_id?: string }
+  | { kind: "node_complete"; node_id: string }
+  | { kind: "synthesis_timeout"; missing: string[] }
 
-function MarkdownContent({ content }: { content: string }) {
-  const rendered = useMemo(() => {
-    const lines = content.split("\n")
-    const elements: React.ReactNode[] = []
-    let listItems: string[] = []
-    let listType: "ul" | "ol" | null = null
-
-    function flushList() {
-      if (listItems.length > 0 && listType) {
-        const Tag = listType
-        elements.push(
-          <Tag
-            key={`list-${elements.length}`}
-            className={`my-2 space-y-1 pl-4 ${listType === "ul" ? "list-disc" : "list-decimal"}`}
-          >
-            {listItems.map((item, i) => (
-              <li key={i} className="text-sm leading-relaxed">
-                <InlineMarkdown text={item} />
-              </li>
-            ))}
-          </Tag>
-        )
-        listItems = []
-        listType = null
-      }
-    }
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-
-      // Unordered list
-      if (/^\s*[-*]\s+/.test(line)) {
-        if (listType !== "ul") flushList()
-        listType = "ul"
-        listItems.push(line.replace(/^\s*[-*]\s+/, ""))
-        continue
-      }
-
-      // Ordered list
-      if (/^\s*\d+\.\s+/.test(line)) {
-        if (listType !== "ol") flushList()
-        listType = "ol"
-        listItems.push(line.replace(/^\s*\d+\.\s+/, ""))
-        continue
-      }
-
-      flushList()
-
-      // Code block delimiter
-      if (line.startsWith("```")) {
-        const codeLines: string[] = []
-        i++
-        while (i < lines.length && !lines[i].startsWith("```")) {
-          codeLines.push(lines[i])
-          i++
-        }
-        elements.push(
-          <pre
-            key={`code-${elements.length}`}
-            className="my-2 overflow-x-auto rounded-lg border border-white/[0.06] bg-white/[0.03] p-3 text-xs leading-relaxed"
-          >
-            <code>{codeLines.join("\n")}</code>
-          </pre>
-        )
-        continue
-      }
-
-      // Headings
-      if (line.startsWith("### ")) {
-        elements.push(
-          <p key={`h3-${elements.length}`} className="mt-3 mb-1 text-sm font-semibold">
-            <InlineMarkdown text={line.slice(4)} />
-          </p>
-        )
-        continue
-      }
-      if (line.startsWith("## ")) {
-        elements.push(
-          <p key={`h2-${elements.length}`} className="mt-3 mb-1 text-sm font-bold">
-            <InlineMarkdown text={line.slice(3)} />
-          </p>
-        )
-        continue
-      }
-
-      // Empty line
-      if (line.trim() === "") {
-        elements.push(<div key={`br-${elements.length}`} className="h-2" />)
-        continue
-      }
-
-      // Normal paragraph
-      elements.push(
-        <p key={`p-${elements.length}`} className="text-sm leading-relaxed">
-          <InlineMarkdown text={line} />
-        </p>
-      )
-    }
-
-    flushList()
-    return elements
-  }, [content])
-
-  return <div className="space-y-0.5">{rendered}</div>
+interface ParsedAssistantMessage {
+  trace: TraceEvent[] | null
+  body: string
+  configRunId: string | null
+  configMissingEnvs: Array<{ var_name: string; description: string; tool_id?: string }>
 }
 
-function InlineMarkdown({ text }: { text: string }) {
-  // Process inline markdown: **bold**, `code`, *italic*
-  const parts: React.ReactNode[] = []
-  // Match bold, inline code, and italic
-  const regex = /(\*\*(.+?)\*\*|`([^`]+)`|\*(.+?)\*)/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(text)) !== null) {
-    // Text before the match
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
+function parseAssistantMessage(text: string): ParsedAssistantMessage {
+  // Inline API key config card
+  if (text.startsWith(CONFIG_PREFIX)) {
+    try {
+      const payload = JSON.parse(text.slice(CONFIG_PREFIX.length))
+      return {
+        trace: null,
+        body: "",
+        configRunId: payload.run_id ?? null,
+        configMissingEnvs: payload.missing_envs ?? [],
+      }
+    } catch {
+      // fall through to normal parsing
     }
-
-    if (match[2]) {
-      // Bold
-      parts.push(
-        <strong key={match.index} className="font-semibold text-foreground">
-          {match[2]}
-        </strong>
-      )
-    } else if (match[3]) {
-      // Inline code
-      parts.push(
-        <code
-          key={match.index}
-          className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[0.85em] text-orange-300/90"
-        >
-          {match[3]}
-        </code>
-      )
-    } else if (match[4]) {
-      // Italic
-      parts.push(
-        <em key={match.index} className="italic text-foreground/80">
-          {match[4]}
-        </em>
-      )
-    }
-
-    lastIndex = match.index + match[0].length
   }
 
-  // Remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
+  // Trace prefix injected by the chat backend route
+  const match = text.match(TRACE_RE)
+  if (match) {
+    let trace: TraceEvent[] = []
+    try {
+      trace = JSON.parse(match[1])
+    } catch {
+      trace = []
+    }
+    return {
+      trace,
+      body: text.slice(match[0].length),
+      configRunId: null,
+      configMissingEnvs: [],
+    }
   }
 
-  return <>{parts}</>
+  return { trace: null, body: text, configRunId: null, configMissingEnvs: [] }
 }
 
-// ---------------------------------------------------------------------------
-// Inline API Key Config Card
-// ---------------------------------------------------------------------------
+// ── Inline API key config card ─────────────────────────────────────────────
 
 function ApiKeyConfigCard({
   missingEnvs,
@@ -218,77 +139,114 @@ function ApiKeyConfigCard({
   const allFilled = missingEnvs.every((env) => values[env.var_name]?.trim())
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <Key className="size-4 text-primary" />
-        API Keys Required
-      </div>
-      <p className="text-xs text-muted-foreground">
-        The following API keys are needed to run this task. They will be saved to your account for future use.
-      </p>
-      <div className="space-y-3">
-        {missingEnvs.map((env) => (
-          <div key={env.var_name} className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground/80">
-              {env.var_name}
-              {env.description && (
-                <span className="ml-1.5 font-normal text-muted-foreground">
-                  — {env.description}
-                </span>
-              )}
-            </label>
-            <div className="relative">
-              <input
-                type={visibility[env.var_name] ? "text" : "password"}
-                value={values[env.var_name] || ""}
-                onChange={(e) =>
-                  setValues((prev) => ({ ...prev, [env.var_name]: e.target.value }))
-                }
-                placeholder={`Enter ${env.var_name}`}
-                className="w-full rounded-lg border border-border/70 bg-card/75 px-3 py-2 pr-9 text-sm text-foreground shadow-inner shadow-black/10 ring-1 ring-border/70 placeholder:text-muted-foreground/50 outline-none transition-all focus:border-border focus:ring-2 focus:ring-primary/30"
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  setVisibility((prev) => ({
-                    ...prev,
-                    [env.var_name]: !prev[env.var_name],
-                  }))
-                }
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-              >
-                {visibility[env.var_name] ? (
-                  <EyeOff className="size-3.5" />
-                ) : (
-                  <Eye className="size-3.5" />
+    <Card className="border-primary/20 bg-card/85 p-4">
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Key className="size-4 text-primary" />
+          API keys required
+        </div>
+        <p className="text-xs text-muted-foreground">
+          These keys will be saved to your account so you don&apos;t have to enter them again.
+        </p>
+        <div className="space-y-3">
+          {missingEnvs.map((env) => (
+            <div key={env.var_name} className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground/80">
+                {env.var_name}
+                {env.description && (
+                  <span className="ml-1.5 font-normal text-muted-foreground">
+                    — {env.description}
+                  </span>
                 )}
-              </button>
+              </label>
+              <div className="relative">
+                <input
+                  type={visibility[env.var_name] ? "text" : "password"}
+                  value={values[env.var_name] || ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [env.var_name]: e.target.value }))
+                  }
+                  placeholder={`Enter ${env.var_name}`}
+                  className="w-full rounded-lg border border-border/70 bg-card/75 px-3 py-2 pr-9 text-sm text-foreground shadow-inner shadow-black/10 ring-1 ring-border/70 placeholder:text-muted-foreground/50 outline-none transition-all focus:border-border focus:ring-2 focus:ring-primary/30"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVisibility((prev) => ({
+                      ...prev,
+                      [env.var_name]: !prev[env.var_name],
+                    }))
+                  }
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                >
+                  {visibility[env.var_name] ? (
+                    <EyeOff className="size-3.5" />
+                  ) : (
+                    <Eye className="size-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+        <Button
+          onClick={() => onSubmit(values)}
+          disabled={!allFilled || isSubmitting}
+          className="w-full"
+          size="sm"
+        >
+          {isSubmitting ? "Saving & continuing…" : "Save & continue"}
+        </Button>
       </div>
-      <Button
-        onClick={() => onSubmit(values)}
-        disabled={!allFilled || isSubmitting}
-        className="w-full"
-        size="sm"
-      >
-        {isSubmitting ? (
-          <>
-            <Loader2 className="mr-2 size-3.5 animate-spin" />
-            Saving & continuing...
-          </>
-        ) : (
-          "Save & Continue"
-        )}
-      </Button>
-    </div>
+    </Card>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+// ── Trace renderer (collapsible reasoning block) ───────────────────────────
+
+function traceToMarkdown(trace: TraceEvent[]): string {
+  const lines: string[] = []
+  for (const ev of trace) {
+    switch (ev.kind) {
+      case "plan": {
+        const roles = ev.nodes.map((n) => n.role).join(" → ")
+        lines.push(`**Plan:** ${roles}`)
+        for (const node of ev.nodes) {
+          const tools = node.tools.length
+            ? ` _(uses: ${node.tools.map((t) => `\`${t.split(".").pop()}\``).join(", ")})_`
+            : ""
+          lines.push(`- **${node.role}** — ${node.id}${tools}`)
+        }
+        lines.push("")
+        break
+      }
+      case "synthesis_wait":
+        lines.push(`⏳ Synthesizing missing tools: ${ev.tool_ids.join(", ")}`)
+        break
+      case "tool_ready":
+        lines.push(`✓ Tool ready: \`${ev.tool_id}\``)
+        break
+      case "node_start":
+        lines.push(`▸ \`${ev.node_id}\` started`)
+        break
+      case "tool_call":
+        lines.push(`  → Calling \`${ev.tool}\``)
+        break
+      case "tool_result":
+        lines.push(`  ← Result received`)
+        break
+      case "node_complete":
+        lines.push(`✓ \`${ev.node_id}\` complete`)
+        break
+      case "synthesis_timeout":
+        lines.push(`⚠ Synthesis timed out: ${ev.missing.join(", ")}`)
+        break
+    }
+  }
+  return lines.join("\n")
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
   return (
@@ -298,7 +256,7 @@ export default function ChatPage() {
           <div className="relative">
             <span className="absolute -inset-4 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 blur-xl" />
             <div className="relative flex size-16 items-center justify-center rounded-2xl border border-primary/30 bg-primary/15">
-              <Bot className="size-8 text-primary" />
+              <Flame className="size-8 text-primary" />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -320,71 +278,115 @@ export default function ChatPage() {
 }
 
 function KilnChat() {
-  const [input, setInput] = useState("")
   const { getToken } = useAuth()
+
+  // ── Persisted conversation history ────────────────────────────────────────
+  const {
+    hydrated,
+    conversations,
+    activeConversation,
+    activeId,
+    createConversation,
+    setActiveConversation,
+    deleteConversation,
+    renameConversation,
+    persistMessages,
+  } = useChatStore()
+
+  // Auto-create the first conversation once hydration is done.
+  useEffect(() => {
+    if (!hydrated) return
+    if (activeId === null && conversations.length === 0) {
+      createConversation()
+    } else if (activeId === null && conversations.length > 0) {
+      setActiveConversation(conversations[0].id)
+    }
+  }, [hydrated, activeId, conversations, createConversation, setActiveConversation])
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/chat",
-        headers: async () => {
+        headers: async (): Promise<Record<string, string>> => {
           const token = await getToken()
-          return token ? { Authorization: `Bearer ${token}` } : {}
+          const headers: Record<string, string> = {}
+          if (token) headers.Authorization = `Bearer ${token}`
+          return headers
         },
       }),
     [getToken],
   )
-  const { messages, sendMessage, status } =
-    useChat({ transport })
+  const { messages, sendMessage, status, setMessages } = useChat({
+    transport,
+    // Seed initial messages from the active conversation when it changes.
+    id: activeId ?? undefined,
+  })
   const isLoading = status === "streaming" || status === "submitted"
 
-  // Config prompt state for inline API key card
+  // ── Sync messages ↔ store ────────────────────────────────────────────────
+  // When the active conversation changes, replace useChat messages with the
+  // persisted ones for that conversation. Tracked with a ref so we don't
+  // overwrite live in-flight messages.
+  const lastLoadedIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeConversation) return
+    if (lastLoadedIdRef.current === activeConversation.id) return
+    lastLoadedIdRef.current = activeConversation.id
+    setMessages(activeConversation.messages)
+  }, [activeConversation, setMessages])
+
+  // After useChat updates, persist the new messages back into the store.
+  // Skipped while no conversation is active or while we're hydrating to
+  // avoid clobbering localStorage with an empty array.
+  useEffect(() => {
+    if (!hydrated || !activeId) return
+    if (lastLoadedIdRef.current !== activeId) return
+    persistMessages(activeId, messages)
+  }, [messages, activeId, hydrated, persistMessages])
+
+  const handleNewChat = useCallback(() => {
+    setMessages([])
+    createConversation()
+  }, [createConversation, setMessages])
+
+  const handleSelectChat = useCallback(
+    (id: string) => {
+      setActiveConversation(id)
+    },
+    [setActiveConversation],
+  )
+
+  // Pending API key config card state
   const [configPrompt, setConfigPrompt] = useState<{
     runId: string
-    missingEnvs: Array<{ var_name: string; description: string; tool_id: string }>
+    missingEnvs: Array<{ var_name: string; description: string }>
     originalQuery: string
   } | null>(null)
   const [isSubmittingConfig, setIsSubmittingConfig] = useState(false)
 
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-
-  // Auto-scroll to bottom when messages change
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [messages])
-
-  // Focus input on mount
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
-  // Detect __KILN_CONFIG__ messages and extract config prompt
+  // Detect needs_config card in latest assistant message
   useEffect(() => {
     if (messages.length < 2) return
-    const lastMsg = messages[messages.length - 1]
-    if (lastMsg?.role !== "assistant") return
-    const text = lastMsg.parts
-      .map((part) => (part.type === "text" ? part.text : ""))
+    const last = messages[messages.length - 1]
+    if (last.role !== "assistant") return
+    const text = last.parts
+      .map((p) => (p.type === "text" ? p.text : ""))
       .join("")
     if (!text.startsWith(CONFIG_PREFIX)) return
-
     try {
       const payload = JSON.parse(text.slice(CONFIG_PREFIX.length))
-      // Find the last user message to get the original query
-      const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")
-      const originalQuery = lastUserMsg?.parts
-        .map((part) => (part.type === "text" ? part.text : ""))
-        .join("") || ""
-
+      const lastUser = [...messages].reverse().find((m) => m.role === "user")
+      const originalQuery =
+        lastUser?.parts
+          .map((p) => (p.type === "text" ? p.text : ""))
+          .join("") || ""
       setConfigPrompt({
         runId: payload.run_id,
         missingEnvs: payload.missing_envs,
         originalQuery,
       })
     } catch {
-      // Invalid JSON — ignore
+      // ignore malformed payload
     }
   }, [messages])
 
@@ -393,7 +395,6 @@ function KilnChat() {
       if (!configPrompt) return
       setIsSubmittingConfig(true)
       try {
-        // Save keys to user account via registry API
         const token = await getToken()
         await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
           method: "PUT",
@@ -403,8 +404,6 @@ function KilnChat() {
           },
           body: JSON.stringify({ env_vars: envVars }),
         })
-
-        // Clear config prompt and re-send original query
         const query = configPrompt.originalQuery
         setConfigPrompt(null)
         sendMessage({ text: query })
@@ -417,175 +416,160 @@ function KilnChat() {
     [configPrompt, getToken, sendMessage],
   )
 
+  const handlePromptSubmit = (msg: PromptInputMessage) => {
+    if (!msg.text || isLoading) return
+    sendMessage({ text: msg.text })
+  }
+
   const handleExampleClick = (text: string) => {
     sendMessage({ text })
   }
 
-  const handleSend = () => {
-    if (!input.trim() || isLoading) return
-    sendMessage({ text: input })
-    setInput("")
-  }
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
   const hasMessages = messages.length > 0
-  const getMessageText = (message: (typeof messages)[number]) => {
-    return message.parts
-      .map((part) => (part.type === "text" ? part.text : ""))
-      .join("")
-  }
 
-  const isConfigMessage = (text: string) => text.startsWith(CONFIG_PREFIX)
+  const showAssistantThinking =
+    isLoading &&
+    messages.length > 0 &&
+    messages[messages.length - 1].role === "user"
 
   return (
-    <div className="section-surface flex h-[calc(100vh-12.5rem)] min-h-[38rem] flex-col overflow-hidden">
-      {/* Messages area */}
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div ref={scrollRef} className="h-full overflow-y-auto">
-            {!hasMessages ? (
-              /* Welcome state */
-              <div className="flex flex-col items-center justify-center h-full min-h-[60vh] px-6 py-12">
-                {/* Animated flame icon with glow */}
-                <div className="relative mb-8">
+    <div className="section-surface flex h-[calc(100vh-12.5rem)] min-h-[38rem] overflow-hidden p-0">
+      <ChatSidebar
+        conversations={conversations}
+        activeId={activeId}
+        onNew={handleNewChat}
+        onSelect={handleSelectChat}
+        onDelete={deleteConversation}
+        onRename={renameConversation}
+      />
+      <div className="flex flex-1 flex-col overflow-hidden">
+      <Conversation className="flex-1">
+        <ConversationContent className="mx-auto w-full max-w-3xl space-y-6 px-6 py-6">
+          {!hasMessages ? (
+            <ConversationEmptyState
+              icon={
+                <div className="relative">
                   <span className="absolute -inset-4 animate-pulse rounded-3xl bg-gradient-to-br from-primary/30 to-primary/10 blur-2xl" />
-                  <span className="absolute -inset-2 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 blur-xl" />
-                  <div className="relative flex size-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/30 shadow-lg shadow-primary/15">
-                    <Flame className="size-10 text-primary" />
+                  <div className="relative flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/30">
+                    <Flame className="size-8 text-primary" />
                   </div>
                 </div>
-                <h2 className="text-3xl font-bold tracking-tight mb-3">
-                  Ask Kiln anything
-                </h2>
-                <p className="text-sm text-muted-foreground mb-10 max-w-md text-center leading-relaxed">
-                  Explore the registry, find tools, learn how to publish, or get help
-                  with your setup.
-                </p>
+              }
+              title="Ask Kiln anything"
+              description="Explore the registry, find tools, learn how to publish, or get help with your setup."
+            >
+              <Suggestions className="mt-2 max-w-2xl">
+                {EXAMPLE_QUERIES.map(({ icon: Icon, text }) => (
+                  <Suggestion
+                    key={text}
+                    suggestion={text}
+                    onClick={handleExampleClick}
+                    className="gap-2"
+                  >
+                    <Icon className="size-3.5 text-muted-foreground/70" />
+                    {text}
+                  </Suggestion>
+                ))}
+              </Suggestions>
+            </ConversationEmptyState>
+          ) : (
+            <>
+              {messages.map((message) => {
+                const text = message.parts
+                  .map((p) => (p.type === "text" ? p.text : ""))
+                  .join("")
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-2xl w-full">
-                  {EXAMPLE_QUERIES.map(({ icon: Icon, text }) => (
-                    <button
-                      key={text}
-                      onClick={() => handleExampleClick(text)}
-                      className="group flex items-center gap-3 rounded-xl border border-border/70 bg-card/70 px-4 py-3.5 text-left text-sm text-muted-foreground ring-1 ring-border/70 transition-all duration-300 hover:-translate-y-0.5 hover:border-border hover:bg-card hover:text-foreground hover:shadow-lg hover:shadow-primary/8"
-                    >
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/65 transition-all duration-300 group-hover:bg-primary/15">
-                        <Icon className="size-4 text-muted-foreground/60 transition-colors duration-300 group-hover:text-primary" />
-                      </div>
-                      <span className="leading-snug">{text}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Powered by Kiln watermark */}
-                <div className="mt-12 flex items-center gap-1.5 text-xs text-muted-foreground/40">
-                  <Flame className="size-3 text-primary/65" />
-                  <span>Powered by Kiln</span>
-                </div>
-              </div>
-            ) : (
-              /* Message list */
-              <div className="mx-auto max-w-3xl space-y-6 px-6 py-6 pb-4">
-                {messages.map((message) => {
-                  const text = getMessageText(message)
+                if (message.role === "user") {
                   return (
-                    <div key={message.id}>
-                      {message.role === "user" ? (
-                        <div className="flex justify-end">
-                          <div className="max-w-[80%] rounded-2xl rounded-br-md border border-primary/40 bg-gradient-to-br from-primary to-primary/85 px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
-                            <p className="whitespace-pre-wrap">{text}</p>
-                          </div>
-                        </div>
-                      ) : isConfigMessage(text) ? (
-                        /* Inline API key config card */
-                        <div className="flex gap-3">
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/25">
-                            <Key className="size-4 text-primary" />
-                          </div>
-                          <Card className="max-w-[85%] border-0 bg-card/80 px-4 py-3 ring-1 ring-border/70">
-                            {configPrompt ? (
-                              <ApiKeyConfigCard
-                                missingEnvs={configPrompt.missingEnvs}
-                                onSubmit={handleConfigSubmit}
-                                isSubmitting={isSubmittingConfig}
-                              />
-                            ) : (
-                              <p className="text-sm text-muted-foreground">
-                                API keys saved. Retrying...
-                              </p>
-                            )}
-                          </Card>
-                        </div>
-                      ) : (
-                        <div className="flex gap-3">
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/25">
-                            <Bot className="size-4 text-primary" />
-                          </div>
-                          <Card className="max-w-[85%] border-0 bg-card/80 px-4 py-3 ring-1 ring-border/70">
-                            <MarkdownContent content={text} />
-                          </Card>
-                        </div>
+                    <Message key={message.id} from="user">
+                      <MessageContent>{text}</MessageContent>
+                    </Message>
+                  )
+                }
+
+                const parsed = parseAssistantMessage(text)
+
+                if (parsed.configRunId !== null) {
+                  return (
+                    <Message key={message.id} from="assistant">
+                      <div className="flex w-full max-w-[85%] flex-col gap-2">
+                        {configPrompt ? (
+                          <ApiKeyConfigCard
+                            missingEnvs={configPrompt.missingEnvs}
+                            onSubmit={handleConfigSubmit}
+                            isSubmitting={isSubmittingConfig}
+                          />
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            API keys saved. Retrying…
+                          </p>
+                        )}
+                      </div>
+                    </Message>
+                  )
+                }
+
+                return (
+                  <Message key={message.id} from="assistant">
+                    <div className="flex w-full max-w-[85%] flex-col gap-2">
+                      {parsed.trace && parsed.trace.length > 0 && (
+                        <Reasoning isStreaming={false}>
+                          <ReasoningTrigger>
+                            <Brain className="size-3.5" />
+                            View execution trace ({parsed.trace.length} steps)
+                          </ReasoningTrigger>
+                          <ReasoningContent>
+                            {traceToMarkdown(parsed.trace)}
+                          </ReasoningContent>
+                        </Reasoning>
+                      )}
+                      {parsed.body && (
+                        <MessageContent>
+                          <MessageResponse>{parsed.body}</MessageResponse>
+                        </MessageContent>
                       )}
                     </div>
-                  )
-                })}
+                  </Message>
+                )
+              })}
 
-                {/* Loading indicator */}
-                {isLoading &&
-                  messages.length > 0 &&
-                  messages[messages.length - 1].role === "user" && (
-                    <div className="flex gap-3">
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/25">
-                        <Bot className="size-4 text-primary" />
-                      </div>
-                      <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
-                        <Loader2 className="size-4 animate-spin" />
-                        <span>Thinking...</span>
-                      </div>
+              {showAssistantThinking && (
+                <Message from="assistant">
+                  <MessageContent>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader />
+                      <span>Thinking…</span>
                     </div>
-                  )}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
-      </div>
+                  </MessageContent>
+                </Message>
+              )}
+            </>
+          )}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
-      {/* Input bar */}
       <div className="shrink-0 border-t border-border/70 bg-background/85 px-6 py-4 backdrop-blur-xl">
-        <form
-          onSubmit={(e) => { e.preventDefault(); handleSend() }}
-          className="mx-auto flex max-w-3xl items-end gap-3"
-        >
-          <div className="relative flex-1">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Ask Kiln something..."
-              rows={1}
-              className="field-sizing-content min-h-[44px] max-h-[200px] w-full resize-none rounded-xl border border-border/70 bg-card/75 px-4 py-3 pr-12 text-sm text-foreground shadow-inner shadow-black/15 ring-1 ring-border/70 placeholder:text-muted-foreground/60 outline-none transition-all duration-300 focus:border-border focus:bg-card focus:ring-2 focus:ring-primary/30 focus:shadow-lg focus:shadow-primary/8"
-            />
-          </div>
-          <Button
-            type="submit"
-            size="icon"
-            disabled={!input.trim() || isLoading}
-            className="size-11 shrink-0 rounded-xl border border-primary/35 bg-gradient-to-br from-primary to-primary/80 shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-primary/20 disabled:opacity-40"
-          >
-            {isLoading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-          </Button>
-        </form>
+        <div className="mx-auto max-w-3xl">
+          <PromptInput onSubmit={handlePromptSubmit}>
+            <PromptInputBody>
+              <PromptInputTextarea
+                placeholder="Ask Kiln something…"
+                disabled={isLoading}
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60">
+                <Flame className="size-3 text-primary/70" />
+                Powered by Kiln
+              </div>
+              <PromptInputSubmit disabled={isLoading}>
+                <Send className="size-3.5" />
+              </PromptInputSubmit>
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
+      </div>
       </div>
     </div>
   )

@@ -27,6 +27,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -38,11 +39,41 @@ import httpx
 import jsonschema
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+
+from pydantic import BaseModel, Field
+from slowapi.errors import RateLimitExceeded
 
 from kiln_shared.auth import KilnUser, invalidate_api_key_cache, require_auth, require_jwt_auth, verify_internal_secret
 from kiln_shared.config import get_config
+from kiln_shared.cors import install_cors
+from kiln_shared.httpx_client import async_client
+from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
+from kiln_shared.request_id import KilnRequestIDMiddleware
+
+
+class ExecuteToolRequest(BaseModel):
+    """Body for ``POST /tools/{id}/execute``.
+
+    Validated by FastAPI before the handler runs. Caps the arg + env_var
+    sizes so a malicious client can't send a 1 GB JSON and blow up the
+    subprocess executor.
+    """
+
+    args: dict[str, object] = Field(
+        default_factory=dict,
+        description="Keyword arguments to pass to the tool function",
+    )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-execution env vars (e.g. API keys)",
+    )
+
+
+class FavoriteRequest(BaseModel):
+    """Body for ``POST /tools/{id}/favorite``."""
+
+    delta: int = Field(1, description="+1 to favorite, -1 to unfavorite")
 
 from .loader import KilnLoader
 from .registry import get_global_registry
@@ -64,17 +95,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow requests from local UI dev servers
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.environ.get(
-        "CORS_ORIGINS",
-        "http://localhost:3000,http://localhost:5173,http://localhost:5174",
-    ).split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-    allow_credentials=True,
-)
+# Per-user rate limiting (slowapi). Default limit comes from
+# `KILN_RATE_LIMIT_DEFAULT`; the /tools/{id}/execute route below tightens
+# further with `@limiter.limit(...)` because tool execution can be expensive.
+limiter = get_limiter()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, kiln_rate_limit_exceeded_handler)
+
+# Per-request correlation ID — must come before CORS so it's included on
+# every response, including OPTIONS preflight.
+app.add_middleware(KilnRequestIDMiddleware)
+
+# CORS: strict allowlist + fail-loud in production if CORS_ORIGINS is unset.
+install_cors(app)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
@@ -186,10 +219,81 @@ def _tool_def(tool) -> dict:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.get("/health", summary="Server health + tool count")
-def health():
-    registry = get_global_registry()
-    return {"status": "ok", "service": "kiln-registry-api", "tool_count": len(registry)}
+@app.get("/livez", summary="Liveness — process is up and serving")
+def livez():
+    """Cheap liveness probe. Returns 200 as long as the process is alive.
+
+    Used by orchestrators (k8s, docker-compose) to decide whether to restart
+    the container. MUST NOT call out to dependencies — a slow DB should not
+    cause us to be killed and restarted.
+    """
+    return {"status": "ok", "service": "kiln-registry-api"}
+
+
+@app.get("/readyz", summary="Readiness — dependencies are reachable")
+async def readyz():
+    """Real readiness probe. Pings the async DB and the in-process registry.
+
+    Returns 200 only when the service can actually serve traffic. Used by
+    orchestrators to decide whether to send requests to this instance.
+    Returns 503 if any check fails so /tools requests get routed elsewhere.
+    """
+    from sqlalchemy import text
+
+    from .db import get_session
+
+    checks: dict[str, str] = {}
+    overall = "ok"
+
+    # In-process registry: cheap, just confirms tools were loaded at boot.
+    try:
+        registry = get_global_registry()
+        checks["registry"] = f"ok ({len(registry)} tools)"
+    except Exception as exc:
+        checks["registry"] = f"error: {exc!s}"
+        overall = "degraded"
+
+    # Async DB: real round-trip with a tiny query.
+    try:
+        async with get_session() as session:
+            await session.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"error: {exc!s}"
+        overall = "degraded"
+
+    body = {
+        "status": overall,
+        "service": "kiln-registry-api",
+        "checks": checks,
+    }
+    if overall != "ok":
+        return JSONResponse(status_code=503, content=body)
+    return body
+
+
+@app.get("/health", summary="Combined health: live + ready (legacy compat)")
+async def health():
+    """Combined health endpoint kept for backwards compatibility.
+
+    New deployments should use /livez and /readyz separately. This route
+    runs the readiness checks AND adds the legacy ``tool_count`` field that
+    the iter-20 test_main.py and the Puppeteer e2e tests assert against.
+    """
+    ready = await readyz()
+    if isinstance(ready, JSONResponse):
+        # Readiness failed — propagate the 503 but enrich the body so old
+        # callers see the legacy fields too.
+        body = json.loads(ready.body)
+        body["tool_count"] = len(get_global_registry())
+        return JSONResponse(status_code=503, content=body)
+
+    return {
+        "status": "ok",
+        "service": "kiln-registry-api",
+        "tool_count": len(get_global_registry()),
+        "checks": ready["checks"],
+    }
 
 
 @app.get("/audio", summary="Serve a generated audio file by absolute path")
@@ -207,7 +311,7 @@ def serve_audio(path: str):
 def tool_stats():
     """Returns tool count, categories breakdown, and tag distribution."""
     registry = get_global_registry()
-    tools = registry.list()
+    tools = registry.list_all()
     categories: dict[str, int] = {}
     tags: dict[str, int] = {}
     authors: set[str] = set()
@@ -226,17 +330,58 @@ def tool_stats():
     }
 
 
-@app.get("/tools", summary="List all registered tools")
-def list_tools():
+def _stats_to_dict(stat) -> dict:
+    """Serialize a ToolStatModel row (or None) to a stats dict.
+
+    Returns a zero-valued dict if stat is None so the UI can render the same
+    shape for tools that have never been executed yet.
     """
-    Returns every registered tool with its spec and LLM-ready tool_def.
+    if stat is None:
+        return {
+            "execution_count": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "success_rate": None,
+            "avg_duration_ms": 0.0,
+            "last_executed_at": None,
+            "last_status": "never",
+            "favorite_count": 0,
+        }
+    total = stat.execution_count
+    return {
+        "execution_count": stat.execution_count,
+        "success_count": stat.success_count,
+        "error_count": stat.error_count,
+        "success_rate": (stat.success_count / total) if total > 0 else None,
+        "avg_duration_ms": round(stat.avg_duration_ms, 2),
+        "last_executed_at": stat.last_executed_at.isoformat() if stat.last_executed_at else None,
+        "last_status": stat.last_status,
+        "favorite_count": stat.favorite_count,
+    }
+
+
+@app.get("/tools", summary="List all registered tools (with execution stats)")
+async def list_tools():
+    """
+    Returns every registered tool with its spec, LLM-ready tool_def, AND
+    execution stats (count, success rate, last_executed_at, favorites).
+
     Agents should call this at the top of every loop iteration to pick up
-    tools registered by the synthesis pipeline since the last call.
+    tools registered by the synthesis pipeline since the last call. The
+    catalog UI uses the same response to render the tool cards with their
+    social-proof signals (executions, favorites, last status badge).
     """
+    from .db import db_list_all_tool_stats
+
     registry = get_global_registry()
+    stats_by_id = await db_list_all_tool_stats()
     return [
-        {**_tool_to_dict(t), "tool_def": _tool_def(t)}
-        for t in registry.list()
+        {
+            **_tool_to_dict(t),
+            "tool_def": _tool_def(t),
+            "stats": _stats_to_dict(stats_by_id.get(t.id)),
+        }
+        for t in registry.list_all()
     ]
 
 
@@ -285,6 +430,44 @@ def list_tool_versions(tool_id: str):
             versions.append({"version": ver_dir.name, "error": "Could not parse spec"})
 
     return {"tool_id": tool_id, "versions": versions, "count": len(versions)}
+
+
+@app.get("/tools/{tool_id:path}/stats", summary="Per-tool execution statistics")
+async def get_tool_stats(tool_id: str):
+    """Return execution stats for a single tool, or zeros if never run.
+
+    Declared BEFORE the catch-all ``GET /tools/{tool_id:path}`` because the
+    `:path` qualifier on that route would otherwise greedily match
+    ``com.kiln.tools.foo/stats`` as a tool id and 404.
+    """
+    from .db import db_get_tool_stats
+
+    stat = await db_get_tool_stats(tool_id)
+    if stat is None:
+        return {
+            "tool_id": tool_id,
+            "execution_count": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "success_rate": None,
+            "avg_duration_ms": 0.0,
+            "last_executed_at": None,
+            "last_status": "never",
+            "favorite_count": 0,
+        }
+    total = stat.execution_count
+    success_rate = (stat.success_count / total) if total > 0 else None
+    return {
+        "tool_id": stat.tool_id,
+        "execution_count": stat.execution_count,
+        "success_count": stat.success_count,
+        "error_count": stat.error_count,
+        "success_rate": success_rate,
+        "avg_duration_ms": round(stat.avg_duration_ms, 2),
+        "last_executed_at": stat.last_executed_at.isoformat() if stat.last_executed_at else None,
+        "last_status": stat.last_status,
+        "favorite_count": stat.favorite_count,
+    }
 
 
 @app.get("/tools/{tool_id:path}", summary="Get a single tool by ID")
@@ -446,74 +629,115 @@ def _read_tool_source(tool_id: str) -> tuple[str, str, list[str]] | None:
 
 
 @app.post("/tools/{tool_id:path}/execute", summary="Execute a registered tool")
-async def execute_tool(tool_id: str, body: dict, _user: KilnUser = Depends(require_auth)):
+@limiter.limit(os.environ.get("KILN_RATE_LIMIT_EXECUTE", "60/minute"))
+async def execute_tool(
+    request: Request,
+    tool_id: str,
+    body: ExecuteToolRequest,
+    _user: KilnUser = Depends(require_auth),
+):
     """
     Execute a registered tool with the provided arguments.
 
-    Body:
-        {"args": {"location": "Singapore", "units": "celsius"},
-         "env_vars": {"API_KEY": "..."}}   # optional
-
     Delegates execution to the Tool Executor service for isolated subprocess
     execution. Falls back to in-process execution if the executor is unavailable.
+    Records execution stats (count, success rate, duration) regardless of path.
 
     Returns:
         {"success": true, "tool_id": "...", "result": {...}}
     """
+    import time
+
+    from .db import db_record_execution
+
     registry = get_global_registry()
     tool = registry.get(tool_id)
     if tool is None:
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
 
-    args = body.get("args", {})
-    env_vars = body.get("env_vars", {})
+    args = dict(body.args)
+    env_vars = dict(body.env_vars)
 
-    # Try delegating to the Tool Executor service
-    source = _read_tool_source(tool_id)
-    if source is not None:
-        code, function_name, requirements = source
-        config = get_config()
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    f"{TOOL_EXECUTOR_URL}/execute",
-                    json={
-                        "tool_id": tool_id,
-                        "function_name": function_name,
-                        "code": code,
-                        "args": args,
-                        "requirements": requirements,
-                        "timeout": 30,
-                        "env_vars": env_vars,
-                    },
-                    headers={"X-Internal-Secret": config.internal_secret},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("success"):
-                        return {"success": True, "tool_id": tool_id, "result": data["result"]}
-                    else:
-                        raise HTTPException(status_code=500, detail=data.get("error", "Executor error"))
-        except httpx.ConnectError:
-            logger.debug("Tool Executor unavailable, falling back to in-process execution")
-        except httpx.TimeoutException:
-            logger.warning("Tool Executor timed out for %s", tool_id)
-
-    # Fallback: in-process execution (local dev without executor running)
+    started_at = time.perf_counter()
+    success = False
     try:
-        result = tool.fn(**args)
-    except TypeError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid arguments for '{tool_id}': {exc}",
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Tool '{tool_id}' raised {type(exc).__name__}: {exc}",
-        ) from exc
+        # Try delegating to the Tool Executor service
+        source = _read_tool_source(tool_id)
+        if source is not None:
+            code, function_name, requirements = source
+            config = get_config()
+            try:
+                # Use the request-id-aware client so the executor's logs
+                # get the same correlation ID as the originating call.
+                async with async_client(timeout=60) as client:
+                    resp = await client.post(
+                        f"{TOOL_EXECUTOR_URL}/execute",
+                        json={
+                            "tool_id": tool_id,
+                            "function_name": function_name,
+                            "code": code,
+                            "args": args,
+                            "requirements": requirements,
+                            "timeout": 30,
+                            "env_vars": env_vars,
+                        },
+                        headers={"X-Internal-Secret": config.internal_secret},
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("success"):
+                            success = True
+                            return {"success": True, "tool_id": tool_id, "result": data["result"]}
+                        else:
+                            raise HTTPException(status_code=500, detail=data.get("error", "Executor error"))
+            except httpx.ConnectError:
+                logger.debug("Tool Executor unavailable, falling back to in-process execution")
+            except httpx.TimeoutException:
+                logger.warning("Tool Executor timed out for %s", tool_id)
 
-    return {"success": True, "tool_id": tool_id, "result": result}
+        # Fallback: in-process execution (local dev without executor running)
+        try:
+            result = tool.fn(**args)
+            success = True
+        except TypeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid arguments for '{tool_id}': {exc}",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Tool '{tool_id}' raised {type(exc).__name__}: {exc}",
+            ) from exc
+
+        return {"success": True, "tool_id": tool_id, "result": result}
+    finally:
+        duration_ms = (time.perf_counter() - started_at) * 1000.0
+        try:
+            await db_record_execution(tool_id, success=success, duration_ms=duration_ms)
+        except Exception as exc:
+            logger.warning("Failed to record execution stats for %s: %s", tool_id, exc)
+
+
+@app.post("/tools/{tool_id:path}/favorite", summary="Toggle the favorite count")
+async def toggle_favorite(
+    tool_id: str,
+    body: FavoriteRequest | None = None,
+    _user: KilnUser = Depends(require_auth),
+):
+    """Increment or decrement the favorite count for a tool.
+
+    Body: ``{"delta": 1}`` to favorite, ``{"delta": -1}`` to unfavorite.
+    Defaults to +1 if body is omitted entirely.
+    """
+    from .db import db_toggle_favorite
+
+    delta = body.delta if body is not None else 1
+    if delta not in (-1, 1):
+        raise HTTPException(status_code=422, detail="delta must be +1 or -1")
+
+    new_count = await db_toggle_favorite(tool_id, delta)
+    return {"tool_id": tool_id, "favorite_count": new_count}
 
 
 @app.post("/tools/{tool_id:path}/test", summary="Run test fixtures for a tool")

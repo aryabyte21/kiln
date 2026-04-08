@@ -42,7 +42,9 @@ class LangChainAdapter(BaseAdapter):
         The args_schema is dynamically built from the KilnToolSpec.
         """
         try:
-            from langchain_core.tools import StructuredTool
+            # langchain-core is an optional dep; only used if a tool author
+            # asks for the langchain compile target. mypy can't see the stub.
+            from langchain_core.tools import StructuredTool  # type: ignore[import-not-found]
         except ImportError:
             raise ImportError(
                 "LangChain not installed. Run: pip install langchain langchain-core"
@@ -91,7 +93,9 @@ def _build_pydantic_model(model_name: str, params: list[ToolParam]) -> type:
     field_definitions: dict[str, Any] = {}
 
     for param in params:
-        python_type = type_map.get(param.type, str)
+        # `python_type` may be either a real `type` (str, int, ...) or a
+        # typing special form like `Literal["a","b"]`, so annotate as Any.
+        python_type: Any = type_map.get(param.type, str)
 
         # Handle enums — use Literal type for strict validation
         if param.enum:

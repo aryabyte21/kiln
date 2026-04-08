@@ -83,6 +83,10 @@ async def run_opencode(
             cwd=str(workdir),
             env=env,
         )
+        # PIPE was requested for both stdout and stderr, so they are guaranteed
+        # StreamReader. Narrow for mypy and fail loudly if asyncio breaks contract.
+        if proc.stdout is None or proc.stderr is None:
+            raise OpenCodeError("subprocess did not expose stdout/stderr pipes")
 
         # CRITICAL: Drain stderr concurrently to prevent pipe buffer deadlock.
         # OpenCode may write progress/TUI codes to stderr which can fill the

@@ -56,7 +56,7 @@ metadata:
 """
 
 _IMPL_RULES = """\
-## Implementation Rules (impl.py)
+## Implementation Rules (impl.py) — read carefully
 
 - MUST define a global list `REQUIRED_ENV_VARS` at the top of the file listing every environment
   variable the tool needs. Each entry is a dict with `name` and `description`. Example:
@@ -70,14 +70,40 @@ _IMPL_RULES = """\
   Example: if `tool.name: geopolitical_analysis` then `def geopolitical_analysis(**kwargs) -> dict`
 - Accept all inputs defined in spec as keyword arguments with appropriate type hints and defaults
 - Return a dict whose keys match the `expected_output_contains` keys in the test fixtures
-- On error, return `{"error": "<message>"}` — NEVER raise exceptions to the caller
-- NEVER include mock or fallback data — always make real API calls
+- On API/network error, return `{"error": "<concrete reason>"}` — NEVER raise exceptions to the caller
 - Only import stdlib modules + dependencies declared in spec.implementation.dependencies
 - Keep the implementation concise and production-quality
+
+### NO DUMMY DATA — this is the most important rule
+
+The whole point of Kiln tools is that they call REAL services and return REAL data. A tool
+that returns hardcoded values is WORSE THAN NOTHING because it lies to the agent. The
+following are forbidden:
+
+  - Hardcoded return values that ignore the inputs (e.g. returning the same date every call)
+  - "Fallback" branches that fabricate plausible-looking output when the API fails
+  - Mock/example/placeholder data anywhere in the function body
+  - `try: ... except: return {"foo": "default value"}` patterns that swallow errors with fake output
+  - Returning `datetime.now()` or local computation pretending to be the result of an API call
+    (the only exception: a tool whose stated purpose IS local computation, e.g. unit conversion)
+
+If an API legitimately doesn't work (down, rate-limited, requires auth you don't have), the
+correct behavior is `return {"error": "<exactly what failed and why>"}`. The test will fail.
+That is the CORRECT outcome — it tells the synthesis pipeline to retry with a different API
+or report the missing tool to the user. A test that "passes" because the function returned
+fabricated data is a much worse failure mode than a test that fails honestly.
+
+### API selection
+
 - **STRONGLY prefer free, open APIs that require no API key.** Use paid/key-gated APIs only when
   there is absolutely no free alternative. If a free API is used, `REQUIRED_ENV_VARS` MUST be `[]`.
-  If a key-gated API is unavoidable, declare its env var in `REQUIRED_ENV_VARS` and return
+- If a key-gated API is unavoidable, declare its env var in `REQUIRED_ENV_VARS` and return
   `{"error": "Missing required env var: <VAR>"}` if it is absent.
+- Pick an API whose response shape ACTUALLY contains the fields the spec asks for. Do not
+  pick an API and then synthesize the missing fields locally.
+- One real API per tool. Do NOT chain together random APIs (Wikipedia + arxiv + web_search)
+  hoping one of them produces the right answer. If you can't find one good API, the right
+  output is `{"error": "no public API exists for <X>"}` and let the user know.
 """
 
 
@@ -108,7 +134,8 @@ def _format_output(request: SynthesizeRequest) -> str:
 
 def _build_test_input(request: SynthesizeRequest) -> str:
     """Build a sample test invocation from the inputs."""
-    sample = {}
+    # Mixed value types (str/int/float/bool/list/dict) — use object for mypy.
+    sample: dict[str, object] = {}
     for inp in request.inputs:
         if not inp.required and inp.default is not None:
             continue
@@ -193,22 +220,36 @@ python -c "from impl import {request.tool_name}; print('Import OK')"
 If this fails, fix syntax errors in impl.py before proceeding.
 
 ### Step 2: Functional test
+The default test input uses placeholder values that real APIs may reject (e.g. `city="test"`).
+**Replace placeholder values with REAL ones** that the API you chose will actually accept
+(e.g. `city="London"`, `symbol="BTC"`, `lat=51.5, lon=-0.13`). Then run:
+
 ```bash
 cd {workspace}
-python -c "from impl import {request.tool_name}; import json; result = {request.tool_name}(**{_build_test_input(request)}); print(json.dumps(result, indent=2))"
+python -c "from impl import {request.tool_name}; import json; result = {request.tool_name}(**{{REAL_INPUTS}}); print(json.dumps(result, indent=2))"
 ```
 
-### Verification checklist
+### Verification checklist (in order)
 1. The command runs **without any Python errors or tracebacks**
-2. The output is a valid dict — NOT an error dict like `{{"error": "..."}}`
+2. The output is a valid dict
 3. The output contains the expected keys from the spec
-4. If an API call fails (network error, timeout), add a local fallback so the tool always returns useful output
+4. The output looks like REAL data the API would have produced — not hardcoded constants,
+   not `datetime.now()` masquerading as an API result, not the same value every call
 
-### Important testing rules
-- Do NOT consider the tool done until the test command above succeeds
-- If an external API is unreachable, switch to a **free API that works** or use a **local computation** (e.g. stdlib `datetime` for dates, stdlib `math` for calculations)
-- Do NOT waste turns retrying the same failing approach — if an API doesn't work after one attempt, switch strategy immediately
-- The test input may use placeholder values like "test" — make sure your implementation handles these gracefully without crashing
+### What to do when the API fails
+**Do NOT add a local fallback. Do NOT fabricate data. Do NOT switch to local computation
+unless local computation IS the tool's stated purpose.** Instead:
+
+1. First, try a different real input. The placeholder may have been the problem.
+2. If the API genuinely doesn't work, try ONE alternative free public API for the same data.
+3. If no free public API works, the correct outcome is for `impl.py` to return
+   `{{"error": "<exact failure reason>"}}` AND for you to STOP and report:
+   *"No public API found for <X>. Synthesis cannot proceed without inventing fake data."*
+
+A test that fails honestly is INFINITELY better than a tool that ships hardcoded lies.
+The synthesis pipeline knows how to handle a failed test (retry, ask the user, mark
+the tool as needing manual implementation). It cannot recover from a tool that
+silently fabricates output.
 
 ## Files to Create
 

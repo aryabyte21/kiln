@@ -40,6 +40,14 @@ import os
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+
+from kiln_shared.httpx_client import async_client
+from kiln_shared.request_id import KilnRequestIDMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +88,13 @@ def _fetch_tools_sync() -> list[dict]:
 
 
 async def _fetch_tools() -> list[dict]:
-    """Fetch all tools from the Kiln Registry API (async, for polling)."""
+    """Fetch all tools from the Kiln Registry API (async, for polling).
+
+    Uses the request-id-aware client so refresh polls are correlated
+    with the originating MCP request when one is in flight.
+    """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with async_client(timeout=10) as client:
             resp = await client.get(f"{REGISTRY_URL}/tools")
             resp.raise_for_status()
             return resp.json()
@@ -93,7 +105,7 @@ async def _fetch_tools() -> list[dict]:
 
 async def _execute_tool(tool_id: str, args: dict) -> dict:
     """Execute a tool via the Kiln Registry API."""
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with async_client(timeout=30) as client:
         resp = await client.post(
             f"{REGISTRY_URL}/tools/{tool_id}/execute",
             json={"args": args},
@@ -282,7 +294,7 @@ async def kiln_search_tools(query: str, ctx: Context[ServerSession, None]) -> st
     """Search the Kiln tool registry by keyword. Returns matching tools."""
     await ctx.info(f"Searching for: {query}")
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with async_client(timeout=10) as client:
             resp = await client.get(
                 f"{REGISTRY_URL}/tools/search",
                 params={"q": query},
@@ -320,12 +332,88 @@ async def kiln_registry_stats(ctx: Context[ServerSession, None]) -> str:
     """Get statistics about the Kiln tool registry."""
     await ctx.info("Fetching registry stats")
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with async_client(timeout=10) as client:
             resp = await client.get(f"{REGISTRY_URL}/tools/stats")
             resp.raise_for_status()
             return json.dumps(resp.json(), indent=2)
     except Exception as e:
         return f"Failed to fetch stats: {e}"
+
+
+# ── Health endpoints ─────────────────────────────────────────────────────────
+#
+# FastMCP doesn't expose HTTP routes for liveness/readiness, so we wrap its
+# ASGI app in a parent Starlette app that adds /livez, /readyz, /health
+# routes alongside the streamable-http MCP transport. This lets orchestrators
+# health-check the MCP server the same way they check the other services.
+
+
+async def _livez(_request: Request) -> JSONResponse:
+    """Cheap liveness probe — process is up. No dependency calls."""
+    return JSONResponse({"status": "ok", "service": "kiln-mcp-server"})
+
+
+async def _readyz(_request: Request) -> JSONResponse:
+    """Real readiness probe — pings registry_api as a HARD dependency.
+
+    Without registry_api the MCP server has no tools to expose; every
+    `tools/list` call would return only the built-in utility tools.
+    Returns 503 if the registry is unreachable so orchestrators stop
+    routing MCP clients here.
+    """
+    checks: dict[str, str] = {}
+    overall = "ok"
+
+    # Registry: hard dependency.
+    try:
+        async with async_client(timeout=2.0) as client:
+            resp = await client.get(f"{REGISTRY_URL}/livez")
+            if resp.status_code == 200:
+                checks["registry_api"] = "ok"
+            else:
+                checks["registry_api"] = f"unhealthy: HTTP {resp.status_code}"
+                overall = "degraded"
+    except Exception as exc:
+        checks["registry_api"] = f"unreachable: {exc!s}"
+        overall = "degraded"
+
+    # In-process tool count — proves load_tools_on_startup ran.
+    checks["registered_tools"] = f"ok ({len(_registered_tools)} tools)"
+
+    body = {
+        "status": overall,
+        "service": "kiln-mcp-server",
+        "checks": checks,
+    }
+    if overall != "ok":
+        return JSONResponse(status_code=503, content=body)
+    return JSONResponse(body)
+
+
+async def _health(request: Request) -> JSONResponse:
+    """Combined health endpoint kept for backwards compatibility."""
+    return await _readyz(request)
+
+
+def build_http_app() -> Starlette:
+    """Build the parent Starlette app: health routes + mounted MCP transport.
+
+    Exposed as a separate function so tests can call it without spawning
+    uvicorn. The MCP streamable HTTP transport is mounted at the root so
+    MCP clients still hit `/mcp` etc as before.
+    """
+    mcp_app = mcp.streamable_http_app()
+    return Starlette(
+        routes=[
+            Route("/livez", _livez, methods=["GET"]),
+            Route("/readyz", _readyz, methods=["GET"]),
+            Route("/health", _health, methods=["GET"]),
+            Mount("/", app=mcp_app),
+        ],
+        middleware=[Middleware(KilnRequestIDMiddleware)],
+        # Honor MCP app's lifespan (its session manager sets up streams).
+        lifespan=mcp_app.router.lifespan_context,
+    )
 
 
 # ── Entry Point ──────────────────────────────────────────────────────────────
@@ -349,9 +437,10 @@ def main():
     if transport == "stdio":
         mcp.run(transport="stdio")
     else:
-        # For HTTP transports, get the ASGI app and run with uvicorn directly
+        # For HTTP transports, build the wrapped Starlette app (MCP transport
+        # plus /livez /readyz /health routes) and run with uvicorn directly.
         import uvicorn
-        app = mcp.streamable_http_app()
+        app = build_http_app()
         uvicorn.run(app, host=host, port=port)
 
 

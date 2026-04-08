@@ -172,7 +172,7 @@ class SQLiteRegistry:
                 "SELECT 1 FROM tools WHERE id = ?", (tool_id,)
             ).fetchone() is not None
 
-    def list(self) -> list[KilnTool]:
+    def list_all(self) -> list[KilnTool]:
         with self._conn() as conn:
             rows = conn.execute("SELECT spec_json FROM tools").fetchall()
         return [t for t in (self._row_to_tool(r) for r in rows) if t is not None]
@@ -204,7 +204,7 @@ class SQLiteRegistry:
             return conn.execute("SELECT COUNT(*) FROM tools").fetchone()[0]
 
     def __iter__(self) -> Iterator[KilnTool]:
-        return iter(self.list())
+        return iter(self.list_all())
 
     def __repr__(self) -> str:
         return f"SQLiteRegistry(db={self._db_path!r}, tools={len(self)})"
@@ -212,7 +212,7 @@ class SQLiteRegistry:
     # ── Summary ────────────────────────────────────────────────────────────────
 
     def summary(self) -> str:
-        tools = self.list()
+        tools = self.list_all()
         if not tools:
             return "SQLite registry is empty."
         lines = ["┌─ Kiln SQLite Registry ───────────────────────────────────┐"]

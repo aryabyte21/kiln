@@ -11,6 +11,8 @@ dependencies = [
     "pyjwt[crypto]>=2.8",
     "httpx>=0.27.0",
     "redis>=5.0",
+    "slowapi>=0.1.9",
+    "starlette>=0.40",
 ]
 
 [build-system]
@@ -19,3 +21,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kiln_shared"]
+
+# PEP 561: include the py.typed marker so consumers (other monorepo
+# packages and external users) get type-checked imports of kiln_shared.
+[tool.hatch.build.targets.wheel.force-include]
+"kiln_shared/py.typed" = "kiln_shared/py.typed"

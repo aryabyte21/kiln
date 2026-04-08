@@ -21,7 +21,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String, Text, func, select
+from sqlalchemy import DateTime, Float, Integer, String, Text, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -71,6 +71,29 @@ class ToolModel(Base):
         server_default=func.now(),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class ToolStatModel(Base):
+    """Per-tool execution statistics — the social-proof signal of the registry.
+
+    One row per tool, kept in sync with executions via ``db_record_execution``.
+    Cheap aggregation: avg_duration_ms is a running average so we never need to
+    join against an executions table for the listing endpoint.
+    """
+
+    __tablename__ = "tool_stats"
+
+    tool_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    execution_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_duration_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    last_executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_status: Mapped[str] = mapped_column(String(20), nullable=False, default="never")
+    favorite_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 # ── Engine & Session ──────────────────────────────────────────────────────────
@@ -173,3 +196,73 @@ async def db_search_tools(query: str) -> list[ToolModel]:
             ).order_by(ToolModel.name)
         )
         return list(result.scalars().all())
+
+
+# ── Stats helpers ─────────────────────────────────────────────────────────────
+
+
+async def db_record_execution(tool_id: str, success: bool, duration_ms: float) -> None:
+    """Increment the execution counters for a tool. Idempotent on tool_id.
+
+    Maintains a running average of duration_ms via the standard
+    ``new_avg = (old_avg * old_count + new_value) / (old_count + 1)`` formula
+    so we never need to scan an executions log to compute the average.
+    """
+    async with get_session() as session:
+        stat = await session.get(ToolStatModel, tool_id)
+        if stat is None:
+            stat = ToolStatModel(
+                tool_id=tool_id,
+                execution_count=1,
+                success_count=1 if success else 0,
+                error_count=0 if success else 1,
+                avg_duration_ms=duration_ms,
+                last_executed_at=datetime.now(UTC),
+                last_status="success" if success else "error",
+            )
+            session.add(stat)
+            return
+
+        new_count = stat.execution_count + 1
+        stat.avg_duration_ms = (
+            (stat.avg_duration_ms * stat.execution_count) + duration_ms
+        ) / new_count
+        stat.execution_count = new_count
+        if success:
+            stat.success_count += 1
+        else:
+            stat.error_count += 1
+        stat.last_executed_at = datetime.now(UTC)
+        stat.last_status = "success" if success else "error"
+
+
+async def db_get_tool_stats(tool_id: str) -> ToolStatModel | None:
+    async with get_session() as session:
+        return await session.get(ToolStatModel, tool_id)
+
+
+async def db_list_all_tool_stats() -> dict[str, ToolStatModel]:
+    """Return a tool_id → ToolStatModel map for batch enrichment of /tools."""
+    async with get_session() as session:
+        result = await session.execute(select(ToolStatModel))
+        return {row.tool_id: row for row in result.scalars().all()}
+
+
+async def db_toggle_favorite(tool_id: str, delta: int) -> int:
+    """Increment or decrement the favorite count. Returns the new count.
+
+    Caller is responsible for tracking which user favorited what (out of
+    scope for the Kiln registry — this is just the aggregate counter the
+    catalog UI shows). Pass delta=+1 to favorite, delta=-1 to unfavorite.
+    """
+    async with get_session() as session:
+        stat = await session.get(ToolStatModel, tool_id)
+        if stat is None:
+            stat = ToolStatModel(
+                tool_id=tool_id,
+                favorite_count=max(0, delta),
+            )
+            session.add(stat)
+            return stat.favorite_count
+        stat.favorite_count = max(0, stat.favorite_count + delta)
+        return stat.favorite_count

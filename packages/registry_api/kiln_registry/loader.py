@@ -265,7 +265,13 @@ class KilnLoader:
             )
 
         module_spec = importlib.util.spec_from_file_location(impl_path.stem, impl_path)
-        module      = importlib.util.module_from_spec(module_spec)
+        if module_spec is None or module_spec.loader is None:
+            raise ImportError(
+                f"Could not build a module spec for {impl_path}. "
+                f"The file exists but importlib refused to load it — "
+                f"check that the path is a valid Python source file."
+            )
+        module = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(module)
 
         fn = getattr(module, fn_name, None)
