@@ -39,7 +39,7 @@ export default async function ToolDetailPage({
   return (
     <div className="mx-auto w-full max-w-5xl">
       {/* Back button */}
-      <Link href="/">
+      <Link href="/tools">
         <Button variant="ghost" size="sm" className="mb-6 -ml-2 gap-1.5 text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" />
           Back to Registry
