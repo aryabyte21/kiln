@@ -6,6 +6,7 @@ import { fetchTools, fetchToolStats } from "@/lib/registry"
 import type { Tool, ToolStats } from "@/lib/registry"
 import { Card, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Show, SignUpButton } from "@clerk/nextjs"
 
 const hoverClassName = "hover:-translate-y-0.5 hover:shadow-[0_22px_56px_hsl(223_80%_4%_/_0.48)]"
 
@@ -57,9 +58,20 @@ function Home({
           </p>
 
           <div className="mt-8 flex justify-center gap-4">
-            <Button variant={"default"} className={hoverClassName}>
-              Get Started <ArrowRight className="size-4" />
-            </Button>
+            <Show when={"signed-in"}>
+              <Link href={"/chat"}>
+                <Button variant={"default"} className={hoverClassName}>
+                  Start Using <ArrowRight className="size-4" />
+                </Button>
+              </Link>
+            </Show>
+            <Show when={"signed-out"}>
+              <SignUpButton>
+                <Button variant={"default"} className={hoverClassName}>
+                  Get Started 
+                </Button>
+              </SignUpButton>
+            </Show>
 
             <Link href="/tools">
               <Button variant={"outline"} className={hoverClassName}>
@@ -227,9 +239,20 @@ function Home({
         </p>
 
         <div className="flex justify-center gap-4">
-          <Button variant={"default"} className={`${hoverClassName} px-6 py-6`}>
-            Get Started
-          </Button>
+          <Show when={"signed-in"}>
+              <Link href={"/chat"}>
+                <Button variant={"default"} className={`${hoverClassName} px-6 py-6`}>
+                  Start Using <ArrowRight className="size-4" />
+                </Button>
+              </Link>
+            </Show>
+            <Show when={"signed-out"}>
+              <SignUpButton>
+                <Button variant={"default"} className={`${hoverClassName} px-6 py-6`}>
+                  Get Started 
+                </Button>
+              </SignUpButton>
+            </Show>
         </div>
       </section>
     </div>
