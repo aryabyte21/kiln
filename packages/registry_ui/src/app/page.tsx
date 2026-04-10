@@ -15,7 +15,7 @@ export default async function LandingPage() {
   let error: string | null = null
 
   try {
-    ;[tools, stats] = await Promise.all([fetchTools(), fetchToolStats()])
+    tools = await fetchTools()
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load tools"
   }
