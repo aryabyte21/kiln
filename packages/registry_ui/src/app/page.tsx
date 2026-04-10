@@ -61,7 +61,7 @@ function Home({
               Get Started <ArrowRight className="size-4" />
             </Button>
 
-            <Link href={"/registry"}>
+            <Link href="/tools">
               <Button variant={"outline"} className={hoverClassName}>
                 View Registry
               </Button>
