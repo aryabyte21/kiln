@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 }
 
 const nav = [
-  { href: "/", label: "Registry", icon: "LayoutGrid" as const },
+  { href: "/tools", label: "Registry", icon: "LayoutGrid" as const },
   { href: "/chat", label: "Chat", icon: "MessageSquare" as const },
   { href: "/publish", label: "Publish", icon: "Upload" as const },
   { href: "/settings", label: "Settings", icon: "Settings" as const },
