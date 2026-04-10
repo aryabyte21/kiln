@@ -170,7 +170,7 @@ function Home({
           )}
           {!error && (
             tools.sort(() => Math.random() - 0.5).slice(0, 3).map((tool, i) => (
-              <div key={i} className={`p-5 border border-border rounded-xl text-left ${hoverClassName} "section-surface group/tool relative h-full cursor-pointer overflow-hidden border-border/70 bg-card/75 transition-all duration-300 hover:-translate-y-1 hover:border-primary/25 hover:shadow-[0_28px_72px_hsl(223_80%_4%_/_0.55)]"`}>
+              <div key={i} className={`p-5 border border-border rounded-xl text-left ${hoverClassName} section-surface group/tool relative h-full cursor-pointer overflow-hidden border-border/70 bg-card/75 transition-all duration-300 hover:-translate-y-1 hover:border-primary/25 hover:shadow-[0_28px_72px_hsl(223_80%_4%_/_0.55)]`}>
                 <Link href={`/tools/${tool.id}`} className="block">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className="flex min-w-0 items-center gap-2.5">
