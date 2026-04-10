@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button"
 import { Flame, ArrowRight, CheckCircle, X, Package } from "lucide-react"
 import Link from "next/link"
 
-import { fetchTools, fetchToolStats } from "@/lib/registry"
+import { fetchTools } from "@/lib/registry"
 import type { Tool, ToolStats } from "@/lib/registry"
 import { Card, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -12,7 +12,6 @@ const hoverClassName = "hover:-translate-y-0.5 hover:shadow-[0_22px_56px_hsl(223
 
 export default async function LandingPage() {
   let tools: Tool[] = []
-  let stats: ToolStats | null = null
   let error: string | null = null
 
   try {
