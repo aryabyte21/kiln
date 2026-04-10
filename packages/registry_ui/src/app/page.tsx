@@ -126,7 +126,7 @@ function Home({
           <span>Ask</span>
           <span>→</span>
           <span>Plan</span>
-          <span>→</span><Card className=" flex-row justify-center gap-5 outline p-5 items-center">
+          <span>→</span><Card className="flex flex-row justify-center gap-5 outline p-5 items-center">
           <span className="text-primary font-medium">Missing Tool</span>
           <span>→</span>
           <span className="text-primary font-medium">Generate</span>
