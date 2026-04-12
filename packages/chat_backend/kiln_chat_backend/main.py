@@ -358,12 +358,12 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
                 if not name or name in seen:
                     continue
                 seen.add(name)
-                server_value = os.environ.get(name, "").strip()
+                saved_value = (os.environ.get(name, "") or provided.get(name, "")).strip()
                 entry: dict[str, Any] = {
                     "tool_id":     tool_id,
                     "var_name":    name,
                     "description": ev.get("description", ""),
-                    "has_saved_value": len(server_value) >= 4,
+                    "has_saved_value": len(saved_value) >= 4,
                 }
                 if ev.get("signup_url"):
                     entry["signup_url"] = ev["signup_url"]

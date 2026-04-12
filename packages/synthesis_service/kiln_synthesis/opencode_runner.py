@@ -97,6 +97,7 @@ async def run_opencode(
         # Per-line timeout is 120s (stalled I/O). Total process timeout is
         # opencode_timeout (default 600s) to guard against runaway processes.
         import time as _time
+        opencode_error: str | None = None
         line_timeout = 120
         deadline = _time.monotonic() + settings.opencode_timeout
         while True:

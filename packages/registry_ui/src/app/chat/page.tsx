@@ -298,7 +298,9 @@ function ApiKeyConfigCard({
   const [values, setValues] = useState<Record<string, string>>({})
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
 
-  const allFilled = missingEnvs.every((env) => values[env.var_name]?.trim())
+  const allFilled = missingEnvs.every(
+    (env) => env.has_saved_value || values[env.var_name]?.trim(),
+  )
 
   return (
     <div className="rounded-xl border border-primary/15 bg-gradient-to-b from-primary/[0.04] to-transparent p-5">
@@ -317,9 +319,11 @@ function ApiKeyConfigCard({
       <div className="space-y-4">
         {missingEnvs.map((env) => {
           const fallback = API_KEY_SIGNUP_URLS[env.var_name]
-          const signup = env.signup_url
-            ? { url: env.signup_url, label: `Get ${env.var_name}` }
-            : fallback
+          const rawUrl = env.signup_url
+          const signup =
+            rawUrl && /^https?:\/\//.test(rawUrl)
+              ? { url: rawUrl, label: `Get ${env.var_name}` }
+              : fallback
           return (
             <div key={env.var_name} className="space-y-2">
               <div className="flex items-baseline justify-between gap-2">
@@ -920,11 +924,15 @@ function KilnChat() {
 
         // Execute with the provided keys
         const runId = configPrompt.runId
-        await fetch(`${CHAT_BACKEND}/kiln/execute/${runId}`, {
+        const execResp = await fetch(`${CHAT_BACKEND}/kiln/execute/${runId}`, {
           method: "POST",
           headers,
           body: JSON.stringify({ env_vars: nonEmpty }),
         })
+        if (!execResp.ok) {
+          const errBody = await execResp.json().catch(() => ({ detail: "Execution failed" }))
+          throw new Error(errBody.detail || `HTTP ${execResp.status}`)
+        }
 
         setConfigPrompt(null)
         setStreamState(emptyExecutionState())
