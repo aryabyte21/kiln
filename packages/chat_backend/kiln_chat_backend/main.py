@@ -358,12 +358,12 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
                 if not name or name in seen:
                     continue
                 seen.add(name)
-                value = os.environ.get(name, "") or provided.get(name, "")
+                server_value = os.environ.get(name, "").strip()
                 missing.append({
                     "tool_id":     tool_id,
                     "var_name":    name,
                     "description": ev.get("description", ""),
-                    "has_saved_value": bool(value and len(value.strip()) >= 4),
+                    "has_saved_value": len(server_value) >= 4,
                 })
 
     logger.info("_collect_missing_envs: checked %d tools, found %d missing env vars", len(seen), len(missing))

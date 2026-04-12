@@ -301,9 +301,7 @@ function ApiKeyConfigCard({
           API keys required
         </div>
         <p className="text-xs text-muted-foreground">
-          {hasSavedKeys
-            ? "You have saved keys but they may be invalid. Enter new values or use saved keys."
-            : "These keys will be saved to your account so you don\u0027t have to enter them again."}
+          Enter the required API keys below. They will be saved to your account for future use.
         </p>
         <div className="space-y-3">
           {missingEnvs.map((env) => (
@@ -329,11 +327,8 @@ function ApiKeyConfigCard({
                   onChange={(e) =>
                     setValues((prev) => ({ ...prev, [env.var_name]: e.target.value }))
                   }
-                  placeholder={
-                    env.has_saved_value
-                      ? "Enter new key or leave empty to use saved"
-                      : `Enter ${env.var_name}`
-                  }
+                  autoComplete="off"
+                  placeholder={`Enter ${env.var_name}`}
                   className="w-full rounded-lg border border-border/70 bg-card/75 px-3 py-2 pr-9 text-sm text-foreground shadow-inner shadow-black/10 ring-1 ring-border/70 placeholder:text-muted-foreground/50 outline-none transition-all focus:border-border focus:ring-2 focus:ring-primary/30"
                 />
                 <button
