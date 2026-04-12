@@ -359,12 +359,15 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
                     continue
                 seen.add(name)
                 server_value = os.environ.get(name, "").strip()
-                missing.append({
+                entry: dict[str, Any] = {
                     "tool_id":     tool_id,
                     "var_name":    name,
                     "description": ev.get("description", ""),
                     "has_saved_value": len(server_value) >= 4,
-                })
+                }
+                if ev.get("signup_url"):
+                    entry["signup_url"] = ev["signup_url"]
+                missing.append(entry)
 
     logger.info("_collect_missing_envs: checked %d tools, found %d missing env vars", len(seen), len(missing))
     return missing
