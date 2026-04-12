@@ -358,7 +358,8 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
                 if not name or name in seen:
                     continue
                 seen.add(name)
-                if not os.environ.get(name) and not provided.get(name):
+                value = os.environ.get(name, "") or provided.get(name, "")
+                if not value or len(value.strip()) < 4:
                     missing.append({
                         "tool_id":     tool_id,
                         "var_name":    name,
@@ -779,6 +780,7 @@ def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_k
             if awaited_tools:
                 remaining = set(awaited_tools)
                 deadline  = time.time() + 120   # 2-minute timeout
+                synthesis_failures: dict[str, str] = {}
 
                 q.put({"type": "synthesis_wait", "tool_ids": list(remaining)})
 
@@ -794,6 +796,34 @@ def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_k
                                 q.put({"type": "tool_ready", "tool_id": tid})
                     except Exception:
                         pass
+
+                    for tid in list(remaining):
+                        try:
+                            status_resp = requests.get(f"{SYNTHESIS_URL}/synthesize/status/{tid}", timeout=3)
+                            if not status_resp.ok:
+                                continue
+                            info = status_resp.json()
+                            if info.get("status") == "failed":
+                                synthesis_failures[tid] = str(info.get("error") or "Synthesis failed")
+                                remaining.discard(tid)
+                        except Exception:
+                            pass
+
+                    if synthesis_failures:
+                        details = "\n".join(
+                            f"  - {tid}: {msg[:240]}"
+                            for tid, msg in synthesis_failures.items()
+                        )
+                        q.put({
+                            "type": "flow_complete",
+                            "final_answer": (
+                                "I couldn't complete this request because tool synthesis failed:\n"
+                                f"{details}\n\n"
+                                "Please check the synthesis service credentials/configuration and try again."
+                            ),
+                        })
+                        return
+
                     if remaining:
                         time.sleep(2)
 

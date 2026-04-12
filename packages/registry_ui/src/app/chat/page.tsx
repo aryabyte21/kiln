@@ -858,25 +858,38 @@ function KilnChat() {
       setIsSubmittingConfig(true)
       try {
         const token = await getToken()
-        await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+
+        // Save keys to Clerk for future use (best-effort, don't block on failure)
+        fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers,
+          body: JSON.stringify({ env_vars: envVars }),
+        }).catch(() => {})
+
+        // Execute immediately with the provided keys
+        const runId = configPrompt.runId
+        await fetch(`${CHAT_BACKEND}/kiln/execute/${runId}`, {
+          method: "POST",
+          headers,
           body: JSON.stringify({ env_vars: envVars }),
         })
-        const query = configPrompt.originalQuery
+
         setConfigPrompt(null)
-        await runQuery(query)
+        setStreamState(emptyExecutionState())
+        setIsLoading(true)
+        await startStream(runId, token ? { Authorization: `Bearer ${token}` } : {})
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unknown error"
-        appendAssistantMessage(`Failed to save API keys: ${msg}. Please try again.`)
+        appendAssistantMessage(`Failed to execute with API keys: ${msg}. Please try again.`)
       } finally {
         setIsSubmittingConfig(false)
       }
     },
-    [appendAssistantMessage, configPrompt, getToken, runQuery],
+    [appendAssistantMessage, configPrompt, getToken, startStream],
   )
 
   const handleNewChat = useCallback(() => {
