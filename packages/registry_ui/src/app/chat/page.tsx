@@ -281,14 +281,17 @@ function ApiKeyConfigCard({
   onSubmit,
   isSubmitting,
 }: {
-  missingEnvs: Array<{ var_name: string; description: string }>
+  missingEnvs: Array<{ var_name: string; description: string; has_saved_value?: boolean }>
   onSubmit: (envVars: Record<string, string>) => void
   isSubmitting: boolean
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+  const hasSavedKeys = missingEnvs.some((e) => e.has_saved_value)
 
-  const allFilled = missingEnvs.every((env) => values[env.var_name]?.trim())
+  const allFilled = missingEnvs.every(
+    (env) => env.has_saved_value || values[env.var_name]?.trim(),
+  )
 
   return (
     <Card className="border-primary/20 bg-card/85 p-4">
@@ -298,7 +301,9 @@ function ApiKeyConfigCard({
           API keys required
         </div>
         <p className="text-xs text-muted-foreground">
-          These keys will be saved to your account so you don&apos;t have to enter them again.
+          {hasSavedKeys
+            ? "You have saved keys but they may be invalid. Enter new values or use saved keys."
+            : "These keys will be saved to your account so you don\u0027t have to enter them again."}
         </p>
         <div className="space-y-3">
           {missingEnvs.map((env) => (
@@ -311,6 +316,11 @@ function ApiKeyConfigCard({
                     - {env.description}
                   </span>
                 )}
+                {env.has_saved_value && (
+                  <span className="ml-1.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
+                    saved key exists
+                  </span>
+                )}
               </label>
               <div className="relative">
                 <input
@@ -319,7 +329,11 @@ function ApiKeyConfigCard({
                   onChange={(e) =>
                     setValues((prev) => ({ ...prev, [env.var_name]: e.target.value }))
                   }
-                  placeholder={`Enter ${env.var_name}`}
+                  placeholder={
+                    env.has_saved_value
+                      ? "Enter new key or leave empty to use saved"
+                      : `Enter ${env.var_name}`
+                  }
                   className="w-full rounded-lg border border-border/70 bg-card/75 px-3 py-2 pr-9 text-sm text-foreground shadow-inner shadow-black/10 ring-1 ring-border/70 placeholder:text-muted-foreground/50 outline-none transition-all focus:border-border focus:ring-2 focus:ring-primary/30"
                 />
                 <button
@@ -348,7 +362,11 @@ function ApiKeyConfigCard({
           className="w-full"
           size="sm"
         >
-          {isSubmitting ? "Saving and continuing..." : "Save and continue"}
+          {isSubmitting
+            ? "Saving and continuing..."
+            : hasSavedKeys
+              ? "Use saved keys and continue"
+              : "Save and continue"}
         </Button>
       </div>
     </Card>
@@ -468,7 +486,7 @@ function KilnChat() {
   const [streamState, setStreamState] = useState<ExecutionState | null>(null)
   const [configPrompt, setConfigPrompt] = useState<{
     runId: string
-    missingEnvs: Array<{ var_name: string; description: string }>
+    missingEnvs: Array<{ var_name: string; description: string; has_saved_value?: boolean }>
     originalQuery: string
   } | null>(null)
   const [isSubmittingConfig, setIsSubmittingConfig] = useState(false)
@@ -863,19 +881,27 @@ function KilnChat() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
 
-        // Save keys to Clerk for future use (best-effort, don't block on failure)
-        fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify({ env_vars: envVars }),
-        }).catch(() => {})
+        // Only include non-empty values (empty means "use saved key from Clerk")
+        const nonEmpty: Record<string, string> = {}
+        for (const [k, v] of Object.entries(envVars)) {
+          if (v.trim()) nonEmpty[k] = v.trim()
+        }
 
-        // Execute immediately with the provided keys
+        // Save new keys to Clerk for future use (best-effort)
+        if (Object.keys(nonEmpty).length > 0) {
+          fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({ env_vars: nonEmpty }),
+          }).catch(() => {})
+        }
+
+        // Execute with the provided keys
         const runId = configPrompt.runId
         await fetch(`${CHAT_BACKEND}/kiln/execute/${runId}`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ env_vars: envVars }),
+          body: JSON.stringify({ env_vars: nonEmpty }),
         })
 
         setConfigPrompt(null)
