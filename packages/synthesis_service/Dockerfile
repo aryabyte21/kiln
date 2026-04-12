@@ -17,22 +17,29 @@ RUN apt-get update && \
 RUN npm install -g opencode-ai @ai-sdk/openai-compatible
 
 # Install Python service dependencies
-COPY requirements.txt .
+COPY packages/synthesis_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install the shared package with its own runtime dependencies.
+COPY packages/shared/pyproject.toml /tmp/kiln-shared/pyproject.toml
+COPY packages/shared/kiln_shared/ /tmp/kiln-shared/kiln_shared/
+RUN pip install --no-cache-dir /tmp/kiln-shared
 
 # Configure OpenCode
 RUN mkdir -p /root/.config/opencode
-COPY opencode.json /root/.config/opencode/opencode.json
+COPY packages/synthesis_service/opencode.json /root/.config/opencode/opencode.json
 
 # Create runtime directories
 RUN mkdir -p /app/logs /tmp/opencode_workspace
 
-# Copy service code
-COPY kiln_synthesis/ /app/kiln_synthesis/
+# Copy service code and shared package
+COPY packages/synthesis_service/kiln_synthesis/ /app/kiln_synthesis/
+COPY packages/shared/kiln_shared/ /app/kiln_shared/
 
 # Default env vars for Docker context
 ENV KILN_SYNTHESIS_LOG_DIR=/app/logs \
     KILN_SYNTHESIS_WORKSPACE_DIR=/tmp/opencode_workspace \
+    PYTHONPATH=/app \
     KILN_CALLBACK_URL=http://host.docker.internal:8766/synthesis/callback
 
 EXPOSE 8002

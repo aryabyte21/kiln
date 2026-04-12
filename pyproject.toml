@@ -32,7 +32,7 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 # Use importlib mode so test packages with the same name (e.g. each
 # package has its own `tests/`) don't collide at module-import time.
-addopts = "-q"
+addopts = "-q --import-mode=importlib"
 testpaths = ["packages"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"

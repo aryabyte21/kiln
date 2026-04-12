@@ -10,8 +10,6 @@ import json
 import logging
 from pathlib import Path
 
-import httpx
-
 from kiln_shared.httpx_client import async_client
 from kiln_synthesis.config import get_settings
 
@@ -59,16 +57,14 @@ async def notify_failure(
     tool_id: str,
     error: str,
 ) -> None:
-    """POST a JSON error to the Kiln registry on synthesis failure."""
-    logger.warning("Notifying failure for %s: %s", tool_id, error)
-
-    async with async_client(timeout=15) as client:
-        try:
-            response = await client.post(
-                callback_url,
-                json={"tool_id": tool_id, "status": "failed", "error": error},
-                headers=_auth_headers(),
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError:
-            logger.warning("Callback endpoint rejected failure notification")
+    """Log synthesis failure. The registry's callback endpoint only accepts
+    multipart success payloads (spec+impl files), so failure notifications
+    are logged server-side. The chat backend detects failures via its own
+    polling timeout when the tool never appears in the registry.
+    """
+    logger.warning("Synthesis failed for %s: %s", tool_id, error)
+    logger.info(
+        "Failure not forwarded to registry — %s only accepts multipart success payloads. "
+        "The chat backend will detect this via synthesis timeout.",
+        callback_url,
+    )

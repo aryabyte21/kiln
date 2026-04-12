@@ -19,6 +19,7 @@ import os
 import re
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
@@ -28,9 +29,8 @@ import requests
 import yaml
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse, StreamingResponse
-
+from pydantic import BaseModel, Field
 from slowapi.errors import RateLimitExceeded
 
 from kiln_shared.auth import KilnUser, require_auth
@@ -60,6 +60,7 @@ app = FastAPI(
         "Provides planning, execution and streaming endpoints for the Kiln multi-agent workflow."
     ),
     version="1.0.0",
+    lifespan=None,
 )
 
 # Per-user rate limiting (slowapi). Default 1000/minute per user/IP via
@@ -76,10 +77,14 @@ app.add_middleware(KilnRequestIDMiddleware)
 # CORS: strict allowlist + fail-loud in production if CORS_ORIGINS is unset.
 install_cors(app)
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
     from kiln_shared.logging_config import setup_logging
     setup_logging()
+    yield
+
+
+app.router.lifespan_context = _lifespan
 
 
 @app.get("/livez", summary="Liveness — process is up")
@@ -314,9 +319,9 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
 
     for node in graph.get("nodes", []):
         for tool_id in node.get("tools", []):
-            # Find the tool's implementation file on disk
             tool_dir = REGISTRY_DIR / tool_id
             if not tool_dir.exists():
+                logger.warning("_collect_missing_envs: tool dir not found: %s", tool_dir)
                 continue
             # Pick the latest version directory
             impl_file = None
@@ -332,17 +337,20 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
                     break
 
             if impl_file is None:
+                logger.warning("_collect_missing_envs: no impl file found for %s", tool_id)
                 continue
 
             # Dynamically load the module to read REQUIRED_ENV_VARS
             try:
                 spec = importlib.util.spec_from_file_location("_tmp", impl_file)
                 if spec is None or spec.loader is None:
+                    logger.warning("_collect_missing_envs: importlib could not create spec for %s", impl_file)
                     continue
                 mod  = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
                 required = getattr(mod, "REQUIRED_ENV_VARS", [])
-            except Exception:
+            except Exception as exc:
+                logger.warning("_collect_missing_envs: failed to load %s: %s", impl_file, exc)
                 continue
 
             for ev in required:
@@ -357,6 +365,7 @@ def _collect_missing_envs(graph: dict, provided: dict[str, str]) -> list[dict]:
                         "description": ev.get("description", ""),
                     })
 
+    logger.info("_collect_missing_envs: checked %d tools, found %d missing env vars", len(seen), len(missing))
     return missing
 
 
@@ -410,6 +419,84 @@ def _research_api(tool_description: str, api_key: str) -> str:
     except Exception as exc:
         logger.error(f"Could not research API: {exc}")
         return ""
+
+
+def _find_similar_tool(missing_spec: dict, existing_tools: list[dict], threshold: float = 0.3) -> dict | None:
+    """Check if a missing tool overlaps with an existing registered tool.
+
+    Uses word-level Jaccard similarity between the missing tool's description
+    and each existing tool's description + name. Returns the best match above
+    threshold, or None.
+    """
+    missing_desc = missing_spec.get("description", "").lower()
+    missing_name = missing_spec.get("id", "").split(".")[-1].replace("_", " ").lower()
+    missing_words = set((missing_desc + " " + missing_name).split()) - {"the", "a", "an", "of", "to", "and", "in", "for", "is", "it", "by", "on", "with"}
+
+    if not missing_words:
+        return None
+
+    best_match: dict | None = None
+    best_score = 0.0
+
+    for tool in existing_tools:
+        tool_desc = tool.get("description", "").lower()
+        tool_name = tool.get("name", "").lower().replace("_", " ")
+        tool_id = tool.get("id", "").split(".")[-1].replace("_", " ").lower()
+        tool_words = set((tool_desc + " " + tool_name + " " + tool_id).split()) - {"the", "a", "an", "of", "to", "and", "in", "for", "is", "it", "by", "on", "with"}
+
+        if not tool_words:
+            continue
+
+        intersection = missing_words & tool_words
+        union = missing_words | tool_words
+        score = len(intersection) / len(union) if union else 0.0
+
+        if score > best_score:
+            best_score = score
+            best_match = tool
+
+    if best_score >= threshold and best_match is not None:
+        logger.info(
+            "Similar tool found: %s matches missing '%s' (score=%.2f)",
+            best_match.get("id"), missing_spec.get("id"), best_score,
+        )
+        return best_match
+
+    return None
+
+
+def _filter_missing_tools(graph: dict, existing_tools: list[dict]) -> tuple[list, dict[str, str]]:
+    """Filter out missing tools that already have similar existing tools.
+
+    Returns (truly_missing, remap) where remap maps missing tool IDs to
+    existing tool IDs so the graph can be updated.
+    """
+    missing = graph.get("missing_tools", [])
+    if not missing:
+        return [], {}
+
+    truly_missing: list = []
+    remap: dict[str, str] = {}
+
+    for spec in missing:
+        if not isinstance(spec, dict):
+            continue
+        spec_id = spec.get("id")
+        if not spec_id:
+            continue
+        match = _find_similar_tool(spec, existing_tools)
+        if match:
+            remap[spec_id] = match["id"]
+            logger.info("Skipping synthesis for %s — remapping to existing tool %s", spec_id, match.get("id"))
+        else:
+            truly_missing.append(spec)
+
+    if remap:
+        for node in graph.get("nodes", []):
+            node["tools"] = [remap.get(tid, tid) for tid in node.get("tools", [])]
+        graph["missing_tools"] = truly_missing
+
+    return truly_missing, remap
 
 
 def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[dict]:
@@ -618,7 +705,10 @@ async def kiln_start(
 
     missing = _collect_missing_envs(graph, provided_env)
 
-    # Trigger synthesis for any missing tools
+    # Check if any "missing" tools overlap with existing registered tools
+    _filter_missing_tools(graph, tools_list)
+
+    # Trigger synthesis only for truly missing tools
     synthesis_jobs = _synthesize_missing_tools(graph.get("missing_tools", []), api_key=api_key)
     awaited_tool_ids = [j["tool_id"] for j in synthesis_jobs]
     _run_awaited_tools[run_id] = awaited_tool_ids
@@ -709,9 +799,34 @@ def _launch_execution(run_id: str, graph: dict, extra_env: dict[str, str], api_k
 
                 if remaining:
                     q.put({"type": "synthesis_timeout", "missing": list(remaining)})
+                    missing_names = ", ".join(remaining)
 
-                # Re-plan with all tools now available (including synthesised ones)
-                # so that graph nodes are updated to reference the new tool IDs.
+                    synth_status = ""
+                    for tid in remaining:
+                        try:
+                            status_resp = requests.get(f"{SYNTHESIS_URL}/synthesize/status/{tid}", timeout=3)
+                            if status_resp.ok:
+                                info = status_resp.json()
+                                synth_status += f"\n  - {tid}: {info.get('status', 'unknown')} — {info.get('error', '')[:200]}"
+                        except Exception:
+                            synth_status += f"\n  - {tid}: status unknown (synthesis service unreachable)"
+
+                    q.put({
+                        "type": "flow_complete",
+                        "final_answer": (
+                            f"I couldn't complete this request because the required tool(s) "
+                            f"({missing_names}) could not be synthesized in time. "
+                            f"This usually means the tool generation took longer than 2 minutes "
+                            f"or encountered an error."
+                            f"{synth_status if synth_status else ''}\n\n"
+                            f"You can try again — sometimes it succeeds on retry. "
+                            f"If the tool requires an API key, make sure it's configured."
+                        ),
+                    })
+                    return
+
+                # All synthesized tools are now available — re-plan so the graph
+                # references the newly registered tool IDs.
                 try:
                     tools_resp = requests.get(f"{REGISTRY_URL}/tools", timeout=5)
                     tools_resp.raise_for_status()

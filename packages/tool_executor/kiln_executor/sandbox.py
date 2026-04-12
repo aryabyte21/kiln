@@ -126,7 +126,7 @@ async def _install_requirements(
         if proc.returncode != 0:
             return False, f"pip install failed: {stderr_bytes.decode()[:500]}"
         return True, ""
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return False, f"pip install timed out after {timeout}s"
 
@@ -210,7 +210,7 @@ async def run_in_sandbox(
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return ExecutionResult(

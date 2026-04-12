@@ -165,7 +165,7 @@ export function useChatStore() {
       ...prev,
       conversations: prev.conversations.map((c) =>
         c.id === id
-          ? { ...c, title: title.trim() || "Untitled", updatedAt: Date.now() }
+          ? { ...c, title: title.trim() || "Untitled" }
           : c,
       ),
     }))
@@ -178,6 +178,10 @@ export function useChatStore() {
         if (!existing) return prev
         const titleNeedsUpdate =
           existing.title === "New conversation" && messages.length > 0
+        const existingSerialized = JSON.stringify(existing.messages)
+        const nextSerialized = JSON.stringify(messages)
+        const messagesChanged = existingSerialized !== nextSerialized
+        if (!messagesChanged && !titleNeedsUpdate) return prev
         return {
           ...prev,
           conversations: prev.conversations.map((c) =>
@@ -185,7 +189,7 @@ export function useChatStore() {
               ? {
                   ...c,
                   messages,
-                  updatedAt: Date.now(),
+                  updatedAt: messagesChanged ? Date.now() : c.updatedAt,
                   title: titleNeedsUpdate ? deriveTitle(messages) : c.title,
                 }
               : c,

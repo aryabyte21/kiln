@@ -28,7 +28,7 @@ def news_headlines(topic: str = "", country: str = "us", num_results: int = 5) -
     try:
         import requests
 
-        api_key = os.environ.get("NEWS_API_KEY", "608b6e478b914f7db188093c053611dc").strip()
+        api_key = os.environ.get("NEWS_API_KEY", "").strip()
         if not api_key:
             return {"articles": [], "total_results": 0, "success": False,
                     "error": "NEWS_API_KEY environment variable not set"}

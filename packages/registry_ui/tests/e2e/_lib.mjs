@@ -39,7 +39,7 @@ export async function preflightHealthChecks(required = ['registry_api', 'registr
     for (const f of failures) console.error(f)
     console.error(
       '\nStart the local dev stack first:\n' +
-      '  cd /Users/pinetortoise/Desktop/kiln && ./dev.sh\n'
+      '  ./dev.sh   (from the repo root)\n'
     )
     process.exit(2)
   }

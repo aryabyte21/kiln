@@ -15,7 +15,6 @@ import pytest
 from kiln_registry.loader import KilnLoader
 from kiln_shared.spec import KilnTool
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CURRENT_DATE_DIR = REPO_ROOT / "registry" / "tools" / "com.kiln.tools.current_date" / "1.0.0"
 

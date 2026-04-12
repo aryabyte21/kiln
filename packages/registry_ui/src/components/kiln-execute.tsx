@@ -8,6 +8,9 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -27,7 +30,13 @@ interface KilnEvent {
   [key: string]: unknown
 }
 
-type Phase = "idle" | "planning" | "synthesizing" | "executing" | "complete" | "error"
+type Phase = "idle" | "planning" | "config" | "synthesizing" | "executing" | "complete" | "error"
+
+interface MissingEnv {
+  tool_id: string
+  var_name: string
+  description: string
+}
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -41,8 +50,13 @@ export function KilnExecute() {
   const [events, setEvents] = useState<KilnEvent[]>([])
   const [finalAnswer, setFinalAnswer] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [missingEnvs, setMissingEnvs] = useState<MissingEnv[]>([])
+  const [envValues, setEnvValues] = useState<Record<string, string>>({})
+  const [showEnvValues, setShowEnvValues] = useState<Record<string, boolean>>({})
+  const [pendingRunId, setPendingRunId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const pendingHeadersRef = useRef<Record<string, string>>({})
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -84,7 +98,6 @@ export function KilnExecute() {
           break
 
         case "tool_ready":
-          addEvent(evt)
           break
 
         case "node_start":
@@ -127,6 +140,34 @@ export function KilnExecute() {
     [addEvent, scrollToBottom],
   )
 
+  const streamRun = useCallback(async (runId: string, headers: Record<string, string>) => {
+    abortRef.current = new AbortController()
+    const streamResp = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`, {
+      signal: abortRef.current.signal,
+      headers,
+    })
+    if (!streamResp.ok || !streamResp.body) {
+      throw new Error("Failed to connect to event stream")
+    }
+    const reader = streamResp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue
+        try {
+          const evt: KilnEvent = JSON.parse(line.slice(6))
+          processEvent(evt)
+        } catch { /* skip malformed */ }
+      }
+    }
+  }, [processEvent])
+
   const handleSubmit = useCallback(async () => {
     const query = input.trim()
     if (!query || phase === "planning" || phase === "executing") return
@@ -161,20 +202,24 @@ export function KilnExecute() {
       const startData = await startResp.json()
       const runId: string = startData.run_id
 
-      // If needs_config, execute with empty env_vars (let tools handle it)
       if (startData.status === "needs_config") {
         setPlan(startData.plan)
-        setPhase("executing")
         addEvent({ type: "plan_ready", ...startData.plan })
-
-        // Initialize node statuses
         const statuses: Record<string, NodeStatus> = {}
         for (const node of startData.plan.nodes || []) {
           statuses[node.id] = "pending"
         }
         setNodeStatuses(statuses)
 
-        // Supply env vars and start execution
+        const envs: MissingEnv[] = startData.missing_envs || []
+        if (envs.length > 0) {
+          setMissingEnvs(envs)
+          setPendingRunId(runId)
+          pendingHeadersRef.current = headers
+          setPhase("config")
+          return
+        }
+
         const execResp = await fetch(`${CHAT_BACKEND}/kiln/execute/${runId}`, {
           method: "POST",
           headers,
@@ -184,44 +229,12 @@ export function KilnExecute() {
           const err = await execResp.json().catch(() => ({ detail: "Execution failed" }))
           throw new Error(err.detail || `HTTP ${execResp.status}`)
         }
+        setPhase("executing")
       } else {
-        // Already started
         setPhase("executing")
       }
 
-      // Step 2: SSE stream from /kiln/stream/{run_id}
-      abortRef.current = new AbortController()
-      const streamResp = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`, {
-        signal: abortRef.current.signal,
-        headers,
-      })
-
-      if (!streamResp.ok || !streamResp.body) {
-        throw new Error("Failed to connect to event stream")
-      }
-
-      const reader = streamResp.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue
-          try {
-            const evt: KilnEvent = JSON.parse(line.slice(6))
-            processEvent(evt)
-          } catch {
-            // Skip malformed events
-          }
-        }
-      }
+      await streamRun(runId, headers)
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return
       const msg = err instanceof Error ? err.message : "Unknown error"
@@ -229,9 +242,37 @@ export function KilnExecute() {
       setPhase("error")
       addEvent({ type: "error", message: msg })
     }
-  }, [input, phase, getToken, addEvent, processEvent])
+  }, [input, phase, getToken, addEvent, streamRun])
 
-  const isActive = phase === "planning" || phase === "synthesizing" || phase === "executing"
+  const handleConfigSubmit = useCallback(async () => {
+    if (!pendingRunId) return
+    const headers = pendingHeadersRef.current
+    setPhase("executing")
+    setMissingEnvs([])
+    try {
+      const execResp = await fetch(`${CHAT_BACKEND}/kiln/execute/${pendingRunId}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ env_vars: envValues }),
+      })
+      if (!execResp.ok) {
+        const err = await execResp.json().catch(() => ({ detail: "Execution failed" }))
+        throw new Error(err.detail || `HTTP ${execResp.status}`)
+      }
+      await streamRun(pendingRunId, headers)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setError(msg)
+      setPhase("error")
+      addEvent({ type: "error", message: msg })
+    } finally {
+      setPendingRunId(null)
+      setEnvValues({})
+    }
+  }, [pendingRunId, envValues, addEvent, streamRun])
+
+  const isActive = phase === "planning" || phase === "config" || phase === "synthesizing" || phase === "executing"
 
   return (
     <div className="flex h-[calc(100vh-12.5rem)] min-h-[38rem] flex-col overflow-hidden">
@@ -283,6 +324,7 @@ export function KilnExecute() {
                   )}
                   <span className="font-medium text-foreground">
                     {phase === "planning" && "Planning execution graph..."}
+                    {phase === "config" && "API keys required"}
                     {phase === "synthesizing" && "Synthesizing missing tools..."}
                     {phase === "executing" && "Executing workflow..."}
                     {phase === "complete" && "Execution complete"}
@@ -297,6 +339,87 @@ export function KilnExecute() {
                     nodeStatuses={nodeStatuses}
                     nodeResults={nodeResults}
                   />
+                )}
+
+                {/* Config card — collect missing API keys */}
+                {phase === "config" && missingEnvs.length > 0 && (
+                  <Card className="border-amber-500/30 bg-amber-500/5 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <KeyRound className="size-4 text-amber-400" />
+                      <p className="text-xs font-medium text-amber-400">
+                        API keys needed to run this workflow
+                      </p>
+                    </div>
+                    <div className="space-y-3">
+                      {missingEnvs.map((env) => (
+                        <div key={env.var_name}>
+                          <label className="block text-xs text-muted-foreground mb-1">
+                            <span className="font-mono text-foreground">{env.var_name}</span>
+                            {env.description && (
+                              <span className="ml-1 text-muted-foreground/60">
+                                — {env.description}
+                              </span>
+                            )}
+                            {env.tool_id && (
+                              <span className="ml-1 text-muted-foreground/40">
+                                (used by {env.tool_id.split(".").pop()})
+                              </span>
+                            )}
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showEnvValues[env.var_name] ? "text" : "password"}
+                              value={envValues[env.var_name] || ""}
+                              onChange={(e) =>
+                                setEnvValues((prev) => ({
+                                  ...prev,
+                                  [env.var_name]: e.target.value,
+                                }))
+                              }
+                              placeholder={`Enter ${env.var_name}`}
+                              className="w-full rounded-lg border border-border/70 bg-card/75 px-3 py-2 pr-9 text-sm font-mono text-foreground ring-1 ring-border/70 placeholder:text-muted-foreground/40 outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowEnvValues((prev) => ({
+                                  ...prev,
+                                  [env.var_name]: !prev[env.var_name],
+                                }))
+                              }
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground"
+                            >
+                              {showEnvValues[env.var_name] ? (
+                                <EyeOff className="size-4" />
+                              ) : (
+                                <Eye className="size-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={handleConfigSubmit}
+                        disabled={missingEnvs.some((e) => !envValues[e.var_name]?.trim())}
+                        className="bg-amber-600 hover:bg-amber-500 text-white"
+                      >
+                        Run with keys
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          handleConfigSubmit()
+                        }}
+                        className="text-muted-foreground"
+                      >
+                        Skip (run without keys)
+                      </Button>
+                    </div>
+                  </Card>
                 )}
 
                 {/* Event log */}

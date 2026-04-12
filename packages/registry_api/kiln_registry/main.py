@@ -32,6 +32,7 @@ import logging
 import os
 import shutil
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,6 @@ import jsonschema
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-
 from pydantic import BaseModel, Field
 from slowapi.errors import RateLimitExceeded
 
@@ -50,6 +50,9 @@ from kiln_shared.cors import install_cors
 from kiln_shared.httpx_client import async_client
 from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
 from kiln_shared.request_id import KilnRequestIDMiddleware
+
+from .loader import KilnLoader
+from .registry import get_global_registry
 
 
 class ExecuteToolRequest(BaseModel):
@@ -75,9 +78,6 @@ class FavoriteRequest(BaseModel):
 
     delta: int = Field(1, description="+1 to favorite, -1 to unfavorite")
 
-from .loader import KilnLoader
-from .registry import get_global_registry
-
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -93,6 +93,7 @@ app = FastAPI(
         "The synthesis pipeline registers new tools via POST /tools/register."
     ),
     version="1.0.0",
+    lifespan=None,
 )
 
 # Per-user rate limiting (slowapi). Default limit comes from
@@ -111,8 +112,8 @@ install_cors(app)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def _startup() -> None:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
     from kiln_shared.logging_config import setup_logging
     setup_logging()
 
@@ -147,6 +148,10 @@ async def _startup() -> None:
         logger.info(f"Synced {len(tools)} tools to database")
     else:
         logger.info(f"Registry dir not found: {REGISTRY_DIR} — starting empty")
+    yield
+
+
+app.router.lifespan_context = _lifespan
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -695,20 +700,39 @@ async def execute_tool(
             except httpx.TimeoutException:
                 logger.warning("Tool Executor timed out for %s", tool_id)
 
-        # Fallback: in-process execution (local dev without executor running)
+        # Fallback: in-process execution (local dev without executor running).
+        # Inject env vars via a threading lock to avoid concurrent requests
+        # clobbering each other's os.environ entries.
+        import threading
+        _env_lock = threading.Lock()
+        _env_saved: dict[str, str | None] = {}
+        if env_vars:
+            with _env_lock:
+                for k, v in env_vars.items():
+                    _env_saved[k] = os.environ.get(k)
+                    os.environ[k] = v
         try:
-            result = tool.fn(**args)
-            success = True
-        except TypeError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid arguments for '{tool_id}': {exc}",
-            ) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Tool '{tool_id}' raised {type(exc).__name__}: {exc}",
-            ) from exc
+            try:
+                result = tool.fn(**args)
+                success = True
+            except TypeError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid arguments for '{tool_id}': {exc}",
+                ) from exc
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Tool '{tool_id}' raised {type(exc).__name__}: {exc}",
+                ) from exc
+        finally:
+            if env_vars:
+                with _env_lock:
+                    for k, original in _env_saved.items():
+                        if original is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = original
 
         return {"success": True, "tool_id": tool_id, "result": result}
     finally:

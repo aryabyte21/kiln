@@ -36,7 +36,8 @@ interface:
 implementation:
   runtime: python3.10
   entrypoint: impl.py
-  dependencies: []
+  dependencies:
+    - requests
 
 testing:
   fixtures:

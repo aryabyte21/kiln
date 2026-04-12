@@ -34,7 +34,7 @@ export const SourcesTrigger = ({
   >
     {children ?? (
       <>
-        <p className="font-medium">Used {count} sources</p>
+        <span className="font-medium">Used {count} sources</span>
         <ChevronDownIcon className="h-4 w-4" />
       </>
     )}

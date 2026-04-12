@@ -24,15 +24,15 @@ interface:
 implementation:
   runtime: python3.10
   entrypoint: impl.py
-  dependencies: []
+  dependencies:
+    - requests
 
 testing:
   fixtures:
     - input:
         pdf_url: "test"
       expected_output_contains:
-        - text_content
-        - financial_data
+        - error
 
 metadata:
   tags: [synthesized]

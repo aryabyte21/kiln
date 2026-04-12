@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from kiln_synthesis.models import SynthesizeRequest, ToolInput
 from kiln_synthesis.prompt_builder import _build_test_input
 

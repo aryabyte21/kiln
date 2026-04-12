@@ -145,6 +145,12 @@ Hard rules:
 - Tool IDs in any node's "tools" list MUST come from the registered list. Never invent IDs.
 - The exit_node synthesises results and uses no tools.
 - entry_nodes = all nodes with no incoming edges.
+- Prefer the shortest correct plan. If one tool can directly answer in the
+  requested currency, unit, or format, use that tool directly instead of
+  fetching an intermediate value and converting it in another node.
+- Example: for "what is the price of bitcoin in INR?", use `crypto_price`
+  with `currency=inr` directly. Do NOT fetch USD first and then call
+  `currency_convert` unless the direct tool truly cannot produce INR.
 - Output raw JSON only, no markdown fences, no prose around it.
 """
 
@@ -214,7 +220,7 @@ class KilnPlanner:
         import time
 
         tool_summary = "\n".join(
-            f"  - {t['id']}: {t['description'][:80]}"
+            f"  - {t['id']} [{t.get('category', 'general')}] (tags: {', '.join(t.get('tags', []))}): {t['description'][:200]}"
             for t in tools
         )
 
@@ -274,7 +280,6 @@ class KilnPlanner:
             graph = json.loads(raw)
         except json.JSONDecodeError as exc:
             logger.error("Mistral returned invalid JSON: %s", raw[:300])
-            # Return a minimal single-node graph so execution can still proceed
             return {
                 "task": user_request,
                 "nodes": [
@@ -292,5 +297,60 @@ class KilnPlanner:
                 "_parse_error": str(exc),
             }
 
-        graph["task"] = user_request      # ensure original request is preserved
+        graph["task"] = user_request
+        graph = self._validate_graph(graph, user_request, tools)
+        return graph
+
+    def _validate_graph(self, graph: dict, user_request: str, tools: list[dict]) -> dict:
+        """Validate and repair common planner output issues."""
+        nodes = graph.get("nodes", [])
+        if not nodes:
+            return {
+                "task": user_request,
+                "nodes": [{"id": "fallback", "role": "GeneralAgent", "task": user_request, "tools": []}],
+                "edges": [],
+                "entry_nodes": ["fallback"],
+                "exit_node": "fallback",
+                "missing_tools": graph.get("missing_tools", []),
+            }
+
+        nodes = [n for n in nodes if isinstance(n, dict) and "id" in n]
+        if not nodes:
+            return {
+                "task": user_request,
+                "nodes": [{"id": "fallback", "role": "GeneralAgent", "task": user_request, "tools": []}],
+                "edges": [],
+                "entry_nodes": ["fallback"],
+                "exit_node": "fallback",
+                "missing_tools": graph.get("missing_tools", []),
+            }
+        graph["nodes"] = nodes
+
+        node_ids = {n["id"] for n in nodes}
+        registered_ids = {t["id"] for t in tools}
+
+        for node in nodes:
+            if "tools" not in node:
+                node["tools"] = []
+            valid_tools = [tid for tid in node["tools"] if tid in registered_ids]
+            invalid_tools = [tid for tid in node["tools"] if tid not in registered_ids]
+            if invalid_tools:
+                logger.warning("Planner referenced non-existent tools: %s — dropping them", invalid_tools)
+            node["tools"] = valid_tools
+
+        valid_edges = [
+            e for e in graph.get("edges", [])
+            if isinstance(e, (list, tuple)) and len(e) >= 2 and e[0] in node_ids and e[1] in node_ids
+        ]
+        graph["edges"] = valid_edges
+
+        if "exit_node" not in graph or graph["exit_node"] not in node_ids:
+            graph["exit_node"] = nodes[-1]["id"]
+
+        if "entry_nodes" not in graph:
+            targets = {e[1] for e in valid_edges}
+            graph["entry_nodes"] = [n["id"] for n in nodes if n["id"] not in targets]
+        else:
+            graph["entry_nodes"] = [eid for eid in graph["entry_nodes"] if eid in node_ids]
+
         return graph

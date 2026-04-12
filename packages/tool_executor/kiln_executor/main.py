@@ -21,8 +21,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -41,6 +42,7 @@ app = FastAPI(
         "blocked imports, and executes in a subprocess with timeout."
     ),
     version="1.0.0",
+    lifespan=None,
 )
 
 app.add_middleware(
@@ -54,11 +56,15 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
     from kiln_shared.logging_config import setup_logging
     setup_logging()
     logger.info("Tool Executor started")
+    yield
+
+
+app.router.lifespan_context = _lifespan
 
 
 # ── Request / Response Models ────────────────────────────────────────────────
