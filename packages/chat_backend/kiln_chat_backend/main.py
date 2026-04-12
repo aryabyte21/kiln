@@ -481,10 +481,13 @@ def _filter_missing_tools(graph: dict, existing_tools: list[dict]) -> tuple[list
     for spec in missing:
         if not isinstance(spec, dict):
             continue
+        spec_id = spec.get("id")
+        if not spec_id:
+            continue
         match = _find_similar_tool(spec, existing_tools)
         if match:
-            remap[spec["id"]] = match["id"]
-            logger.info("Skipping synthesis for %s — remapping to existing tool %s", spec.get("id"), match.get("id"))
+            remap[spec_id] = match["id"]
+            logger.info("Skipping synthesis for %s — remapping to existing tool %s", spec_id, match.get("id"))
         else:
             truly_missing.append(spec)
 

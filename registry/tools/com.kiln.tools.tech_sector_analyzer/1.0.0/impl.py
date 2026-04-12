@@ -6,10 +6,13 @@ Without API access, it returns an honest error rather than fabricated analysis.
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 
-REQUIRED_ENV_VARS = []
+REQUIRED_ENV_VARS = [
+    {"name": "ALPHA_VANTAGE_API_KEY", "description": "Alpha Vantage API key for stock data"},
+]
 
 
 def tech_sector_analyzer(stock_symbols, time_period) -> dict:
@@ -23,7 +26,8 @@ def tech_sector_analyzer(stock_symbols, time_period) -> dict:
     try:
         results = []
         for symbol in stock_symbols:
-            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=compact&apikey=demo"
+            api_key = os.environ.get("ALPHA_VANTAGE_API_KEY", "demo")
+            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=compact&apikey={api_key}"
             with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
 

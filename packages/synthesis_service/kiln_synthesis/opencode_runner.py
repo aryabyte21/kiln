@@ -93,12 +93,20 @@ async def run_opencode(
         # 64KB OS pipe buffer, blocking the process from writing to stdout.
         stderr_task = asyncio.create_task(_drain_stderr(proc.stderr))
 
-        # Read stdout line-by-line (NDJSON streaming via --format json)
-        line_timeout = settings.opencode_timeout
+        # Read stdout line-by-line (NDJSON streaming via --format json).
+        # Per-line timeout is 120s (stalled I/O). Total process timeout is
+        # opencode_timeout (default 600s) to guard against runaway processes.
+        import time as _time
+        line_timeout = 120
+        deadline = _time.monotonic() + settings.opencode_timeout
         while True:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                proc.kill()
+                raise OpenCodeError(f"OpenCode exceeded total timeout ({settings.opencode_timeout}s)")
             line = await asyncio.wait_for(
                 proc.stdout.readline(),
-                timeout=line_timeout,
+                timeout=min(line_timeout, remaining),
             )
             if not line:
                 break

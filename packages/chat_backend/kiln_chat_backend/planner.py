@@ -314,6 +314,18 @@ class KilnPlanner:
                 "missing_tools": graph.get("missing_tools", []),
             }
 
+        nodes = [n for n in nodes if isinstance(n, dict) and "id" in n]
+        if not nodes:
+            return {
+                "task": user_request,
+                "nodes": [{"id": "fallback", "role": "GeneralAgent", "task": user_request, "tools": []}],
+                "edges": [],
+                "entry_nodes": ["fallback"],
+                "exit_node": "fallback",
+                "missing_tools": graph.get("missing_tools", []),
+            }
+        graph["nodes"] = nodes
+
         node_ids = {n["id"] for n in nodes}
         registered_ids = {t["id"] for t in tools}
 
@@ -326,7 +338,10 @@ class KilnPlanner:
                 logger.warning("Planner referenced non-existent tools: %s — dropping them", invalid_tools)
             node["tools"] = valid_tools
 
-        valid_edges = [e for e in graph.get("edges", []) if e[0] in node_ids and e[1] in node_ids]
+        valid_edges = [
+            e for e in graph.get("edges", [])
+            if isinstance(e, (list, tuple)) and len(e) >= 2 and e[0] in node_ids and e[1] in node_ids
+        ]
         graph["edges"] = valid_edges
 
         if "exit_node" not in graph or graph["exit_node"] not in node_ids:

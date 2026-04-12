@@ -16,11 +16,13 @@ def exchange_rate_fetcher(from_currency: str, to_currency: str) -> dict:
         timestamp = data.get("time_last_update_utc", "")
 
         if exchange_rate is None:
-            return {"error": f"Currency '{to_currency}' not found in exchange rates for '{from_currency}'."}
+            raise ValueError(f"Currency '{to_currency}' not found in exchange rates for '{from_currency}'.")
 
         return {
             "exchange_rate": exchange_rate,
             "timestamp": timestamp
         }
+    except ValueError:
+        raise
     except Exception as e:
-        return {"error": f"Failed to fetch exchange rate: {e}"}
+        raise RuntimeError(f"Failed to fetch exchange rate: {e}") from e
