@@ -114,17 +114,21 @@ services:
   # ── Synthesis Service (port 8002) ───────────────────────────────────────────
   synthesis_service:
     build:
-      context: ./packages/synthesis_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/synthesis_service/Dockerfile
     ports:
       - "8002:8002"
     environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - KILN_SYNTHESIS_CALLBACK_URL=http://registry_api:8766/synthesis/callback
       - KILN_SYNTHESIS_INTERNAL_SECRET=${KILN_INTERNAL_SECRET:-}
-      - KILN_SYNTHESIS_OPENCODE_MODEL=${KILN_SYNTHESIS_OPENCODE_MODEL:-nim/meta/llama-3.3-70b-instruct}
+      - KILN_SYNTHESIS_OPENCODE_MODEL=${KILN_SYNTHESIS_OPENCODE_MODEL:-mistral/codestral-latest}
+      - PYTHONPATH=/app
     volumes:
       - synthesis_logs:/app/logs
+      - ./packages/synthesis_service/kiln_synthesis:/app/kiln_synthesis
+      - ./packages/shared/kiln_shared:/app/kiln_shared
     depends_on:
       - registry_api
 

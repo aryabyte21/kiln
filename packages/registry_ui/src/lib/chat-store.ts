@@ -63,7 +63,7 @@ function saveStore(store: StoreShape): void {
     const trimmed: StoreShape = {
       ...store,
       conversations: [...store.conversations]
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, MAX_CONVERSATIONS),
     }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
@@ -119,7 +119,7 @@ export function useChatStore() {
   }, [store, hydrated])
 
   const sortedConversations = [...store.conversations].sort(
-    (a, b) => b.updatedAt - a.updatedAt,
+    (a, b) => b.createdAt - a.createdAt,
   )
 
   const activeConversation =
@@ -165,7 +165,7 @@ export function useChatStore() {
       ...prev,
       conversations: prev.conversations.map((c) =>
         c.id === id
-          ? { ...c, title: title.trim() || "Untitled", updatedAt: Date.now() }
+          ? { ...c, title: title.trim() || "Untitled" }
           : c,
       ),
     }))
@@ -178,6 +178,10 @@ export function useChatStore() {
         if (!existing) return prev
         const titleNeedsUpdate =
           existing.title === "New conversation" && messages.length > 0
+        const existingSerialized = JSON.stringify(existing.messages)
+        const nextSerialized = JSON.stringify(messages)
+        const messagesChanged = existingSerialized !== nextSerialized
+        if (!messagesChanged && !titleNeedsUpdate) return prev
         return {
           ...prev,
           conversations: prev.conversations.map((c) =>
@@ -185,7 +189,7 @@ export function useChatStore() {
               ? {
                   ...c,
                   messages,
-                  updatedAt: Date.now(),
+                  updatedAt: messagesChanged ? Date.now() : c.updatedAt,
                   title: titleNeedsUpdate ? deriveTitle(messages) : c.title,
                 }
               : c,

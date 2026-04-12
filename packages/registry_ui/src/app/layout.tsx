@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Flame } from "lucide-react"
 
 import { NavLinks } from "@/app/_components/nav-links"
+import { Providers } from "@/app/_components/providers"
 import { Button } from "@/components/ui/button"
 import "./globals.css"
 
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-full bg-background text-foreground">
         <ClerkProvider appearance={{ baseTheme: dark }}>
+        <Providers>
           <div className="relative flex min-h-full flex-col overflow-x-clip">
             <div className="pointer-events-none absolute inset-0 -z-10">
               <div className="absolute left-1/2 top-0 h-[28rem] w-[48rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_center,hsl(24_95%_58%_/_0.12),transparent_70%)] blur-3xl" />
@@ -91,6 +93,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </footer>
           </div>
+        </Providers>
         </ClerkProvider>
       </body>
     </html>

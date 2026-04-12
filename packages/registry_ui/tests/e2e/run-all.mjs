@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const TESTS = [
+  'health-checks.mjs',
   'homepage.mjs',
   'tools-list.mjs',
   'tool-detail.mjs',

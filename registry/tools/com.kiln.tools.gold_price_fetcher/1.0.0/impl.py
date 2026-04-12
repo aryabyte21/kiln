@@ -5,30 +5,26 @@ from datetime import datetime
 REQUIRED_ENV_VARS = []
 
 def gold_price_fetcher(**kwargs) -> dict:
+    """Fetch the real-time gold price from a public API."""
     currency = kwargs.get("currency", "USD")
-    
-    # Use a free API that does not require an API key
+
     url = "https://api.metals.dev/v1/latest?api_key=demo&currency=" + currency
-    
+
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
             data = json.loads(response.read().decode("utf-8"))
-            
-            # Extract relevant data
-            price = data.get("data", {}).get("price", 0.0)
-            change_24h = data.get("data", {}).get("change_percent_24h", 0.0)
+
+            price = data.get("data", {}).get("price", None)
+            change_24h = data.get("data", {}).get("change_percent_24h", None)
             timestamp = datetime.utcnow().isoformat()
-            
+
+            if price is None:
+                return {"error": f"Gold price not available for currency '{currency}' from metals.dev API."}
+
             return {
                 "price": price,
-                "change_24h": change_24h,
+                "change_24h": change_24h if change_24h is not None else 0.0,
                 "timestamp": timestamp
             }
     except Exception as e:
-        # Fallback to local computation if API fails
-        timestamp = datetime.utcnow().isoformat()
-        return {
-            "price": 1900.0,  # Example fallback price
-            "change_24h": 0.5,  # Example fallback change
-            "timestamp": timestamp
-        }
+        return {"error": f"Failed to fetch gold price: {e}"}

@@ -41,7 +41,7 @@ class _FakeAsyncClient:
     def __init__(self, responses: dict[str, int]) -> None:
         self._responses = responses
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -56,13 +56,13 @@ class _FakeAsyncClient:
 
 
 def _patch_httpx(monkeypatch: pytest.MonkeyPatch, responses: dict[str, int]) -> None:
-    """Replace httpx.AsyncClient inside chat_backend.main with our fake."""
+    """Replace async_client inside chat_backend.main with our fake."""
     import kiln_chat_backend.main as main_mod
 
-    def _factory(*args: Any, **kwargs: Any) -> _FakeAsyncClient:
+    def _fake_async_client(**_kw: Any) -> _FakeAsyncClient:
         return _FakeAsyncClient(responses)
 
-    monkeypatch.setattr(main_mod.httpx, "AsyncClient", _factory)
+    monkeypatch.setattr(main_mod, "async_client", _fake_async_client)
 
 
 def test_readyz_returns_ok_when_registry_reachable(

@@ -10,8 +10,6 @@ on failure — OpenCode gets up to 2 fix attempts before giving up.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import re
 import subprocess

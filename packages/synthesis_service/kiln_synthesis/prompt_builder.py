@@ -272,8 +272,8 @@ def build_prompt(workspace: Path, request: SynthesizeRequest) -> str:
         f"Create two files in this directory: spec.yaml and impl.py. "
         f"Follow the Kiln spec format exactly as described in CONTEXT.md. "
         f"IMPORTANT: First test the import works: python -c \"from impl import {request.tool_name}; print('OK')\". "
-        f"Then test the full tool: "
+        f"Then test the full tool with REAL inputs (not placeholders): "
         f'python -c "from impl import {request.tool_name}; import json; print(json.dumps({request.tool_name}(**{test_input}), indent=2))" '
-        f"If an external API fails, switch to a free alternative or local computation immediately — do not retry the same failing API. "
-        f"Fix any issues until the tool runs successfully and returns valid output (not an error dict)."
+        f"If the API fails, try ONE alternative free public API. If no free API works, return {{\"error\": \"<reason>\"}} — "
+        f"do NOT fabricate data or switch to local computation unless local computation IS the tool's stated purpose."
     )

@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # OpenCode model identifier (provider/model format)
-    opencode_model: str = "nim/meta/llama-3.3-70b-instruct"
+    opencode_model: str = "mistral/codestral-latest"
 
     # Timeout in seconds for the entire OpenCode process (cost/runaway guard)
     opencode_timeout: int = 600

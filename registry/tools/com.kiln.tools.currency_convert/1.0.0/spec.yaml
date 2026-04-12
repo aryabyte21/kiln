@@ -18,12 +18,12 @@ interface:
       type: string
       required: true
       description: "Source currency code"
-      enum: [USD, SGD, EUR, GBP, JPY]
+      enum: [USD, SGD, EUR, GBP, JPY, INR]
     - name: to_currency
       type: string
       required: true
       description: "Target currency code"
-      enum: [USD, SGD, EUR, GBP, JPY]
+      enum: [USD, SGD, EUR, GBP, JPY, INR]
 
   outputs:
     - name: amount
@@ -71,6 +71,14 @@ testing:
         amount: 250
         from_currency: SGD
         to_currency: EUR
+      expected_output_contains:
+        - converted
+        - rate
+        - success
+    - input:
+        amount: 100
+        from_currency: USD
+        to_currency: INR
       expected_output_contains:
         - converted
         - rate

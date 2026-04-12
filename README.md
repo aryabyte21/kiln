@@ -251,60 +251,69 @@ User: "Get Bitcoin price and predict next week's trend"
 
 ---
 
-## Getting Started
+## How to Run Locally in 60 Seconds
 
 ### Prerequisites
 
-- Python 3.12+
 - Docker & Docker Compose
-- Node.js 18+ (for the UI)
-- A Mistral API key
+- A [Mistral API key](https://console.mistral.ai/)
+- A [Clerk](https://dashboard.clerk.com) project (publishable + secret keys)
 
-### 1. Clone and set up
+For local development without Docker you'll also need Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 20+, and [pnpm](https://pnpm.io/).
 
-```bash
-git clone <repo-url> babel_project
-cd babel_project
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Configure environment
+### 1. Clone and configure
 
 ```bash
-# Create .env with your API keys
-cat > .env << 'EOF'
-MISTRAL_API_KEY=your_mistral_key_here
-EOF
+git clone <repo-url> kiln
+cd kiln
+cp .env.example .env
+# Edit .env — fill in MISTRAL_API_KEY, CLERK_DOMAIN, CLERK_SECRET_KEY,
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, and KILN_INTERNAL_SECRET
 ```
 
-### 3. Start the Vibe Tool (Docker)
+### 2. Start everything
 
 ```bash
-docker compose build vibe_tool
-docker compose up vibe_tool -d
+./dev.sh
 ```
 
-### 4. Start BabelServer
+This builds and starts all services via Docker Compose with hot-reload:
+
+| Service | Port | Description |
+|---------|------|-------------|
+| registry_api | 8766 | Tool registry, execution, search |
+| chat_backend | 8765 | Planning (Mistral Large) + DAG execution |
+| synthesis_service | 8002 | Tool synthesis via Mistral Vibe CLI |
+| mcp_server | 8768 | MCP bridge (exposes Kiln tools as MCP tools) |
+| registry_ui | 3000 | Next.js web UI |
+| postgres | 5432 | Database |
+| redis | 6379 | Caching |
+
+### 3. Use it
+
+Open http://localhost:3000, sign in via Clerk, and start chatting. ARIA will plan, synthesize missing tools, and execute — all automatically.
+
+### Local Development (without Docker)
 
 ```bash
-python run_server.py
-# Server starts on http://localhost:8765
+# Install Python dependencies
+uv sync
+
+# Install frontend dependencies
+cd packages/registry_ui && npm install && cd ../..
+
+# Run services individually (each in its own terminal)
+uv run uvicorn kiln_registry.main:app --host 0.0.0.0 --port 8766 --reload
+uv run uvicorn kiln_chat_backend.main:app --host 0.0.0.0 --port 8765 --reload
+cd packages/registry_ui && npm run dev
+
+# Run tests
+uv run pytest                                    # Python (89 tests)
+uv run ruff check packages/                      # Lint
+uv run mypy packages/                            # Type check
+cd packages/registry_ui && npm run lint           # Frontend lint
+cd packages/registry_ui && npm run build          # Frontend build
 ```
-
-### 5. Start the UI
-
-```bash
-cd aria-ui
-npm install
-npm run dev
-# UI starts on http://localhost:5173
-```
-
-### 6. Use it
-
-Open `http://localhost:5173` and start asking questions. ARIA will plan, synthesize missing tools, and execute — all automatically.
 
 ---
 

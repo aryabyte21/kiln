@@ -21,7 +21,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, func, select
+from sqlalchemy import DateTime, Float, Integer, String, Text, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -184,16 +184,29 @@ async def db_delete_tool(tool_id: str) -> bool:
 
 
 async def db_search_tools(query: str) -> list[ToolModel]:
-    """Full-text search across name, description, and tags."""
-    pattern = f"%{query.lower()}%"
+    """Word-level search across name, description, tags, and id.
+
+    Splits the query into individual terms and matches tools that contain
+    ANY of the terms (OR logic). This finds relevant results even when the
+    query doesn't appear as a contiguous substring.
+    """
+    terms = [t.strip() for t in query.lower().split() if t.strip()]
+    if not terms:
+        return []
+
+    from sqlalchemy import or_
+
+    conditions = []
+    for term in terms:
+        pattern = f"%{term}%"
+        conditions.append(func.lower(ToolModel.name).like(pattern))
+        conditions.append(func.lower(ToolModel.description).like(pattern))
+        conditions.append(func.lower(ToolModel.tags_json).like(pattern))
+        conditions.append(func.lower(ToolModel.id).like(pattern))
+
     async with get_session() as session:
         result = await session.execute(
-            select(ToolModel).where(
-                (func.lower(ToolModel.name).like(pattern))
-                | (func.lower(ToolModel.description).like(pattern))
-                | (func.lower(ToolModel.tags_json).like(pattern))
-                | (func.lower(ToolModel.id).like(pattern))
-            ).order_by(ToolModel.name)
+            select(ToolModel).where(or_(*conditions)).order_by(ToolModel.name)
         )
         return list(result.scalars().all())
 
@@ -202,12 +215,14 @@ async def db_search_tools(query: str) -> list[ToolModel]:
 
 
 async def db_record_execution(tool_id: str, success: bool, duration_ms: float) -> None:
-    """Increment the execution counters for a tool. Idempotent on tool_id.
+    """Atomically increment execution counters for a tool.
 
-    Maintains a running average of duration_ms via the standard
-    ``new_avg = (old_avg * old_count + new_value) / (old_count + 1)`` formula
-    so we never need to scan an executions log to compute the average.
+    Uses SQL-level expressions so concurrent requests don't lose increments.
+    If the row doesn't exist yet, inserts it; otherwise updates atomically.
     """
+    now = datetime.now(UTC)
+    status = "success" if success else "error"
+
     async with get_session() as session:
         stat = await session.get(ToolStatModel, tool_id)
         if stat is None:
@@ -217,23 +232,29 @@ async def db_record_execution(tool_id: str, success: bool, duration_ms: float) -
                 success_count=1 if success else 0,
                 error_count=0 if success else 1,
                 avg_duration_ms=duration_ms,
-                last_executed_at=datetime.now(UTC),
-                last_status="success" if success else "error",
+                last_executed_at=now,
+                last_status=status,
             )
             session.add(stat)
             return
 
-        new_count = stat.execution_count + 1
-        stat.avg_duration_ms = (
-            (stat.avg_duration_ms * stat.execution_count) + duration_ms
-        ) / new_count
-        stat.execution_count = new_count
-        if success:
-            stat.success_count += 1
-        else:
-            stat.error_count += 1
-        stat.last_executed_at = datetime.now(UTC)
-        stat.last_status = "success" if success else "error"
+        col = ToolStatModel.__table__.c
+        new_count_expr = col.execution_count + 1
+        new_avg_expr = (col.avg_duration_ms * col.execution_count + duration_ms) / new_count_expr
+
+        await session.execute(
+            update(ToolStatModel)
+            .where(ToolStatModel.tool_id == tool_id)
+            .values(
+                execution_count=new_count_expr,
+                success_count=col.success_count + (1 if success else 0),
+                error_count=col.error_count + (0 if success else 1),
+                avg_duration_ms=new_avg_expr,
+                last_executed_at=now,
+                last_status=status,
+            )
+        )
+        await session.refresh(stat)
 
 
 async def db_get_tool_stats(tool_id: str) -> ToolStatModel | None:
@@ -249,11 +270,9 @@ async def db_list_all_tool_stats() -> dict[str, ToolStatModel]:
 
 
 async def db_toggle_favorite(tool_id: str, delta: int) -> int:
-    """Increment or decrement the favorite count. Returns the new count.
+    """Atomically increment or decrement the favorite count. Returns the new count.
 
-    Caller is responsible for tracking which user favorited what (out of
-    scope for the Kiln registry — this is just the aggregate counter the
-    catalog UI shows). Pass delta=+1 to favorite, delta=-1 to unfavorite.
+    Uses SQL-level expression to prevent lost updates from concurrent requests.
     """
     async with get_session() as session:
         stat = await session.get(ToolStatModel, tool_id)
@@ -264,5 +283,16 @@ async def db_toggle_favorite(tool_id: str, delta: int) -> int:
             )
             session.add(stat)
             return stat.favorite_count
-        stat.favorite_count = max(0, stat.favorite_count + delta)
+
+        col = ToolStatModel.__table__.c
+        new_val = case(
+            (col.favorite_count + delta < 0, 0),
+            else_=col.favorite_count + delta,
+        )
+        await session.execute(
+            update(ToolStatModel)
+            .where(ToolStatModel.tool_id == tool_id)
+            .values(favorite_count=new_val)
+        )
+        await session.refresh(stat)
         return stat.favorite_count

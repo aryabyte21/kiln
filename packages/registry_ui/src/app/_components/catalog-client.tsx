@@ -19,8 +19,12 @@ import {
   PlayCircle,
   CheckCircle2,
   Star,
+  Activity,
+  ShieldCheck,
+  ShieldAlert,
 } from "lucide-react"
 import type { Tool, ToolStats } from "@/lib/registry"
+import type { SystemStatus } from "@/lib/system-status"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -118,6 +122,74 @@ function StatsRow({ stats }: { stats: ToolStats }) {
         <StatCard key={item.label} {...item} />
       ))}
     </div>
+  )
+}
+
+function SystemStatusPanel({ systemStatus }: { systemStatus: SystemStatus }) {
+  const overallOk = systemStatus.status === "ok"
+
+  return (
+    <Card className="section-surface mb-8 overflow-hidden py-0">
+      <CardHeader className="border-b border-border/60 bg-background/35 pb-4 pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Activity className="size-4 text-primary" />
+              System status
+            </CardTitle>
+            <CardDescription>
+              Live readiness across the operator-facing services.
+            </CardDescription>
+          </div>
+          <Badge
+            variant="outline"
+            className={
+              overallOk
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+            }
+          >
+            {overallOk ? "All core services ready" : "Action needed"}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 px-5 py-5 md:grid-cols-3">
+        {systemStatus.services.map((service) => {
+          const ok = service.status === "ok"
+          return (
+            <div
+              key={service.key}
+              className="rounded-2xl border border-border/70 bg-background/45 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{service.label}</span>
+                    {service.optional && (
+                      <Badge
+                        variant="secondary"
+                        className="rounded-full bg-muted/65 text-[10px] font-normal"
+                      >
+                        optional
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {service.httpStatus ? `HTTP ${service.httpStatus}` : "No response"}
+                  </p>
+                </div>
+                {ok ? (
+                  <ShieldCheck className="size-4 text-emerald-400" />
+                ) : (
+                  <ShieldAlert className="size-4 text-amber-300" />
+                )}
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">{service.detail}</p>
+            </div>
+          )
+        })}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -332,10 +404,12 @@ function EmptyState({ query }: { query: string }) {
 export function CatalogClient({
   tools,
   stats,
+  systemStatus,
   error,
 }: {
   tools: Tool[]
   stats: ToolStats | null
+  systemStatus: SystemStatus | null
   error: string | null
 }) {
   const [search, setSearch] = useState("")
@@ -401,6 +475,7 @@ export function CatalogClient({
 
       {/* Stats row */}
       {stats && <StatsRow stats={stats} />}
+      {systemStatus && <SystemStatusPanel systemStatus={systemStatus} />}
 
       {/* Search */}
       <div className="relative mb-6">

@@ -94,10 +94,11 @@ async def run_opencode(
         stderr_task = asyncio.create_task(_drain_stderr(proc.stderr))
 
         # Read stdout line-by-line (NDJSON streaming via --format json)
+        line_timeout = settings.opencode_timeout
         while True:
             line = await asyncio.wait_for(
                 proc.stdout.readline(),
-                timeout=300,  # 5 min max between lines
+                timeout=line_timeout,
             )
             if not line:
                 break

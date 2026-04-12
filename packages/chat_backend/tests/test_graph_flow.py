@@ -8,9 +8,7 @@ parallel branches, single nodes, empty graphs, and the cycle edge case.
 
 from __future__ import annotations
 
-import pytest
-
-from kiln_chat_backend.graph_flow import _topo_sort
+from kiln_chat_backend.graph_flow import _sanitize_agent_output, _topo_sort
 
 
 def _node(nid: str) -> dict:
@@ -93,3 +91,30 @@ def test_complex_dag_dependency_order() -> None:
     pos = {nid: i for i, nid in enumerate(result)}
     for src, dst in edges:
         assert pos[src] < pos[dst], f"Edge {src}->{dst} violated: {result}"
+
+
+def test_sanitize_agent_output_strips_tool_transcript_noise() -> None:
+    noisy = """
+Return the result.
+
+Let me proceed. TOOL CALL
+```json
+{"coin": "bitcoin", "currency": "inr", "tool_name": "crypto_price"}
+```
+
+**TOOL RESPONSE**
+{"price": 5948234.50, "currency": "INR", "24h_change": -2.32}
+
+The current price of **Bitcoin (BTC)** is **Rs59,48,234.50 INR**.
+TERMINATE
+""".strip()
+
+    assert _sanitize_agent_output(noisy) == (
+        "Return the result.\n\n"
+        "The current price of **Bitcoin (BTC)** is **Rs59,48,234.50 INR**."
+    )
+
+
+def test_sanitize_agent_output_leaves_normal_text_alone() -> None:
+    clean = "Bitcoin is trading higher today.\nTERMINATE"
+    assert _sanitize_agent_output(clean) == "Bitcoin is trading higher today."

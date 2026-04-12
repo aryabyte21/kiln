@@ -27,7 +27,7 @@ class _FakeAsyncClient:
     def __init__(self, responses: dict[str, int]) -> None:
         self._responses = responses
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -44,10 +44,10 @@ class _FakeAsyncClient:
 def _patch_httpx(monkeypatch: pytest.MonkeyPatch, responses: dict[str, int]) -> None:
     import kiln_synthesis.routes.health as health_mod
 
-    def _factory(*args: Any, **kwargs: Any) -> _FakeAsyncClient:
+    def _fake_async_client(**_kw: Any) -> _FakeAsyncClient:
         return _FakeAsyncClient(responses)
 
-    monkeypatch.setattr(health_mod.httpx, "AsyncClient", _factory)
+    monkeypatch.setattr(health_mod, "async_client", _fake_async_client)
 
 
 def _registry_url() -> str:

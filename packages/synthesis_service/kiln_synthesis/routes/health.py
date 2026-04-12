@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-import httpx
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 

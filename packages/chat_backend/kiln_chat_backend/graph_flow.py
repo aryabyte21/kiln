@@ -35,9 +35,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import requests
+
 # AG2 (autogen) does not ship a py.typed marker, so mypy can't follow it.
 # We can't fix this upstream — silence the import-untyped warning.
 from autogen import AssistantAgent, UserProxyAgent, register_function  # type: ignore[import-untyped]
@@ -77,6 +79,7 @@ def _make_http_tool(
     server_url: str,
     node_id: str = "",
     on_event=None,
+    env_vars: dict[str, str] | None = None,
 ):
     """
     Create an AG2-compatible Python callable that runs a Kiln tool
@@ -114,17 +117,36 @@ def _make_http_tool(
         f"    return resp\n"
     )
 
+    _env_vars = env_vars or {}
+
     def _http_call(url: str, tid: str, args: dict) -> Any:
         if on_event:
             on_event({"type": "tool_call", "node_id": node_id, "tool": name, "args": args})
-        r = requests.post(
-            f"{url}/tools/{tid}/execute",
-            json={"args": args},
-            headers={"X-Internal-Secret": os.environ.get("KILN_INTERNAL_SECRET", "")},
-            timeout=30,
-        )
-        r.raise_for_status()
-        result = r.json()["result"]
+        try:
+            payload: dict[str, Any] = {"args": args}
+            if _env_vars:
+                payload["env_vars"] = _env_vars
+            r = requests.post(
+                f"{url}/tools/{tid}/execute",
+                json=payload,
+                headers={"X-Internal-Secret": os.environ.get("KILN_INTERNAL_SECRET", "")},
+                timeout=30,
+            )
+            r.raise_for_status()
+            result = r.json()["result"]
+        except requests.Timeout:
+            result = {"error": f"Tool '{name}' timed out after 30s"}
+        except requests.ConnectionError:
+            result = {"error": f"Tool '{name}' unreachable — registry may be down"}
+        except requests.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.response.json().get("detail", "")
+            except Exception:
+                detail = e.response.text[:200] if e.response else ""
+            result = {"error": f"Tool '{name}' HTTP {e.response.status_code}: {detail}"}
+        except Exception as e:
+            result = {"error": f"Tool '{name}' failed: {e}"}
         if on_event:
             on_event({"type": "tool_result", "node_id": node_id, "tool": name, "result": result})
         return result
@@ -163,7 +185,7 @@ def _extract_result(node_id: str, chat_history: list[dict]) -> str:
     for msg in reversed(chat_history):
         if target_name not in (msg.get("name") or ""):
             continue
-        content = (msg.get("content") or "").replace("TERMINATE", "").strip()
+        content = _sanitize_agent_output(msg.get("content") or "")
         if content:
             return content
 
@@ -171,11 +193,101 @@ def _extract_result(node_id: str, chat_history: list[dict]) -> str:
     for msg in reversed(chat_history):
         if msg.get("role") == "tool":
             continue
-        content = (msg.get("content") or "").replace("TERMINATE", "").strip()
+        content = _sanitize_agent_output(msg.get("content") or "")
         if content:
             return content
 
     return "(no result)"
+
+
+_TOOL_TRANSCRIPT_MARKERS = (
+    "TOOL CALL",
+    "TOOL RESPONSE",
+)
+
+
+def _looks_like_tool_json(line: str) -> bool:
+    """Return True only for AG2 internal tool-call/response JSON, not data."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if not (stripped.startswith("{") or stripped.startswith("[")):
+        return False
+    return '"tool_name"' in stripped and '"args"' in stripped
+
+
+def _sanitize_agent_output(content: str) -> str:
+    """Strip AG2 tool transcript noise from assistant-visible node results."""
+    text = content.replace("TERMINATE", "").strip()
+    if not text:
+        return ""
+
+    if not any(marker in text for marker in _TOOL_TRANSCRIPT_MARKERS):
+        return text
+
+    kept_lines: list[str] = []
+    in_fence = False
+    in_tool_fence = False
+    in_tool_section = False
+    pending_fence: list[str] = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            if not in_fence:
+                in_fence = True
+                in_tool_fence = in_tool_section or any(m in text for m in _TOOL_TRANSCRIPT_MARKERS)
+                if not in_tool_fence:
+                    pending_fence = [line]
+            else:
+                in_fence = False
+                if not in_tool_fence:
+                    pending_fence.append(line)
+                    has_tool_json = any(
+                        fl.strip().startswith("{") and '"tool_name"' in fl
+                        for fl in pending_fence
+                    )
+                    if not has_tool_json:
+                        kept_lines.extend(pending_fence)
+                    pending_fence = []
+                in_tool_fence = False
+            continue
+
+        if not stripped:
+            in_tool_section = False
+            if in_fence and not in_tool_fence:
+                pending_fence.append("")
+            elif not in_fence and kept_lines and kept_lines[-1] != "":
+                kept_lines.append("")
+            continue
+
+        if any(marker in stripped for marker in _TOOL_TRANSCRIPT_MARKERS):
+            in_tool_section = True
+            continue
+
+        if in_fence:
+            if not in_tool_fence:
+                pending_fence.append(line)
+            continue
+
+        if in_tool_section and stripped.startswith(("{", "[")):
+            continue
+
+        if _looks_like_tool_json(stripped):
+            continue
+
+        if re.fullmatch(r"Let me proceed\.?", stripped, flags=re.IGNORECASE):
+            in_tool_section = False
+            continue
+
+        in_tool_section = False
+        kept_lines.append(stripped)
+
+    sanitized = "\n".join(kept_lines)
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized).strip()
+    return sanitized or text
 
 
 # ── KilnGraphFlow ─────────────────────────────────────────────────────────────
@@ -222,7 +334,9 @@ class KilnGraphFlow:
         Returns:
             Final answer string from the exit node.
         """
-        # Inject per-run env vars, restore originals on exit
+        self._extra_env = extra_env or {}
+
+        # Also inject into os.environ for any local checks (e.g. _collect_missing_envs)
         _saved: dict[str, str | None] = {}
         if extra_env:
             for k, v in extra_env.items():
@@ -232,6 +346,7 @@ class KilnGraphFlow:
         try:
             return self._run_graph(task_graph, verbose)
         finally:
+            self._extra_env = {}
             for k, original in _saved.items():
                 if original is None:
                     os.environ.pop(k, None)
@@ -244,14 +359,41 @@ class KilnGraphFlow:
         '"success": false',
         "'success': false",
         "(no result)",
+        "(error:",
         "no wikipedia article found",
         "could not find",
         "failed to",
+        "failed due to",
         "unable to complete",
+        "unable to fetch",
         "api key not set",
+        "api key is missing",
+        "api key not found",
+        "missing news_api_key",
+        "missing api key",
+        "missing api_key",
+        "authentication issue",
+        "authentication failed",
+        "authentication error",
+        "unauthorized",
+        "invalid api key",
         "error occurred",
         "no results found",
         "not found for",
+        "timed out",
+        "unreachable",
+        '"error":',
+        "rate limit",
+        "403 forbidden",
+        "401 unauthorized",
+        "not available in the registry",
+        "not available in the current registry",
+        "none of the available tools",
+        "no tools in the registry",
+        "environment variable not set",
+        "i cannot provide",
+        "cannot be completed",
+        "cannot complete",
     )
 
     def _is_failure(self, result: str) -> bool:
@@ -265,6 +407,12 @@ class KilnGraphFlow:
         edges     = task_graph.get("edges", [])
         exit_node = task_graph["exit_node"]
         order     = _topo_sort(list(nodes.values()), edges)
+
+        if len(order) != len(nodes):
+            missing = set(nodes.keys()) - set(order)
+            logger.error("Graph has a cycle or disconnected nodes: %s not reachable", missing)
+            self._emit("error", message=f"Task graph has a cycle involving nodes: {missing}")
+            return f"(error: task graph has a cycle involving {missing})"
 
         if verbose:
             self._print_graph(task_graph, order)
@@ -288,7 +436,11 @@ class KilnGraphFlow:
                 logger.info(f"Running node: [{node_id}]  role={node['role']}")
                 logger.info(f"Tools: {node.get('tools', []) or '(none)'}")
 
-            result = self._run_node(node, context, task_graph["task"])
+            try:
+                result = self._run_node(node, context, task_graph["task"])
+            except Exception as exc:
+                logger.error("Node '%s' raised an exception: %s", node_id, exc)
+                result = f"(error: node '{node_id}' crashed: {exc})"
 
             # ── Retry once if a non-exit node failed ─────────────────────────
             if node_id != exit_node and self._is_failure(result):
@@ -305,10 +457,14 @@ class KilnGraphFlow:
                         "- Use different, broader or more specific search terms\n"
                         "- Break a complex query into simpler sub-queries\n"
                         "- If one tool fails, try another available tool\n"
-                        "- If no suitable tool succeeds, summarise what you know from general knowledge"
+                        "- If ALL tools fail, say so honestly — do NOT make up data"
                     ),
                 }
-                result = self._run_node(retry_node, context, task_graph["task"])
+                try:
+                    result = self._run_node(retry_node, context, task_graph["task"])
+                except Exception as exc:
+                    logger.error("Node '%s' retry also failed: %s", node_id, exc)
+                    result = f"(error: node '{node_id}' retry crashed: {exc})"
 
             context[node_id] = result
             self._emit("node_complete", node_id=node_id, result=result)
@@ -356,6 +512,14 @@ class KilnGraphFlow:
             "- Use the tools registered with you (if any) to complete your task. Do not "
             "describe tools you weren't given access to as if you can call them.\n"
             "- Be concise and factual. Do not fabricate URLs, docs, or product names.\n"
+            "- CRITICAL: If your task requires fetching real-time data (prices, weather, "
+            "news, exchange rates, etc.) and you have NO tools to do so, say \"I don't "
+            "have a tool to fetch this data\" — do NOT make up numbers, dates, or facts "
+            "from your training data. Fabricated data is WORSE than no data.\n"
+            "- If an upstream agent FAILED (context marked as FAILED), acknowledge the "
+            "failure explicitly. Report what went wrong and suggest a fix (e.g. 'the news "
+            "API returned an authentication error — the user may need to provide a valid "
+            "NEWS_API_KEY'). Never pretend you have data when the upstream failed.\n"
             "- Reply TERMINATE when done."
         )
 
@@ -395,7 +559,11 @@ class KilnGraphFlow:
             if spec is None:
                 logger.warning(f"Tool '{tool_id}' not found on Kiln registry — skipping")
                 continue
-            fn = _make_http_tool(tool_id, spec, self._server_url, node_id=node_id, on_event=self._on_event)
+            fn = _make_http_tool(
+                tool_id, spec, self._server_url,
+                node_id=node_id, on_event=self._on_event,
+                env_vars=self._extra_env,
+            )
             register_function(
                 fn,
                 caller=assistant,
@@ -423,14 +591,32 @@ class KilnGraphFlow:
         """
         Build the initial message for a node, injecting upstream results
         as context so downstream agents have full information.
+
+        Explicitly marks failed upstream results so downstream agents report
+        the failure honestly instead of hallucinating around missing data.
         """
         msg = node_task
         if context:
-            upstream = "\n".join(
-                f"  [{node_id}]: {result}"
-                for node_id, result in context.items()
-            )
+            parts: list[str] = []
+            has_failures = False
+            for node_id, result in context.items():
+                if self._is_failure(result):
+                    has_failures = True
+                    parts.append(f"  [{node_id}] FAILED: {result}")
+                else:
+                    parts.append(f"  [{node_id}]: {result}")
+
+            upstream = "\n".join(parts)
             msg += f"\n\nContext from upstream agents:\n{upstream}"
+            if has_failures:
+                msg += (
+                    "\n\nIMPORTANT: One or more upstream agents FAILED (marked above). "
+                    "Do NOT fabricate or guess the missing data. Instead, acknowledge the "
+                    "failure and explain what went wrong based on the error message. "
+                    "If the upstream failure means you cannot complete your task, say so "
+                    "clearly and suggest what the user can do (e.g. provide an API key, "
+                    "retry later, etc.)."
+                )
         return msg
 
     def _warm_tool_cache(self, nodes: list[dict]) -> None:

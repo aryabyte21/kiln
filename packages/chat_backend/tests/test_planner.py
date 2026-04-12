@@ -20,7 +20,6 @@ import pytest
 
 from kiln_chat_backend.planner import KilnPlanner
 
-
 # A minimal valid task-graph JSON the planner is "supposed" to return.
 SAMPLE_GRAPH = {
     "task": "test request",
