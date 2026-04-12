@@ -12,7 +12,11 @@ function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
   return <MenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />
 }
 
-function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
+// Accept ``asChild`` for compatibility with shadcn-radix-style consumers
+// (e.g. vendored AI Elements). Base UI uses render-prop instead, so the
+// flag is silently swallowed here — the trigger still renders normally.
+type DropdownMenuTriggerProps = MenuPrimitive.Trigger.Props & { asChild?: boolean }
+function DropdownMenuTrigger({ asChild: _asChild, ...props }: DropdownMenuTriggerProps) {
   return <MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
 }
 

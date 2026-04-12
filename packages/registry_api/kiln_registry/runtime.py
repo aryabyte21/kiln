@@ -116,7 +116,7 @@ class KilnRuntime:
         """
         target = target or self._default_target
         _validate_target(target)
-        return [self._compile(tool, target) for tool in self._registry.list()]
+        return [self._compile(tool, target) for tool in self._registry.list_all()]
 
     def get_many(self, tool_ids: list[str], target: str | None = None) -> list[Any]:
         """

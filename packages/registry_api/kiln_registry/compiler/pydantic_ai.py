@@ -46,7 +46,9 @@ class CompiledPydanticAITool:
         Falls back to returning the raw function if not.
         """
         try:
-            from pydantic_ai import Tool
+            # pydantic_ai is an optional compile target — only used if a tool
+            # author asks for it. mypy can't see the stub when not installed.
+            from pydantic_ai import Tool  # type: ignore[import-not-found]
             return Tool(self.fn, description=self.description)
         except ImportError:
             # pydantic_ai not installed — return the typed function

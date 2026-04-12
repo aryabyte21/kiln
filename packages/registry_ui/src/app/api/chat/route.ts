@@ -89,7 +89,28 @@ function streamSimpleText(text: string): Response {
   return new Response(stream, { headers: SSE_HEADERS })
 }
 
-/** Connect to Kiln's SSE stream and convert to AI SDK UI Message Stream Protocol */
+/** Connect to Kiln's SSE stream and convert to AI SDK UI Message Stream Protocol.
+ *
+ * Key UX decision: we do NOT stream the noisy intermediate events
+ * (`Plan: ...`, `node_x starting`, `tool_call`, etc) as markdown text into
+ * the assistant message. Doing so makes the chat look like a debug log.
+ *
+ * Instead we buffer all intermediate events into a structured "trace" array
+ * and emit them as a single hidden ``__KILN_TRACE__{...}__END__`` prefix on
+ * the final delta. The chat page picks that prefix off and renders it as a
+ * collapsible "View execution trace" disclosure under the answer. Default
+ * view is just the answer — clean and conversational.
+ */
+type KilnTraceEvent =
+  | { kind: "plan"; nodes: { id: string; role: string; tools: string[] }[] }
+  | { kind: "synthesis_wait"; tool_ids: string[] }
+  | { kind: "tool_ready"; tool_id: string }
+  | { kind: "node_start"; node_id: string; role?: string }
+  | { kind: "tool_call"; tool: string; node_id?: string }
+  | { kind: "tool_result"; node_id?: string }
+  | { kind: "node_complete"; node_id: string }
+  | { kind: "synthesis_timeout"; missing: string[] }
+
 function streamKilnExecution(runId: string): Response {
   const encoder = new TextEncoder()
   const msgId = `msg_${runId}`
@@ -98,6 +119,7 @@ function streamKilnExecution(runId: string): Response {
     async start(controller) {
       let closed = false
       let started = false
+      const trace: KilnTraceEvent[] = []
 
       function ensureStarted() {
         if (!started) {
@@ -106,35 +128,38 @@ function streamKilnExecution(runId: string): Response {
         }
       }
 
-      function sendDelta(content: string) {
-        if (closed) return
-        ensureStarted()
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: msgId, delta: content })}\n\n`))
-      }
-
-      function finish() {
+      function finishWithAnswer(answer: string) {
         if (closed) return
         closed = true
         ensureStarted()
+        // Trace prefix is invisible to the default rendering — the chat
+        // page strips it off and renders it as a separate disclosure.
+        const tracePrefix =
+          trace.length > 0
+            ? `__KILN_TRACE__${JSON.stringify(trace)}__END__`
+            : ""
+        const payload = tracePrefix + answer
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-delta", id: msgId, delta: payload })}\n\n`))
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text-end", id: msgId })}\n\n`))
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "finish" })}\n\n`))
         controller.enqueue(encoder.encode("data: [DONE]\n\n"))
         controller.close()
       }
 
+      function finishWithError(message: string) {
+        finishWithAnswer(`I hit an error: ${message}`)
+      }
+
       // Connect to Kiln SSE
       const sseRes = await fetch(`${CHAT_BACKEND}/kiln/stream/${runId}`)
       if (!sseRes.ok || !sseRes.body) {
-        sendDelta("Error: Could not connect to execution stream")
-        finish()
+        finishWithError("Could not connect to the execution stream.")
         return
       }
 
       const reader = sseRes.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-
-      sendDelta("🔄 Planning and executing...\n\n")
 
       // Keep-alive: send SSE comment every 30s to prevent proxy/connection timeout
       const keepAlive = setInterval(() => {
@@ -163,35 +188,44 @@ function streamKilnExecution(runId: string): Response {
               switch (ev.type) {
                 case "plan_ready":
                 case "plan_updated": {
-                  const nodes = ev.nodes?.map((n: { role: string }) => n.role).join(" → ") || ""
-                  sendDelta(`**Plan:** ${nodes}\n\n`)
+                  trace.push({
+                    kind: "plan",
+                    nodes: (ev.nodes || []).map(
+                      (n: { id: string; role: string; tools?: string[] }) => ({
+                        id: n.id,
+                        role: n.role,
+                        tools: n.tools || [],
+                      }),
+                    ),
+                  })
                   break
                 }
                 case "synthesis_wait":
-                  sendDelta("Synthesizing missing tools...\n")
+                  trace.push({ kind: "synthesis_wait", tool_ids: ev.tool_ids || [] })
                   break
                 case "tool_ready":
-                  sendDelta(`Tool ready: ${ev.tool_id}\n`)
+                  trace.push({ kind: "tool_ready", tool_id: ev.tool_id })
                   break
                 case "node_start":
-                  sendDelta(`**${ev.node_id}** starting...\n`)
+                  trace.push({ kind: "node_start", node_id: ev.node_id, role: ev.role })
                   break
                 case "tool_call":
-                  sendDelta(`  → Calling \`${ev.tool}\`\n`)
+                  trace.push({ kind: "tool_call", tool: ev.tool, node_id: ev.node_id })
                   break
                 case "tool_result":
-                  sendDelta("  ← Result received\n")
+                  trace.push({ kind: "tool_result", node_id: ev.node_id })
                   break
                 case "node_complete":
-                  sendDelta(`**${ev.node_id}** done\n\n`)
+                  trace.push({ kind: "node_complete", node_id: ev.node_id })
+                  break
+                case "synthesis_timeout":
+                  trace.push({ kind: "synthesis_timeout", missing: ev.missing || [] })
                   break
                 case "flow_complete":
-                  sendDelta(`\n---\n\n${ev.final_answer}`)
-                  finish()
+                  finishWithAnswer(ev.final_answer || "(no answer returned)")
                   return
                 case "error":
-                  sendDelta(`\nError: ${ev.message}`)
-                  finish()
+                  finishWithError(ev.message || "Unknown error")
                   return
               }
             } catch {
@@ -200,10 +234,9 @@ function streamKilnExecution(runId: string): Response {
           }
         }
 
-        if (!closed) finish()
+        if (!closed) finishWithAnswer("(no answer returned)")
       } catch (err) {
-        sendDelta(`\nStream error: ${err}`)
-        finish()
+        finishWithError(String(err))
       } finally {
         clearInterval(keepAlive)
       }

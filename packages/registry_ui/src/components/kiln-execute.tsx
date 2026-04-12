@@ -60,6 +60,73 @@ export function KilnExecute() {
     [scrollToBottom],
   )
 
+  // Process a single SSE event. Defined as a stable callback so handleSubmit
+  // can include it in its dependency list (react-hooks/exhaustive-deps).
+  const processEvent = useCallback(
+    (evt: KilnEvent) => {
+      addEvent(evt)
+
+      switch (evt.type) {
+        case "plan_ready":
+        case "plan_updated": {
+          const p = evt as unknown as DagPlan & { type: string }
+          setPlan(p)
+          const statuses: Record<string, NodeStatus> = {}
+          for (const node of p.nodes || []) {
+            statuses[node.id] = "pending"
+          }
+          setNodeStatuses(statuses)
+          break
+        }
+
+        case "synthesis_wait":
+          setPhase("synthesizing")
+          break
+
+        case "tool_ready":
+          addEvent(evt)
+          break
+
+        case "node_start":
+          setNodeStatuses((prev) => ({
+            ...prev,
+            [evt.node_id as string]: "running",
+          }))
+          break
+
+        case "node_complete":
+          setNodeStatuses((prev) => ({
+            ...prev,
+            [evt.node_id as string]: "complete",
+          }))
+          if (evt.result) {
+            const preview =
+              typeof evt.result === "string"
+                ? evt.result.slice(0, 200)
+                : JSON.stringify(evt.result).slice(0, 200)
+            setNodeResults((prev) => ({
+              ...prev,
+              [evt.node_id as string]: preview,
+            }))
+          }
+          break
+
+        case "flow_complete":
+          setFinalAnswer(evt.final_answer as string)
+          setPhase("complete")
+          break
+
+        case "error":
+          setError(evt.message as string)
+          setPhase("error")
+          break
+      }
+
+      scrollToBottom()
+    },
+    [addEvent, scrollToBottom],
+  )
+
   const handleSubmit = useCallback(async () => {
     const query = input.trim()
     if (!query || phase === "planning" || phase === "executing") return
@@ -162,70 +229,7 @@ export function KilnExecute() {
       setPhase("error")
       addEvent({ type: "error", message: msg })
     }
-  }, [input, phase, getToken, addEvent])
-
-  // Process a single SSE event
-  function processEvent(evt: KilnEvent) {
-    addEvent(evt)
-
-    switch (evt.type) {
-      case "plan_ready":
-      case "plan_updated": {
-        const p = evt as unknown as DagPlan & { type: string }
-        setPlan(p)
-        const statuses: Record<string, NodeStatus> = {}
-        for (const node of p.nodes || []) {
-          statuses[node.id] = "pending"
-        }
-        setNodeStatuses(statuses)
-        break
-      }
-
-      case "synthesis_wait":
-        setPhase("synthesizing")
-        break
-
-      case "tool_ready":
-        addEvent(evt)
-        break
-
-      case "node_start":
-        setNodeStatuses((prev) => ({
-          ...prev,
-          [evt.node_id as string]: "running",
-        }))
-        break
-
-      case "node_complete":
-        setNodeStatuses((prev) => ({
-          ...prev,
-          [evt.node_id as string]: "complete",
-        }))
-        if (evt.result) {
-          const preview =
-            typeof evt.result === "string"
-              ? evt.result.slice(0, 200)
-              : JSON.stringify(evt.result).slice(0, 200)
-          setNodeResults((prev) => ({
-            ...prev,
-            [evt.node_id as string]: preview,
-          }))
-        }
-        break
-
-      case "flow_complete":
-        setFinalAnswer(evt.final_answer as string)
-        setPhase("complete")
-        break
-
-      case "error":
-        setError(evt.message as string)
-        setPhase("error")
-        break
-    }
-
-    scrollToBottom()
-  }
+  }, [input, phase, getToken, addEvent, processEvent])
 
   const isActive = phase === "planning" || phase === "synthesizing" || phase === "executing"
 

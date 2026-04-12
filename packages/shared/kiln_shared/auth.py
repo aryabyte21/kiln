@@ -221,29 +221,38 @@ async def require_auth(request: Request) -> KilnUser:
     """
     FastAPI dependency: authenticate via JWT, API key, or internal secret.
     Raises 401 if none are valid.
+
+    Side effect: stores the resolved ``KilnUser`` on ``request.state.user``
+    so downstream middleware (e.g. ``kiln_shared.rate_limit.kiln_user_key``)
+    can read it without re-running the auth chain.
     """
+    user: KilnUser | None = None
+
     # Try JWT first
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
-        return await _verify_jwt(token)
+        user = await _verify_jwt(token)
+    else:
+        # Fall back to API key
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key:
+            user = await _verify_api_key(api_key)
+        else:
+            # Fall back to internal service secret (for service-to-service calls)
+            internal_secret = request.headers.get("X-Internal-Secret", "")
+            if internal_secret:
+                config = get_config()
+                if config.internal_secret and internal_secret == config.internal_secret:
+                    user = KilnUser(user_id="internal", email="", name="internal-service")
 
-    # Fall back to API key
-    api_key = request.headers.get("X-API-Key", "")
-    if api_key:
-        return await _verify_api_key(api_key)
-
-    # Fall back to internal service secret (for service-to-service calls)
-    internal_secret = request.headers.get("X-Internal-Secret", "")
-    if internal_secret:
-        config = get_config()
-        if config.internal_secret and internal_secret == config.internal_secret:
-            return KilnUser(user_id="internal", email="", name="internal-service")
-
-    raise HTTPException(
-        status_code=401,
-        detail="Authentication required. Provide Authorization: Bearer <jwt> or X-API-Key: <key>",
-    )
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Provide Authorization: Bearer <jwt> or X-API-Key: <key>",
+        )
+    request.state.user = user
+    return user
 
 
 async def require_jwt_auth(request: Request) -> KilnUser:

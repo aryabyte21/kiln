@@ -16,6 +16,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import threading
 import uuid
 from pathlib import Path
@@ -26,11 +27,17 @@ import httpx
 import requests
 import yaml
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from slowapi.errors import RateLimitExceeded
 
 from kiln_shared.auth import KilnUser, require_auth
+from kiln_shared.cors import install_cors
+from kiln_shared.httpx_client import async_client
+from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
+from kiln_shared.request_id import KilnRequestIDMiddleware
 
 from .graph_flow import KilnGraphFlow
 from .planner import KilnPlanner
@@ -55,17 +62,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow requests from local UI dev servers
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.environ.get(
-        "CORS_ORIGINS",
-        "http://localhost:3000,http://localhost:5173,http://localhost:5174",
-    ).split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-    allow_credentials=True,
-)
+# Per-user rate limiting (slowapi). Default 1000/minute per user/IP via
+# `KILN_RATE_LIMIT_DEFAULT`; specific routes can tighten further with
+# `@limiter.limit(...)` decorators.
+limiter = get_limiter()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, kiln_rate_limit_exceeded_handler)
+
+# Per-request correlation ID — must come before CORS so it's set on
+# every response including OPTIONS preflight and SSE streams.
+app.add_middleware(KilnRequestIDMiddleware)
+
+# CORS: strict allowlist + fail-loud in production if CORS_ORIGINS is unset.
+install_cors(app)
 
 @app.on_event("startup")
 def _startup() -> None:
@@ -73,13 +82,128 @@ def _startup() -> None:
     setup_logging()
 
 
-@app.get("/health", summary="Service health")
-def health():
-    return {
-        "status": "ok",
+@app.get("/livez", summary="Liveness — process is up")
+def livez():
+    """Cheap liveness probe. Returns 200 as long as the process is alive.
+
+    Used by orchestrators to decide whether to RESTART the container — must
+    NOT call out to dependencies, otherwise a slow registry would cause us
+    to be killed and restarted.
+    """
+    return {"status": "ok", "service": "kiln-chat-backend"}
+
+
+@app.get("/readyz", summary="Readiness — downstream dependencies reachable")
+async def readyz():
+    """Real readiness probe. Pings the registry_api (and synthesis if set).
+
+    Returns 200 only when the chat backend can actually serve a run. The
+    chat backend cannot plan a graph without the registry's tool list, so
+    REGISTRY_URL being unreachable is a hard failure that returns 503.
+    The synthesis URL is checked but treated as optional — synthesis is
+    only needed when the planner declares missing tools.
+    """
+    checks: dict[str, str] = {}
+    overall = "ok"
+
+    # Registry: hard dependency. Without /tools the planner has nothing to
+    # work with and every run will fail. Use the request-id-aware client so
+    # the readyz hop is correlated with the original request.
+    try:
+        async with async_client(timeout=2.0) as client:
+            resp = await client.get(f"{REGISTRY_URL}/livez")
+            if resp.status_code == 200:
+                checks["registry_api"] = "ok"
+            else:
+                checks["registry_api"] = f"unhealthy: HTTP {resp.status_code}"
+                overall = "degraded"
+    except Exception as exc:
+        checks["registry_api"] = f"unreachable: {exc!s}"
+        overall = "degraded"
+
+    # Synthesis: soft dependency. Note status but don't fail readyz on it.
+    try:
+        async with async_client(timeout=2.0) as client:
+            resp = await client.get(f"{SYNTHESIS_URL}/health")
+            if resp.status_code == 200:
+                checks["synthesis_service"] = "ok"
+            else:
+                checks["synthesis_service"] = f"degraded: HTTP {resp.status_code} (synthesis is optional)"
+    except Exception as exc:
+        checks["synthesis_service"] = f"unreachable: {exc!s} (synthesis is optional)"
+
+    body = {
+        "status": overall,
         "service": "kiln-chat-backend",
         "active_runs": len(_run_queues),
+        "checks": checks,
     }
+    if overall != "ok":
+        return JSONResponse(status_code=503, content=body)
+    return body
+
+
+@app.get("/health", summary="Combined health: live + ready (legacy compat)")
+async def health():
+    """Combined health endpoint kept for backwards compatibility.
+
+    New deployments should use /livez and /readyz. This route runs the
+    readiness checks AND keeps the legacy ``active_runs`` field that
+    existing UI code asserts against.
+    """
+    ready = await readyz()
+    if isinstance(ready, JSONResponse):
+        # Propagate the 503 — body already contains active_runs.
+        return ready
+    return ready
+
+
+# ── Trivial-message fast path ─────────────────────────────────────────────────
+#
+# Routing every chat through Mistral planning + AG2 execution is wasteful and
+# noisy for messages like "hi" or "thanks" — the user sees a multi-step
+# "Plan: GreetingAgent → greeting starting → greeting done" preamble for what
+# should be a one-line response. Detect those messages here, return a canned
+# answer immediately, skip the planner and the multi-agent flow entirely.
+
+_TRIVIAL_RESPONSES: dict[str, str] = {
+    "hi": "Hi! I'm Kiln. Ask me anything — I can plan multi-step tasks across the registered tools, and synthesise new ones if I'm missing something.",
+    "hello": "Hello! I'm Kiln. What would you like to do?",
+    "hey": "Hey! What can I help you with?",
+    "yo": "Hey! What's up?",
+    "sup": "Not much. What do you want to build?",
+    "howdy": "Howdy! What can I do for you?",
+    "thanks": "You're welcome! Anything else?",
+    "thank you": "You're welcome! Anything else?",
+    "ty": "You're welcome!",
+    "ok": "Got it. Anything else?",
+    "okay": "Got it. Anything else?",
+    "k": "Got it.",
+    "got it": "👍",
+    "cool": "Anything else I can help with?",
+    "nice": "Glad it helped. Anything else?",
+    "bye": "See you later!",
+    "goodbye": "See you later!",
+    "cya": "Later!",
+    "test": "Got the test message. Kiln chat backend is up — try asking me to do something real, like 'what is the current date' or 'convert 100 USD to EUR'.",
+    "ping": "pong",
+}
+
+_TRIVIAL_PUNCT = re.compile(r"[!\.\?,\s]+$")
+
+
+def _trivial_response(user_request: str) -> str | None:
+    """Return a canned response if the input is a known trivial message.
+
+    Matches case-insensitively after stripping trailing punctuation/whitespace.
+    Only fires for short inputs (≤30 chars) so a longer message that happens
+    to start with "hi" still goes through the real planner.
+    """
+    text = user_request.strip()
+    if not text or len(text) > 30:
+        return None
+    normalised = _TRIVIAL_PUNCT.sub("", text.lower())
+    return _TRIVIAL_RESPONSES.get(normalised)
 
 
 # ── Kiln run state (thread-safe via lock) ─────────────────────────────────────
@@ -244,10 +368,13 @@ def _research_api(tool_description: str, api_key: str) -> str:
     """
     try:
         from mistralai.client import Mistral
+
         client = Mistral(api_key=api_key)
         resp = client.chat.complete(
             model="mistral-small-latest",
-            messages=[
+            # Mistral SDK accepts dict literals at runtime; they avoid the
+            # confusing multi-namespace message types in mistralai.
+            messages=[  # type: ignore[arg-type]
                 {
                     "role": "system",
                     "content": (
@@ -262,13 +389,24 @@ def _research_api(tool_description: str, api_key: str) -> str:
                         "required env var name. Be concrete and brief — no prose."
                     ),
                 },
-                {
-                    "role": "user",
-                    "content": f"Tool to implement: {tool_description}",
-                },
+                {"role": "user", "content": f"Tool to implement: {tool_description}"},
             ],
         )
-        return resp.choices[0].message.content.strip()
+        # Mistral SDK content can be str | list[ContentChunk] | Unset | None.
+        # Coerce to a single string we can safely .strip().
+        raw = resp.choices[0].message.content
+        if raw is None:
+            return ""
+        if isinstance(raw, str):
+            return raw.strip()
+        if isinstance(raw, list):
+            parts: list[str] = []
+            for chunk in raw:
+                text = getattr(chunk, "text", None)
+                if isinstance(text, str):
+                    parts.append(text)
+            return "".join(parts).strip()
+        return str(raw).strip()
     except Exception as exc:
         logger.error(f"Could not research API: {exc}")
         return ""
@@ -339,16 +477,50 @@ def _synthesize_missing_tools(missing_tools: list, api_key: str = "") -> list[di
     return jobs
 
 
+# ── Request/response schemas ──────────────────────────────────────────────────
+
+class KilnStartRequest(BaseModel):
+    """Body for ``POST /kiln/start``.
+
+    Validated by FastAPI before the handler runs. Anything malformed gets
+    a 422 with a precise field-level error message — much friendlier than
+    the previous ``body.get("request", "")`` defaults that swallowed bad
+    input and produced confusing downstream failures.
+    """
+    request: str = Field(
+        ...,
+        min_length=1,
+        max_length=10_000,
+        description="Natural-language task description",
+    )
+    history: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Last N conversation messages for context",
+    )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-run env vars (e.g. API keys for synthesized tools)",
+    )
+
+
+class KilnExecuteRequest(BaseModel):
+    """Body for ``POST /kiln/execute/{run_id}``."""
+    env_vars: dict[str, str] = Field(default_factory=dict)
+
+
 # ── Kiln Endpoints ────────────────────────────────────────────────────────────
 
 @app.post("/kiln/start", summary="Plan a Kiln run; returns plan + any missing env vars")
-async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
+@limiter.limit(os.environ.get("KILN_RATE_LIMIT_KILN_START", "30/minute"))
+async def kiln_start(
+    request: Request,
+    body: KilnStartRequest,
+    _user: KilnUser = Depends(require_auth),
+):
     """
     Phase 1 of a two-phase start: plan the task graph and check for missing
     environment variables (API keys) required by the planned tools.
-
-    Body:
-        {"request": "...", "env_vars": {"SERPER_API_KEY": "..."}}  # env_vars optional
 
     Returns one of:
         {"status": "needs_config", "run_id": "...", "plan": {...}, "missing_envs": [...]}
@@ -361,19 +533,54 @@ async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
     if not api_key:
         raise HTTPException(status_code=500, detail="MISTRAL_API_KEY not set on server")
 
-    user_request = body.get("request", "").strip()
+    user_request = body.request.strip()
     if not user_request:
-        raise HTTPException(status_code=422, detail="'request' field is required")
+        # min_length=1 catches empty strings, but a string of pure whitespace
+        # would slip through — bounce that here.
+        raise HTTPException(status_code=422, detail="'request' must not be only whitespace")
+
+    # Trivial-message fast path: skip the planner and the multi-agent flow.
+    # Pre-canned response is pushed straight onto the run queue so the SSE
+    # consumer drains it like any other run, but with zero LLM calls and zero
+    # planner ceremony in the UI.
+    canned = _trivial_response(user_request)
+    if canned is not None:
+        run_id = str(uuid.uuid4())
+        synthetic_graph = {
+            "task": user_request,
+            "nodes": [
+                {
+                    "id": "direct",
+                    "role": "Kiln",
+                    "task": user_request,
+                    "tools": [],
+                }
+            ],
+            "edges": [],
+            "entry_nodes": ["direct"],
+            "exit_node": "direct",
+            "missing_tools": [],
+        }
+        q: Queue = Queue()
+        with _run_lock:
+            _run_plans[run_id] = synthetic_graph
+            _run_queues[run_id] = q
+            _run_awaited_tools[run_id] = []
+        q.put({"type": "plan_ready", **synthetic_graph})
+        q.put({"type": "node_start", "node_id": "direct"})
+        q.put({"type": "node_complete", "node_id": "direct", "result": canned})
+        q.put({"type": "flow_complete", "final_answer": canned})
+        return {"status": "started", "run_id": run_id}
 
     # Build conversation context from history (last 10 messages)
-    history: list[str] = body.get("history", []) or []
+    history = body.history
     if history:
         context = "\n".join(history[-10:])
         full_request = f"Conversation so far:\n{context}\n\nCurrent request: {user_request}"
     else:
         full_request = user_request
 
-    provided_env: dict[str, str] = body.get("env_vars", {}) or {}
+    provided_env: dict[str, str] = dict(body.env_vars)
 
     # Fetch user's saved tool env vars from Clerk and merge
     saved_env = await _fetch_user_tool_env_vars(_user.user_id)
@@ -436,7 +643,11 @@ async def kiln_start(body: dict, _user: KilnUser = Depends(require_auth)):
 
 
 @app.post("/kiln/execute/{run_id}", summary="Start execution after supplying missing env vars")
-async def kiln_execute(run_id: str, body: dict, _user: KilnUser = Depends(require_auth)):
+async def kiln_execute(
+    run_id: str,
+    body: KilnExecuteRequest,
+    _user: KilnUser = Depends(require_auth),
+):
     """
     Phase 2 of a two-phase start: supply the missing environment variables
     and begin executing the already-planned task graph.
@@ -454,7 +665,7 @@ async def kiln_execute(run_id: str, body: dict, _user: KilnUser = Depends(requir
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found — call /kiln/start first")
 
     api_key      = os.environ.get("MISTRAL_API_KEY", "").strip()
-    provided_env = body.get("env_vars", {}) or {}
+    provided_env = dict(body.env_vars)
 
     _launch_execution(run_id, graph, provided_env, api_key)
     return {"status": "started", "run_id": run_id}

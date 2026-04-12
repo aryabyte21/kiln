@@ -17,6 +17,19 @@ export interface ToolParam {
   enum?: string[]
 }
 
+export interface ToolExecutionStats {
+  execution_count: number
+  success_count: number
+  error_count: number
+  /** null when execution_count == 0 */
+  success_rate: number | null
+  avg_duration_ms: number
+  /** ISO timestamp, null if never run */
+  last_executed_at: string | null
+  last_status: "never" | "success" | "error"
+  favorite_count: number
+}
+
 export interface Tool {
   id: string
   name: string
@@ -27,6 +40,9 @@ export interface Tool {
   tags: string[]
   params: ToolParam[]
   tool_def: Record<string, unknown>
+  /** Per-tool execution stats added by registry_api iter 40. May be missing
+   *  on older deploys; consumers should treat undefined as zero/never-run. */
+  stats?: ToolExecutionStats
 }
 
 export interface ToolStats {
@@ -63,6 +79,35 @@ export async function searchTools(query: string): Promise<Tool[]> {
 export async function fetchToolVersions(toolId: string): Promise<{ tool_id: string; versions: Array<{ version: string; description: string; author: string }>; count: number }> {
   const res = await fetch(`${REGISTRY_URL}/tools/versions/${toolId}`, { next: { revalidate: 30 } })
   if (!res.ok) throw new Error("Failed to fetch versions")
+  return res.json()
+}
+
+export interface ToolStatsResponse extends ToolExecutionStats {
+  tool_id: string
+}
+
+export async function fetchToolExecutionStats(toolId: string): Promise<ToolStatsResponse> {
+  const res = await fetch(`${REGISTRY_URL}/tools/${toolId}/stats`, { cache: "no-store" })
+  if (!res.ok) throw new Error("Failed to fetch tool stats")
+  return res.json()
+}
+
+export async function toggleToolFavorite(
+  toolId: string,
+  delta: 1 | -1,
+  token?: string,
+): Promise<{ tool_id: string; favorite_count: number }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const res = await fetch(`${REGISTRY_URL}/tools/${toolId}/favorite`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ delta }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Favorite failed" }))
+    throw new Error(err.detail || "Favorite failed")
+  }
   return res.json()
 }
 

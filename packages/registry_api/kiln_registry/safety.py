@@ -120,8 +120,11 @@ def _get_call_name(node: ast.Call) -> str | None:
     if isinstance(node.func, ast.Name):
         return node.func.id
     if isinstance(node.func, ast.Attribute):
-        parts = []
-        current = node.func
+        parts: list[str] = []
+        # `current` walks down the attribute chain. Declare it as the wider
+        # ast.expr so reassigning `current.value` (which is ast.expr) is sound;
+        # the `isinstance` check inside the loop narrows it back to Attribute.
+        current: ast.expr = node.func
         while isinstance(current, ast.Attribute):
             parts.append(current.attr)
             current = current.value

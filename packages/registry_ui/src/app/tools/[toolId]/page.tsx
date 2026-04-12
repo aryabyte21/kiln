@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { ToolDetailTabs } from "@/app/_components/tool-detail-tabs"
+import { ToolStatsPanel } from "./_components/tool-stats-panel"
 
 export default async function ToolDetailPage({
   params,
@@ -114,6 +115,9 @@ export default async function ToolDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Live usage stats panel — clickable favorite, success rate, latency, last run */}
+      <ToolStatsPanel toolId={tool.id} seedStats={tool.stats} />
 
       {/* Version history */}
       {versions.length > 1 && (

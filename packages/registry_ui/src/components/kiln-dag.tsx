@@ -54,11 +54,11 @@ const STATUS_RING: Record<NodeStatus, string> = {
 }
 
 export function KilnDag({ plan, nodeStatuses, nodeResults }: KilnDagProps) {
-  if (!plan) return null
-
-  // Topological layers for visual layout
+  // Topological layers for visual layout. Hook must run unconditionally
+  // (Rules of Hooks), so handle the null/empty case inside the memo and
+  // return null below after all hooks have run.
   const layers = useMemo(() => {
-    if (!plan.nodes.length) return []
+    if (!plan || !plan.nodes.length) return []
 
     const inDegree: Record<string, number> = {}
     const adj: Record<string, string[]> = {}
@@ -90,6 +90,8 @@ export function KilnDag({ plan, nodeStatuses, nodeResults }: KilnDagProps) {
     }
     return result
   }, [plan])
+
+  if (!plan) return null
 
   return (
     <div className="space-y-3">

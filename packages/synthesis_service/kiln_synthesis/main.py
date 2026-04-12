@@ -41,6 +41,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Per-request correlation ID propagation.
+from kiln_shared.request_id import KilnRequestIDMiddleware  # noqa: E402
+
+app.add_middleware(KilnRequestIDMiddleware)
+
 app.include_router(health_router)
 app.include_router(synthesize_router)
 app.include_router(events_router)

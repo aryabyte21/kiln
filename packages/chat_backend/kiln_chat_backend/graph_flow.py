@@ -38,7 +38,9 @@ import os
 from typing import Any
 
 import requests
-from autogen import AssistantAgent, UserProxyAgent, register_function
+# AG2 (autogen) does not ship a py.typed marker, so mypy can't follow it.
+# We can't fix this upstream — silence the import-untyped warning.
+from autogen import AssistantAgent, UserProxyAgent, register_function  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -326,11 +328,35 @@ class KilnGraphFlow:
         tool_ids  = node.get("tools", [])
 
         # ── System message ────────────────────────────────────────────────────
+        # Inject the FULL Kiln registry as a reference list. Even agents with
+        # no assigned tools (SHAPE A meta questions) need this so they answer
+        # accurately about what tools exist instead of fabricating names.
+        registry_summary = self._registry_summary()
         system_msg = (
-            f"You are {role}, a specialised agent in a multi-agent Kiln workflow.\n"
-            f"Your specific task: {node_task}\n"
-            "Use the provided tools to complete your task.\n"
-            "Be concise and factual. Reply TERMINATE when done."
+            f"You are {role}, an agent in the Kiln multi-agent workflow.\n"
+            f"Your specific task: {node_task}\n\n"
+            "Kiln is a self-hosted, self-evolving tool registry for AI agents. "
+            "The registry currently contains these tools "
+            "(id, category, tags, description):\n"
+            f"{registry_summary}\n\n"
+            "Rules for answering questions about Kiln tools:\n"
+            "1. List ONLY tools whose id appears verbatim in the list above. "
+            "Never invent tool names like fetch_webpage or extract_html_structured_data.\n"
+            "2. **Match the user's intent strictly.** A user asking for 'web scraping tools' "
+            "wants tools that fetch arbitrary web pages and parse HTML — NOT a "
+            "domain-specific parser like cricket_data_parser or fed_policy_parser even though "
+            "those technically 'parse text'. Read the description carefully and pick only the "
+            "tools that genuinely fit. Look at the category and tags too — those are stronger "
+            "signals than keyword-matching the description.\n"
+            "3. **If no tools in the registry actually match the user's request, say so "
+            "honestly in one sentence.** Suggest the user describe what they need so "
+            "Kiln can synthesize it. Do NOT pad the answer with tangentially-related tools.\n"
+            "4. When you do list relevant tools, include 1-5 max. Quality over quantity.\n\n"
+            "General rules:\n"
+            "- Use the tools registered with you (if any) to complete your task. Do not "
+            "describe tools you weren't given access to as if you can call them.\n"
+            "- Be concise and factual. Do not fabricate URLs, docs, or product names.\n"
+            "- Reply TERMINATE when done."
         )
 
         # ── Create AG2 agent pair ─────────────────────────────────────────────
@@ -408,18 +434,46 @@ class KilnGraphFlow:
         return msg
 
     def _warm_tool_cache(self, nodes: list[dict]) -> None:
-        """Batch-fetch all tool specs needed by this graph from the Kiln registry."""
-        needed = {tid for node in nodes for tid in node.get("tools", [])}
-        if not needed:
-            return
+        """Fetch the full registry once per run.
+
+        We cache every registered tool (not just the ones referenced by this
+        graph) so that:
+          1. _run_node has the specs for the tools it needs to register with AG2
+          2. The full registry summary can be injected into the system message
+             of every agent — critical for SHAPE A meta questions like
+             "what tools exist?" where the planner picked no tools but the
+             agent still needs to answer accurately about what's available.
+        """
         try:
             resp = requests.get(f"{self._server_url}/tools", timeout=5)
             resp.raise_for_status()
             for tool in resp.json():
-                if tool["id"] in needed:
-                    self._tool_cache[tool["id"]] = tool
+                self._tool_cache[tool["id"]] = tool
         except requests.RequestException as e:
             logger.warning(f"Could not fetch tools from Kiln registry: {e}")
+
+    def _registry_summary(self) -> str:
+        """One-line-per-tool summary of the full Kiln registry.
+
+        Injected into every agent's system message so meta questions like
+        "find tools for web scraping" get answered from the actual registry
+        instead of fabricated tool names. Includes id, category, tags, and
+        description so the agent can match by category/tag rather than just
+        keyword-matching the description.
+        """
+        if not self._tool_cache:
+            return "(registry currently empty)"
+        lines = []
+        for tool in sorted(self._tool_cache.values(), key=lambda t: t.get("id", "")):
+            tid = tool.get("id", "?")
+            desc = (tool.get("description") or "").strip().replace("\n", " ")
+            if len(desc) > 100:
+                desc = desc[:97] + "..."
+            category = tool.get("category") or "general"
+            tags = tool.get("tags") or []
+            tag_str = f" [tags: {', '.join(tags)}]" if tags else ""
+            lines.append(f"  - {tid} ({category}){tag_str}: {desc}")
+        return "\n".join(lines)
 
     def _print_graph(self, task_graph: dict, order: list[str]) -> None:
         """Pretty-print the task graph before execution."""

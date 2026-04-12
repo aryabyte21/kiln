@@ -58,7 +58,8 @@ class CompiledAG2Tool:
             compiled.register(caller=assistant_agent, executor=executor_agent)
         """
         try:
-            from autogen import register_function
+            # AG2 (autogen) does not ship a py.typed marker.
+            from autogen import register_function  # type: ignore[import-untyped]
         except ImportError:
             raise ImportError(
                 "AG2/AutoGen not installed. Run: pip install autogen-agentchat"

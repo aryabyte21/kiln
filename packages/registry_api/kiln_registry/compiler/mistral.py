@@ -67,9 +67,13 @@ class CompiledMistralTool:
         Mistral returns arguments as a JSON string; we handle both
         a pre-parsed dict and a raw JSON string for convenience.
         """
-        if isinstance(arguments, str):
-            arguments = json.loads(arguments)
-        return self.fn(**arguments)
+        # Use a fresh local so mypy can narrow it cleanly to dict.
+        kwargs: dict = json.loads(arguments) if isinstance(arguments, str) else arguments
+        if not isinstance(kwargs, dict):
+            raise TypeError(
+                f"Mistral tool arguments must be a JSON object, got {type(kwargs).__name__}"
+            )
+        return self.fn(**kwargs)
 
 
 class MistralAdapter(BaseAdapter):

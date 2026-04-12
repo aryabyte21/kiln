@@ -19,7 +19,11 @@ function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
   return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
 }
 
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
+// Accept ``asChild`` so vendored AI Elements (which expect the standard
+// shadcn-radix API) type-check. Base UI's Trigger doesn't natively support
+// it, but the prop is silently swallowed — the trigger still renders.
+type TooltipTriggerProps = TooltipPrimitive.Trigger.Props & { asChild?: boolean }
+function TooltipTrigger({ asChild: _asChild, ...props }: TooltipTriggerProps) {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 

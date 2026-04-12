@@ -16,6 +16,9 @@ import {
   Sparkles,
   ArrowRight,
   Flame,
+  PlayCircle,
+  CheckCircle2,
+  Star,
 } from "lucide-react"
 import type { Tool, ToolStats } from "@/lib/registry"
 import { Badge } from "@/components/ui/badge"
@@ -118,11 +121,59 @@ function StatsRow({ stats }: { stats: ToolStats }) {
   )
 }
 
+function formatCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`
+  return String(n)
+}
+
+function relativeTime(iso: string | null): string | null {
+  if (!iso) return null
+  const ts = new Date(iso).getTime()
+  if (Number.isNaN(ts)) return null
+  const diff = Date.now() - ts
+  const m = Math.floor(diff / 60_000)
+  if (m < 1) return "just now"
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 30) return `${d}d ago`
+  return new Date(ts).toLocaleDateString()
+}
+
 function ToolCard({ tool }: { tool: Tool }) {
   const truncatedDescription =
     tool.description.length > 120
       ? tool.description.slice(0, 120).trimEnd() + "..."
       : tool.description
+
+  // Stats default to zero/never when the registry doesn't yet supply them
+  // (older deploys, fresh DB, etc). The UI should never break on missing data.
+  const stats = tool.stats
+  const executionCount = stats?.execution_count ?? 0
+  const successRate = stats?.success_rate ?? null
+  const lastStatus = stats?.last_status ?? "never"
+  const favoriteCount = stats?.favorite_count ?? 0
+  const lastExecuted = relativeTime(stats?.last_executed_at ?? null)
+
+  // Color the success-rate badge so the eye can scan a long catalog quickly.
+  let successBadgeClass = "bg-muted/50 text-muted-foreground"
+  let successLabel = "—"
+  if (successRate !== null) {
+    const pct = Math.round(successRate * 100)
+    successLabel = `${pct}%`
+    if (pct >= 90) successBadgeClass = "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"
+    else if (pct >= 70) successBadgeClass = "bg-amber-500/15 text-amber-300 ring-amber-500/30"
+    else successBadgeClass = "bg-red-500/15 text-red-300 ring-red-500/30"
+  }
+
+  // Last-status dot mirrors GitHub Actions / CI pill style.
+  const statusDotClass =
+    lastStatus === "success"
+      ? "bg-emerald-400 shadow-emerald-500/40"
+      : lastStatus === "error"
+        ? "bg-red-400 shadow-red-500/40"
+        : "bg-muted-foreground/30"
 
   return (
     <Link href={`/tools/${tool.id}`} className="block">
@@ -183,6 +234,50 @@ function ToolCard({ tool }: { tool: Tool }) {
               )}
             </div>
           )}
+
+          {/* Stats row — execution count, success rate, favorites, last status */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span
+              title={`${executionCount} total runs`}
+              className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
+            >
+              <PlayCircle className="size-3 text-muted-foreground/70" />
+              {formatCount(executionCount)}
+            </span>
+            <span
+              title={
+                successRate === null
+                  ? "Never executed"
+                  : `${stats?.success_count ?? 0} of ${executionCount} runs succeeded`
+              }
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ring-1 ${successBadgeClass}`}
+            >
+              <CheckCircle2 className="size-3" />
+              {successLabel}
+            </span>
+            {favoriteCount > 0 && (
+              <span
+                title={`${favoriteCount} favorites`}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300 ring-1 ring-amber-500/25"
+              >
+                <Star className="size-3" />
+                {formatCount(favoriteCount)}
+              </span>
+            )}
+            <span
+              title={
+                lastStatus === "never"
+                  ? "Never executed"
+                  : `Last run: ${lastStatus}${lastExecuted ? ` (${lastExecuted})` : ""}`
+              }
+              className="inline-flex items-center gap-1 rounded-full bg-background/60 px-2 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border/60"
+            >
+              <span
+                className={`size-1.5 rounded-full shadow-sm ${statusDotClass}`}
+              />
+              {lastExecuted ?? "never"}
+            </span>
+          </div>
         </CardContent>
 
         <CardFooter className="mt-auto border-t border-border/60 bg-background/35 px-5 py-3">

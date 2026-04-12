@@ -10,6 +10,7 @@ This module must stay framework-free forever.
 
 from __future__ import annotations
 
+import builtins
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -38,7 +39,9 @@ class ToolParam:
     default: Any = None
     enum: list[str] | None = None   # for string enums
 
-    def python_type(self) -> type:
+    def python_type(self) -> builtins.type:
+        # Use builtins.type because the `type` field above shadows the builtin
+        # inside class scope, which mypy resolves through forward refs.
         return SUPPORTED_TYPES.get(self.type, Any)
 
 
