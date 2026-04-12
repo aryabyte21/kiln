@@ -575,9 +575,11 @@ function KilnChat() {
             const raw = line.slice(6).trim()
             if (!raw || raw === "[DONE]") continue
 
-            const event = JSON.parse(raw) as {
-              type: string
-              [key: string]: unknown
+            let event: { type: string; [key: string]: unknown }
+            try {
+              event = JSON.parse(raw)
+            } catch {
+              continue
             }
 
             switch (event.type) {

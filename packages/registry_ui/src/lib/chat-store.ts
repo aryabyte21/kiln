@@ -63,7 +63,7 @@ function saveStore(store: StoreShape): void {
     const trimmed: StoreShape = {
       ...store,
       conversations: [...store.conversations]
-        .sort((a, b) => b.createdAt - a.createdAt)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, MAX_CONVERSATIONS),
     }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
@@ -119,7 +119,7 @@ export function useChatStore() {
   }, [store, hydrated])
 
   const sortedConversations = [...store.conversations].sort(
-    (a, b) => b.createdAt - a.createdAt,
+    (a, b) => b.updatedAt - a.updatedAt,
   )
 
   const activeConversation =

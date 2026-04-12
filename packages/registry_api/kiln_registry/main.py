@@ -700,12 +700,17 @@ async def execute_tool(
             except httpx.TimeoutException:
                 logger.warning("Tool Executor timed out for %s", tool_id)
 
-        # Fallback: in-process execution (local dev without executor running)
+        # Fallback: in-process execution (local dev without executor running).
+        # Inject env vars via a threading lock to avoid concurrent requests
+        # clobbering each other's os.environ entries.
+        import threading
+        _env_lock = threading.Lock()
         _env_saved: dict[str, str | None] = {}
         if env_vars:
-            for k, v in env_vars.items():
-                _env_saved[k] = os.environ.get(k)
-                os.environ[k] = v
+            with _env_lock:
+                for k, v in env_vars.items():
+                    _env_saved[k] = os.environ.get(k)
+                    os.environ[k] = v
         try:
             try:
                 result = tool.fn(**args)
@@ -721,11 +726,13 @@ async def execute_tool(
                     detail=f"Tool '{tool_id}' raised {type(exc).__name__}: {exc}",
                 ) from exc
         finally:
-            for k, original in _env_saved.items():
-                if original is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = original
+            if env_vars:
+                with _env_lock:
+                    for k, original in _env_saved.items():
+                        if original is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = original
 
         return {"success": True, "tool_id": tool_id, "result": result}
     finally:

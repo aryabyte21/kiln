@@ -13,5 +13,5 @@ export default async function CatalogPage() {
     error = e instanceof Error ? e.message : "Failed to load tools"
   }
 
-  return <CatalogClient tools={tools} stats={stats} error={error} />
+  return <CatalogClient tools={tools} stats={stats} systemStatus={null} error={error} />
 }

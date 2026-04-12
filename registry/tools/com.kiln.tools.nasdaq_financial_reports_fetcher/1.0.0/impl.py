@@ -22,7 +22,7 @@ def nasdaq_financial_reports_fetcher(ticker: str, report_type: str, limit: Optio
             return {"error": f"CIK not found for ticker '{ticker}'. Supported: {', '.join(sorted(TICKER_TO_CIK.keys()))}"}
 
         url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type={report_type}&output=atom"
-        headers = {"User-Agent": "KilnToolRegistry/1.0 (research tool)"}
+        headers = {"User-Agent": "KilnToolRegistry/1.0 (kiln-registry@users.noreply.github.com)"}
 
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
