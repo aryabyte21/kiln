@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -175,3 +176,138 @@ async def test_revoke_token(provider: KilnOAuthProvider) -> None:
 
     await provider.revoke_token(at)
     assert await provider.load_access_token("revoke-me") is None
+
+
+@pytest.mark.asyncio
+async def test_auth_code_deleted_after_exchange(provider: KilnOAuthProvider) -> None:
+    info = _make_client_info()
+    await provider.register_client(info)
+
+    auth_code = KilnAuthorizationCode(
+        code="single-use",
+        scopes=["kiln:tools"],
+        expires_at=time.time() + 600,
+        client_id="test-client",
+        code_challenge="ch",
+        redirect_uri=AnyUrl("http://localhost:3000/callback"),
+        redirect_uri_provided_explicitly=True,
+        user_id="user",
+    )
+    provider._store.save_auth_code("single-use", auth_code.model_dump(mode="json"), ttl=600)
+
+    await provider.exchange_authorization_code(info, auth_code)
+
+    assert provider._store.get_auth_code("single-use") is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_invalidated_after_exchange(provider: KilnOAuthProvider) -> None:
+    info = _make_client_info()
+    await provider.register_client(info)
+
+    auth_code = KilnAuthorizationCode(
+        code="code-inv",
+        scopes=["kiln:tools"],
+        expires_at=time.time() + 600,
+        client_id="test-client",
+        code_challenge="ch",
+        redirect_uri=AnyUrl("http://localhost:3000/callback"),
+        redirect_uri_provided_explicitly=True,
+        user_id="user",
+    )
+    provider._store.save_auth_code("code-inv", auth_code.model_dump(mode="json"), ttl=600)
+    token_resp = await provider.exchange_authorization_code(info, auth_code)
+
+    refresh = await provider.load_refresh_token(info, token_resp.refresh_token)
+    assert refresh is not None
+
+    await provider.exchange_refresh_token(info, refresh, ["kiln:tools"])
+
+    assert await provider.load_refresh_token(info, token_resp.refresh_token) is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_refresh_token(provider: KilnOAuthProvider) -> None:
+    info = _make_client_info()
+    await provider.register_client(info)
+
+    auth_code = KilnAuthorizationCode(
+        code="code-rev",
+        scopes=["kiln:tools"],
+        expires_at=time.time() + 600,
+        client_id="test-client",
+        code_challenge="ch",
+        redirect_uri=AnyUrl("http://localhost:3000/callback"),
+        redirect_uri_provided_explicitly=True,
+        user_id="user",
+    )
+    provider._store.save_auth_code("code-rev", auth_code.model_dump(mode="json"), ttl=600)
+    token_resp = await provider.exchange_authorization_code(info, auth_code)
+
+    refresh = await provider.load_refresh_token(info, token_resp.refresh_token)
+    assert refresh is not None
+
+    await provider.revoke_token(refresh)
+
+    assert await provider.load_refresh_token(info, token_resp.refresh_token) is None
+    assert await provider.load_access_token(token_resp.access_token) is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_access_also_revokes_paired_refresh(provider: KilnOAuthProvider) -> None:
+    info = _make_client_info()
+    await provider.register_client(info)
+
+    auth_code = KilnAuthorizationCode(
+        code="code-pair",
+        scopes=["kiln:tools"],
+        expires_at=time.time() + 600,
+        client_id="test-client",
+        code_challenge="ch",
+        redirect_uri=AnyUrl("http://localhost:3000/callback"),
+        redirect_uri_provided_explicitly=True,
+        user_id="user",
+    )
+    provider._store.save_auth_code("code-pair", auth_code.model_dump(mode="json"), ttl=600)
+    token_resp = await provider.exchange_authorization_code(info, auth_code)
+
+    access = await provider.load_access_token(token_resp.access_token)
+    assert access is not None
+
+    await provider.revoke_token(access)
+
+    assert await provider.load_access_token(token_resp.access_token) is None
+    assert await provider.load_refresh_token(info, token_resp.refresh_token) is None
+
+
+def test_verify_state_accepts_signed_payload() -> None:
+    from base64 import urlsafe_b64encode
+
+    from kiln_mcp.auth.provider import _sign_state, verify_state
+
+    payload = json.dumps({"hello": "world"}).encode()
+    sig = _sign_state(payload)
+    encoded = f"{urlsafe_b64encode(payload).decode().rstrip('=')}.{sig}"
+
+    result = verify_state(encoded)
+    assert result == {"hello": "world"}
+
+
+def test_verify_state_rejects_tampered_payload() -> None:
+    from base64 import urlsafe_b64encode
+
+    from kiln_mcp.auth.provider import _sign_state, verify_state
+
+    payload = json.dumps({"client_id": "victim"}).encode()
+    sig = _sign_state(payload)
+    tampered = json.dumps({"client_id": "attacker"}).encode()
+    encoded = f"{urlsafe_b64encode(tampered).decode().rstrip('=')}.{sig}"
+
+    assert verify_state(encoded) is None
+
+
+def test_verify_state_rejects_malformed_input() -> None:
+    from kiln_mcp.auth.provider import verify_state
+
+    assert verify_state("not-valid-at-all") is None
+    assert verify_state("no.dot.separator.count") is None

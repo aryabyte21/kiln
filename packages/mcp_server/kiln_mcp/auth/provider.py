@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
+import os
 import secrets
 import time
-from base64 import urlsafe_b64encode
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from urllib.parse import urlencode
 
 from mcp.server.auth.provider import (
@@ -22,6 +25,35 @@ logger = logging.getLogger(__name__)
 _ACCESS_TOKEN_TTL = 3600
 _REFRESH_TOKEN_TTL = 2592000
 
+_ephemeral_secret: bytes | None = None
+
+
+def _signing_secret() -> bytes:
+    configured = os.environ.get("KILN_INTERNAL_SECRET", "").strip()
+    if configured:
+        return configured.encode()
+    global _ephemeral_secret  # noqa: PLW0603
+    if _ephemeral_secret is None:
+        _ephemeral_secret = secrets.token_bytes(32)
+    return _ephemeral_secret
+
+
+def _sign_state(payload: bytes) -> str:
+    mac = hmac.new(_signing_secret(), payload, hashlib.sha256).digest()
+    return urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def verify_state(encoded: str) -> dict | None:
+    try:
+        payload_b64, sig_b64 = encoded.split(".", 1)
+        payload_bytes = urlsafe_b64decode(payload_b64 + "==")
+        expected_sig = _sign_state(payload_bytes)
+        if not hmac.compare_digest(expected_sig, sig_b64):
+            return None
+        return json.loads(payload_bytes)
+    except (ValueError, json.JSONDecodeError):
+        return None
+
 
 class KilnAuthorizationCode(AuthorizationCode):
     user_id: str
@@ -29,10 +61,12 @@ class KilnAuthorizationCode(AuthorizationCode):
 
 class KilnAccessToken(AccessToken):
     user_id: str
+    paired_refresh_token: str | None = None
 
 
 class KilnRefreshToken(RefreshToken):
     user_id: str
+    paired_access_token: str | None = None
 
 
 class KilnOAuthProvider:
@@ -66,7 +100,10 @@ class KilnOAuthProvider:
             "client_id": client.client_id,
             "scopes": params.scopes or [],
         }
-        encoded_state = urlsafe_b64encode(json.dumps(state_payload).encode()).decode()
+        payload_bytes = json.dumps(state_payload).encode()
+        payload_b64 = urlsafe_b64encode(payload_bytes).decode().rstrip("=")
+        signature = _sign_state(payload_bytes)
+        encoded_state = f"{payload_b64}.{signature}"
 
         callback_url = f"{self._issuer_url}/oauth/callback"
         return (
@@ -101,12 +138,14 @@ class KilnOAuthProvider:
             scopes=authorization_code.scopes,
             expires_at=now + _ACCESS_TOKEN_TTL,
             user_id=authorization_code.user_id,
+            paired_refresh_token=refresh_token_str,
         )
         refresh_token = KilnRefreshToken(
             token=refresh_token_str,
             client_id=client.client_id,
             scopes=authorization_code.scopes,
             user_id=authorization_code.user_id,
+            paired_access_token=access_token_str,
         )
 
         self._store.save_access_token(
@@ -157,12 +196,14 @@ class KilnOAuthProvider:
             scopes=scopes or refresh_token.scopes,
             expires_at=now + _ACCESS_TOKEN_TTL,
             user_id=refresh_token.user_id,
+            paired_refresh_token=new_refresh,
         )
         new_refresh_token = KilnRefreshToken(
             token=new_refresh,
             client_id=client.client_id,
             scopes=scopes or refresh_token.scopes,
             user_id=refresh_token.user_id,
+            paired_access_token=new_access,
         )
 
         self._store.save_access_token(
@@ -182,5 +223,11 @@ class KilnOAuthProvider:
     async def revoke_token(self, token: KilnAccessToken | KilnRefreshToken) -> None:
         if isinstance(token, KilnAccessToken):
             self._store.delete_access_token(token.token)
+            if token.paired_refresh_token:
+                self._store.delete_refresh_token(token.paired_refresh_token)
         elif isinstance(token, KilnRefreshToken):
             self._store.delete_refresh_token(token.token)
+            if token.paired_access_token:
+                self._store.delete_access_token(token.paired_access_token)
+        else:
+            logger.warning("revoke_token called with unknown type: %s", type(token).__name__)
