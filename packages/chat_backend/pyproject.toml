@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Kiln Chat Backend - planning agent, graph executor, SSE streaming"
 requires-python = ">=3.12"
 dependencies = [
-    "kiln-shared",
+    "kiln-shared[server]>=1.0.0",
     "kiln-registry-api",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",

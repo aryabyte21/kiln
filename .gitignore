@@ -14,8 +14,9 @@ dist/
 # Nx
 .nx/
 
-# uv
-uv.lock
+# uv — the lockfile IS committed (so CI can `uv sync --frozen` for
+# reproducible builds). Only caches/venvs are ignored.
+.venv/
 
 # Database
 *.db
@@ -54,3 +55,4 @@ infra/terraform/.terraform.lock.hcl
 # Tanka vendor (installed via jb install)
 infra/tanka/vendor/
 infra/tanka/jsonnetfile.lock.json
+packages/registry_ui/tsconfig.tsbuildinfo

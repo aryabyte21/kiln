@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { Check, Code, Copy, Loader2, Play } from "lucide-react"
 
-import type { ToolParam } from "@/lib/registry"
+import type { IntegrationSnippet, ToolParam } from "@/lib/registry"
+import { fetchToolIntegrations } from "@/lib/registry"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -650,63 +651,109 @@ function IntegrationTab({
   toolId: string
   toolDef: Record<string, unknown>
 }) {
-  const pythonSnippet = `from kiln import KilnRuntime
+  const [integrations, setIntegrations] = useState<IntegrationSnippet[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [active, setActive] = useState<string>("openai")
 
-runtime = KilnRuntime(api_key="YOUR_API_KEY")
-
-result = runtime.execute(
-    tool_id="${toolId}",
-    args={
-        # Add your parameters here
-    },
-)
-print(result)`
-
-  const curlSnippet = `curl -X POST \\
-  https://registry.kiln.dev/tools/${toolId}/execute \\
-  -H "Content-Type: application/json" \\
-  -H "X-API-Key: YOUR_API_KEY" \\
-  -d '{
-    "args": {
-
+  useEffect(() => {
+    let cancelled = false
+    fetchToolIntegrations(toolId)
+      .then((res) => {
+        if (cancelled) return
+        setIntegrations(res.integrations)
+        setError(null)
+        // Default to OpenAI tools — most familiar to demo audiences.
+        const openai = res.integrations.find((i) => i.target === "openai")
+        if (openai) setActive(openai.target)
+        else if (res.integrations[0]) setActive(res.integrations[0].target)
+      })
+      .catch((e: Error) => {
+        if (cancelled) return
+        setError(e.message || "Failed to load integrations")
+        setIntegrations(null)
+      })
+    return () => {
+      cancelled = true
     }
-  }'`
+  }, [toolId])
 
-  const jsonSchema = JSON.stringify(toolDef, null, 2)
+  if (error) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+        Could not load integration snippets: {error}
+      </div>
+    )
+  }
+
+  if (!integrations) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Loading snippets…
+      </div>
+    )
+  }
+
+  const current = integrations.find((i) => i.target === active) ?? integrations[0]
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
-        <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <Code className="size-4 text-violet-400" />
-          Python
+        <h3 className="mb-2 text-[13px] font-semibold tracking-tight text-foreground">
+          Use this tool from any framework
         </h3>
-        <CodeBlock code={pythonSnippet} language="python" />
+        <p className="max-w-2xl text-[12.5px] leading-relaxed text-muted-foreground/85">
+          Pick a stack — copy the snippet — replace <code className="rounded bg-muted/50 px-1 font-mono text-[11px] text-primary/90">YOUR_KILN_API_KEY</code>.
+          The <code className="rounded bg-muted/50 px-1 font-mono text-[11px] text-primary/90">KilnRuntime</code> path
+          gives you native objects for AG2 / LangChain / Pydantic-AI; the others
+          go straight over HTTP.
+        </p>
       </div>
 
-      <div>
-        <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <Code className="size-4 text-blue-400" />
-          HTTP (curl)
-        </h3>
-        <CodeBlock code={curlSnippet} language="bash" />
+      <div className="flex flex-wrap gap-1.5">
+        {integrations.map((i) => (
+          <button
+            key={i.target}
+            type="button"
+            onClick={() => setActive(i.target)}
+            className={
+              "rounded-full border px-3 py-1 text-[11.5px] font-medium transition-colors " +
+              (i.target === active
+                ? "border-primary/40 bg-primary/12 text-primary"
+                : "border-white/10 bg-white/[0.02] text-muted-foreground hover:border-white/20 hover:text-foreground")
+            }
+          >
+            {i.label}
+          </button>
+        ))}
       </div>
 
-      <div>
-        <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <Code className="size-4 text-amber-400" />
-          Tool Definition (JSON Schema)
-        </h3>
-        <CodeBlock code={jsonSchema} language="json" />
-      </div>
+      {current && (
+        <>
+          {current.install && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/55">
+                Install
+              </div>
+              <CodeBlock code={current.install} language="bash" />
+            </div>
+          )}
+          <div>
+            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/55">
+              {current.label} snippet
+            </div>
+            <CodeBlock code={current.snippet} language={current.language} />
+          </div>
+        </>
+      )}
 
-      <p className="text-xs text-muted-foreground/70">
-        Replace{" "}
-        <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-primary/90">
-          YOUR_API_KEY
-        </code>{" "}
-        with your actual API key. You can generate one in your account settings.
-      </p>
+      <div>
+        <div className="mb-1.5 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/55">
+          <Code className="size-3" />
+          Tool definition (JSON Schema)
+        </div>
+        <CodeBlock code={JSON.stringify(toolDef, null, 2)} language="json" />
+      </div>
     </div>
   )
 }

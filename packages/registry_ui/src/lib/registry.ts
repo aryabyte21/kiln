@@ -87,6 +87,28 @@ export async function fetchToolVersions(toolId: string): Promise<{ tool_id: stri
   return res.json()
 }
 
+export interface IntegrationSnippet {
+  target: string
+  label: string
+  language: string
+  install: string | null
+  snippet: string
+  schema: Record<string, unknown>
+}
+
+export interface IntegrationsResponse {
+  tool_id: string
+  name: string
+  registry_url: string
+  integrations: IntegrationSnippet[]
+}
+
+export async function fetchToolIntegrations(toolId: string): Promise<IntegrationsResponse> {
+  const res = await fetch(`${REGISTRY_URL}/tools/${toolId}/integrations`, { next: { revalidate: 120 } })
+  if (!res.ok) throw new Error("Failed to fetch integrations")
+  return res.json()
+}
+
 export interface ToolStatsResponse extends ToolExecutionStats {
   tool_id: string
 }
