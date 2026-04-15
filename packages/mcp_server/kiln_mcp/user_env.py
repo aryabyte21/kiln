@@ -37,10 +37,10 @@ async def fetch_user_env_vars(user_id: str) -> dict[str, str]:
             )
             resp.raise_for_status()
             user_data = resp.json()
-
-        env_vars = user_data.get("private_metadata", {}).get("tool_env_vars", {})
-        _cache[user_id] = (env_vars, now + _CACHE_TTL)
-        return env_vars
-    except Exception:
-        logger.warning("Failed to fetch tool env vars for user %s", user_id)
+    except (httpx.HTTPError, ValueError) as e:
+        logger.warning("Failed to fetch tool env vars for user %s: %s", user_id, e)
         return {}
+
+    env_vars = user_data.get("private_metadata", {}).get("tool_env_vars", {})
+    _cache[user_id] = (env_vars, now + _CACHE_TTL)
+    return env_vars
