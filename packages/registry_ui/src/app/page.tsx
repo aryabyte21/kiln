@@ -1,31 +1,18 @@
-import { fetchTools, fetchToolStats } from "@/lib/registry"
-import type { Tool, ToolStats } from "@/lib/registry"
-import { getSystemStatus } from "@/lib/system-status"
-import type { SystemStatus } from "@/lib/system-status"
-import { CatalogClient } from "@/app/_components/catalog-client"
+import { fetchTools } from "@/lib/registry"
+import type { Tool } from "@/lib/registry"
+import { LandingClient } from "@/app/_components/landing-client"
 
-export default async function CatalogPage() {
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
+export default async function LandingPage() {
   let tools: Tool[] = []
-  let stats: ToolStats | null = null
-  let systemStatus: SystemStatus | null = null
-  let error: string | null = null
 
   try {
-    ;[tools, stats] = await Promise.all([fetchTools(), fetchToolStats()])
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to load tools"
+    tools = await fetchTools()
+  } catch {
+    /* registry unreachable — render with placeholders so the page still ships */
   }
 
-  systemStatus = await getSystemStatus({
-    next: { revalidate: 15 },
-  }).catch(() => null)
-
-  return (
-    <CatalogClient
-      tools={tools}
-      stats={stats}
-      systemStatus={systemStatus}
-      error={error}
-    />
-  )
+  return <LandingClient tools={tools} toolCount={tools.length} />
 }

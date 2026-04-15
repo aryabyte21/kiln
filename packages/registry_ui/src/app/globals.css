@@ -127,3 +127,14 @@
     @apply text-[11px] font-semibold tracking-[0.16em] uppercase text-muted-foreground;
   }
 }
+
+@keyframes gradientSlide {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

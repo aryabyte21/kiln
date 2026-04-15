@@ -4,39 +4,50 @@ tool:
   id: com.kiln.tools.current_date
   name: current_date
   version: 1.0.0
-  description: Fetch the current date and time in a specified format.
-  author: vibe_tool
+  description: "Return the current date/time in any IANA timezone and strftime (or friendly YYYY-MM-DD) format. Uses the system clock — no network, no API key."
+  author: kiln
 
 interface:
   inputs:
     - name: format
       type: string
-      description: The desired output format for the date (e.g., 'YYYY-MM-DD')
+      description: "strftime format, or friendly tokens YYYY MM DD HH mm ss. Omit for ISO-8601."
       required: false
-      default: null
+    - name: tz
+      type: string
+      description: "IANA timezone name (e.g. 'Asia/Singapore', 'America/New_York'). Defaults to UTC."
+      required: false
+      default: "UTC"
   outputs:
     - name: date
       type: string
-      description: The current date in the specified format.
+      description: Formatted date string.
     - name: timestamp
       type: integer
-      description: The current Unix timestamp.
+      description: Unix timestamp (seconds).
+    - name: iso
+      type: string
+    - name: timezone
+      type: string
+    - name: weekday
+      type: string
+    - name: success
+      type: boolean
 
 implementation:
   runtime: python3.10
   entrypoint: impl.py
-  dependencies:
-    - requests
+  dependencies: []
 
 testing:
   fixtures:
+    - input: {}
+      expected_output_contains: [date, timestamp, iso, success]
     - input:
         format: "YYYY-MM-DD"
-      expected_output_contains:
-        - date
-        - timestamp
+        tz: "Asia/Singapore"
+      expected_output_contains: [date, timezone, success]
 
 metadata:
-  tags: [synthesized]
-  category: general
-  generated_by: vibe_tool
+  tags: [utility, datetime, offline]
+  category: utility

@@ -5,7 +5,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Mistral AI",
       "options": {
-        "baseURL": "https://codestral.mistral.ai/v1",
+        "baseURL": "https://api.mistral.ai/v1",
         "apiKey": "{env:MISTRAL_API_KEY}"
       },
       "models": {

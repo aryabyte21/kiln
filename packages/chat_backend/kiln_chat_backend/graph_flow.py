@@ -33,6 +33,7 @@ Flow (example):
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -72,6 +73,127 @@ def _topo_sort(nodes: list[dict], edges: list[list[str]]) -> list[str]:
     return result
 
 
+# ── Attachment scrubber ──────────────────────────────────────────────────────
+#
+# Tools like image_generate, satellite_image, website_screenshot, and
+# generate_qr return base64 data URLs that can be 1-3 MB each. If those land
+# in the LLM context they (a) blow Mistral's request size and trigger 429s,
+# (b) burn token budget on every subsequent turn. We scrub them out into a
+# side-channel `attachments` map keyed by a stable hash, replace the value
+# with a `<<image:att_xxx>>` marker, and stream the full payload separately
+# via the SSE `attachment` event so the UI can render it client-side.
+
+_DATA_URL_RE = re.compile(r"^data:(image/[\w.+-]+);base64,", re.IGNORECASE)
+_ATTACHMENT_KEYS = {"data_url", "image", "screenshot", "thumbnail", "qr_data_url", "preview"}
+
+
+def _make_attachment_id(data_url: str) -> str:
+    digest = hashlib.sha1(data_url.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    return f"att_{digest}"
+
+
+def _is_data_url(value: Any) -> bool:
+    return isinstance(value, str) and bool(_DATA_URL_RE.match(value))
+
+
+def _scrub_attachments(
+    value: Any,
+    attachments: dict[str, dict],
+    new_attachments: list[dict],
+    *,
+    node_id: str,
+    tool_name: str,
+    parent_meta: dict | None = None,
+) -> Any:
+    """Recursively walk a tool result; replace data URLs with marker strings.
+
+    Mutates `attachments` (the per-run map) and appends new attachment
+    descriptors to `new_attachments` so the caller can emit SSE events for
+    only the *newly* extracted ones.
+    """
+    if _is_data_url(value):
+        att_id = _make_attachment_id(value)
+        if att_id not in attachments:
+            mime_match = _DATA_URL_RE.match(value)
+            mime = mime_match.group(1) if mime_match else "image/png"
+            descriptor = {
+                "id": att_id,
+                "kind": "image",
+                "mime": mime,
+                "data_url": value,
+                "bytes": _approx_bytes_from_data_url(value),
+                "node_id": node_id,
+                "tool": tool_name,
+                "meta": (parent_meta or {}).copy(),
+            }
+            attachments[att_id] = descriptor
+            new_attachments.append(descriptor)
+        return f"<<image:{att_id}>>"
+
+    if isinstance(value, dict):
+        # Capture sibling metadata (prompt, model, seed, file_path, etc.) so
+        # the attachment carries useful context downstream.
+        sibling_meta = {
+            k: v
+            for k, v in value.items()
+            if k in {"prompt", "model", "seed", "file_path", "url", "width", "height", "location", "title"}
+            and not _is_data_url(v)
+            and isinstance(v, (str, int, float, bool))
+        }
+        out: dict[str, Any] = {}
+        produced_attachment = False
+        for k, v in value.items():
+            out[k] = _scrub_attachments(
+                v, attachments, new_attachments,
+                node_id=node_id, tool_name=tool_name,
+                parent_meta=sibling_meta,
+            )
+            if k in _ATTACHMENT_KEYS and isinstance(out[k], str) and out[k].startswith("<<image:"):
+                # Promote the sibling meta onto the descriptor we just created.
+                marker = out[k]
+                att_id = marker[len("<<image:"):-2]
+                if att_id in attachments:
+                    attachments[att_id]["meta"].update(sibling_meta)
+                produced_attachment = True
+
+        # If this dict produced at least one image attachment, strip the
+        # internal plumbing keys before the LLM sees it. The UI gets these
+        # via the attachment descriptor's meta — the LLM doesn't need them
+        # and tends to leak them into the user-facing answer ("File path:
+        # /tmp/...", "Base64 data URL: ..."). Keeping just `success` and
+        # the marker-bearing key keeps the LLM focused on the marker.
+        if produced_attachment:
+            out = {
+                k: v
+                for k, v in out.items()
+                if k in _ATTACHMENT_KEYS
+                or k in {"success", "error", "prompt"}
+                or (isinstance(v, str) and v.startswith("<<image:"))
+            }
+
+        return out
+
+    if isinstance(value, list):
+        return [
+            _scrub_attachments(
+                item, attachments, new_attachments,
+                node_id=node_id, tool_name=tool_name,
+                parent_meta=parent_meta,
+            )
+            for item in value
+        ]
+
+    return value
+
+
+def _approx_bytes_from_data_url(data_url: str) -> int:
+    try:
+        b64 = data_url.split(",", 1)[1]
+        return int(len(b64) * 3 / 4)
+    except Exception:
+        return 0
+
+
 # ── KilnToolBridge ───────────────────────────────────────────────────────────
 
 def _make_http_tool(
@@ -81,6 +203,7 @@ def _make_http_tool(
     node_id: str = "",
     on_event=None,
     env_vars: dict[str, str] | None = None,
+    attachments: dict[str, dict] | None = None,
 ):
     """
     Create an AG2-compatible Python callable that runs a Kiln tool
@@ -148,6 +271,17 @@ def _make_http_tool(
             result = {"error": f"Tool '{name}' HTTP {e.response.status_code}: {detail}"}
         except Exception as e:
             result = {"error": f"Tool '{name}' failed: {e}"}
+        # Scrub heavy binary payloads (data URLs) before they hit the LLM
+        # context. The summarizer node would otherwise receive the full
+        # base64 payload and (a) blow Mistral's request size, (b) bleed
+        # tokens. We replace each data URL with a stable marker that the
+        # frontend re-hydrates via the SSE `attachment` event.
+        if attachments is not None:
+            new_attachments: list[dict] = []
+            result = _scrub_attachments(result, attachments, new_attachments, node_id=node_id, tool_name=name)
+            if on_event:
+                for att in new_attachments:
+                    on_event({"type": "attachment", **att})
         if on_event:
             on_event({"type": "tool_result", "node_id": node_id, "tool": name, "result": result})
         return result
@@ -315,6 +449,7 @@ class KilnGraphFlow:
         self._llm_config = llm_config or {}
         self._tool_cache: dict[str, dict] = {}   # tool_id → spec dict
         self._on_event   = on_event              # callable(event_dict) | None
+        self._attachments: dict[str, dict] = {}  # att_id → attachment descriptor
 
     def _emit(self, event_type: str, **data) -> None:
         if self._on_event:
@@ -469,7 +604,24 @@ class KilnGraphFlow:
             if verbose:
                 logger.info(f"Result → {result[:200]}{'...' if len(result) > 200 else ''}")
 
-        return context.get(exit_node, "(no result)")
+        final = context.get(exit_node, "(no result)")
+
+        # Safety net: if any attachments were produced this run but the final
+        # answer doesn't reference them in any recognised form, append the
+        # markers ourselves so the UI can still render them. The frontend
+        # rewriter normalises every form to the canonical image markdown.
+        if self._attachments:
+            referenced = any(
+                (f"<<image:{aid}>>" in final) or (aid in final)
+                for aid in self._attachments
+            )
+            if not referenced:
+                tail = "\n\n" + "\n\n".join(
+                    f"<<image:{aid}>>" for aid in self._attachments
+                )
+                final = final.rstrip() + tail
+
+        return final
 
     # ── Node execution ─────────────────────────────────────────────────────────
 
@@ -555,6 +707,31 @@ class KilnGraphFlow:
             "failure explicitly. Report what went wrong and suggest a fix (e.g. 'the news "
             "API returned an authentication error — the user may need to provide a valid "
             "NEWS_API_KEY'). Never pretend you have data when the upstream failed.\n"
+            "- Image / file attachments: when a tool result contains a value "
+            "like `<<image:att_xxx>>`, that token IS the image. Rules — read "
+            "carefully, every word matters:\n"
+            "    * Output the token EXACTLY as `<<image:att_xxx>>` — preserve "
+            "the angle brackets, the `image:` prefix, and the `att_` id "
+            "lowercase. Do NOT change capitalisation. Do NOT URL-encode it. "
+            "Do NOT rewrite it as `kiln-att://...`. Do NOT wrap it in "
+            "`![alt](...)` markdown syntax. The token alone is sufficient.\n"
+            "    * Place the token on its own line where you want the image "
+            "to appear. The UI converts it into a real rendered image with "
+            "caption, download button, and zoom — you do not need to add any "
+            "of that yourself.\n"
+            "    * Do NOT mention `data_url`, `file_path`, `base64`, "
+            "`embedding`, the attachment id itself, or how the UI handles it. "
+            "The user sees a polished image, not the plumbing.\n"
+            "    * Do NOT describe what the image looks like — they can see "
+            "it. A short caption like 'Here is the image you asked for:' "
+            "followed by the token on its own line is ideal.\n"
+            "  Correct example:\n"
+            "    Here is the sun you asked for:\n\n"
+            "    <<image:att_abc123>>\n"
+            "  Wrong examples (do NOT do these):\n"
+            "    ![Sun](kiln-att://att_abc123)\n"
+            "    ![[Kiln-att://att_abc123]](att_abc123)\n"
+            "    The base64 data URL has been embedded via the att_abc123 token.\n"
             "- Reply TERMINATE when done."
         )
 
@@ -598,6 +775,7 @@ class KilnGraphFlow:
                 tool_id, spec, self._server_url,
                 node_id=node_id, on_event=self._on_event,
                 env_vars=self._extra_env,
+                attachments=self._attachments,
             )
             register_function(
                 fn,
@@ -643,6 +821,21 @@ class KilnGraphFlow:
 
             upstream = "\n".join(parts)
             msg += f"\n\nContext from upstream agents:\n{upstream}"
+            if "<<image:" in upstream:
+                msg += (
+                    "\n\nThe upstream context contains one or more "
+                    "`<<image:att_...>>` tokens. Each token represents a real "
+                    "image attachment that the UI will render. Output each "
+                    "token EXACTLY as it appears — angle brackets, "
+                    "`image:` prefix, lowercase `att_` id. Place the token "
+                    "on its own line. Do NOT wrap it in markdown image "
+                    "syntax `![](...)`. Do NOT rewrite it as `kiln-att://`. "
+                    "Do NOT invent new ids. Do NOT mention base64, "
+                    "data URLs, file paths, or how the embedding works. "
+                    "Do NOT describe what the image looks like — the user "
+                    "can see it. A short caption then the bare token on "
+                    "its own line is ideal."
+                )
             if has_failures:
                 msg += (
                     "\n\nIMPORTANT: One or more upstream agents FAILED (marked above). "

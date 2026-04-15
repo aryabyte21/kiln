@@ -1,56 +1,52 @@
-import requests
-from datetime import datetime
+"""
+current_date
+------------
+Return the current date and time in a requested format. No network calls —
+uses the system clock, so it works offline and doesn't depend on any API.
+"""
+
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 REQUIRED_ENV_VARS = []
 
-def current_date(**kwargs) -> dict:
-    """Fetch the current date and time in a specified format."""
+
+def current_date(format: str | None = None, tz: str = "UTC") -> dict:
+    """Return the current date/time in the given timezone and format.
+
+    Args:
+        format: strftime-compatible format (default: ISO-8601).
+                Accepts the friendly tokens YYYY, MM, DD, HH, mm, ss as aliases.
+        tz:     IANA timezone name (e.g. 'Asia/Singapore', 'America/New_York').
+    """
     try:
-        # Fetch current time from WorldTimeAPI
-        response = requests.get("http://worldtimeapi.org/api/timezone/Europe/London", timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Extract datetime string and convert to datetime object
-        datetime_str = data.get("datetime")
-        if not datetime_str:
-            return {"error": "Invalid API response: missing datetime field"}
-        
-        dt = datetime.fromisoformat(datetime_str)
-        
-        # Handle format parameter
-        format_str = kwargs.get("format")
-        if format_str:
-            try:
-                formatted_date = dt.strftime(format_str)
-            except ValueError:
-                return {"error": f"Invalid format string: {format_str}"}
-        else:
-            # Default format: ISO 8601
-            formatted_date = dt.isoformat()
-        
-        # Calculate Unix timestamp
-        timestamp = int(dt.timestamp())
-        
-        return {
-            "date": formatted_date,
-            "timestamp": timestamp
-        }
-    except requests.RequestException as e:
-        # Fallback to local time if API fails
-        dt = datetime.now()
-        format_str = kwargs.get("format")
-        if format_str:
-            try:
-                formatted_date = dt.strftime(format_str)
-            except ValueError:
-                return {"error": f"Invalid format string: {format_str}"}
-        else:
-            formatted_date = dt.isoformat()
-        timestamp = int(dt.timestamp())
-        return {
-            "date": formatted_date,
-            "timestamp": timestamp
-        }
-    except Exception as e:
-        return {"error": f"Unexpected error: {str(e)}"}
+        zone = ZoneInfo(tz) if tz and tz != "UTC" else timezone.utc
+    except Exception:
+        return {"success": False, "error": f"Unknown timezone '{tz}'"}
+
+    now = datetime.now(zone)
+
+    if format:
+        friendly = (
+            format.replace("YYYY", "%Y")
+                  .replace("MM", "%m")
+                  .replace("DD", "%d")
+                  .replace("HH", "%H")
+                  .replace("mm", "%M")
+                  .replace("ss", "%S")
+        )
+        try:
+            formatted = now.strftime(friendly)
+        except Exception as exc:
+            return {"success": False, "error": f"Bad format string: {exc}"}
+    else:
+        formatted = now.isoformat()
+
+    return {
+        "date": formatted,
+        "timestamp": int(now.timestamp()),
+        "iso": now.isoformat(),
+        "timezone": tz,
+        "weekday": now.strftime("%A"),
+        "success": True,
+    }

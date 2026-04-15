@@ -2,6 +2,9 @@ import { fetchTools, fetchToolStats } from "@/lib/registry"
 import type { Tool, ToolStats } from "@/lib/registry"
 import { CatalogClient } from "@/app/_components/catalog-client"
 
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
 export default async function CatalogPage() {
   let tools: Tool[] = []
   let stats: ToolStats | null = null

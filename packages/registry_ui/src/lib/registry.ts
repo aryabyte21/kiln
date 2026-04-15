@@ -51,8 +51,14 @@ export interface ToolStats {
   unique_authors: number
 }
 
+// Caching strategy: the catalog list (`fetchTools`) is the user's primary
+// view of what's registered, and we want newly-published tools visible
+// immediately, so it stays uncached. Per-tool detail and aggregate stats
+// change rarely, so we revalidate them on a short window to cut latency
+// and registry load without sacrificing correctness.
+
 export async function fetchTools(): Promise<Tool[]> {
-  const res = await fetch(`${REGISTRY_URL}/tools`, { next: { revalidate: 30 } })
+  const res = await fetch(`${REGISTRY_URL}/tools`, { cache: "no-store" })
   if (!res.ok) throw new Error("Failed to fetch tools")
   return res.json()
 }
@@ -76,7 +82,7 @@ export async function searchTools(query: string): Promise<Tool[]> {
 }
 
 export async function fetchToolVersions(toolId: string): Promise<{ tool_id: string; versions: Array<{ version: string; description: string; author: string }>; count: number }> {
-  const res = await fetch(`${REGISTRY_URL}/tools/versions/${toolId}`, { next: { revalidate: 30 } })
+  const res = await fetch(`${REGISTRY_URL}/tools/versions/${toolId}`, { next: { revalidate: 60 } })
   if (!res.ok) throw new Error("Failed to fetch versions")
   return res.json()
 }
