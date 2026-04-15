@@ -824,7 +824,10 @@ export function ToolDetailTabs({
         </TabsContent>
 
         <TabsContent value="integration">
-          <IntegrationTab toolId={toolId} toolDef={toolDef} />
+          {/* key={toolId} forces a fresh mount when the user navigates to
+              a different tool, so the tab never shows stale snippets or a
+              stale error state during the refetch. */}
+          <IntegrationTab key={toolId} toolId={toolId} toolDef={toolDef} />
         </TabsContent>
       </div>
     </Tabs>
