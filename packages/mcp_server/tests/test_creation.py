@@ -217,7 +217,7 @@ def test_validate_impl_accepts_async_def() -> None:
 
 
 def test_validate_impl_rejects_missing_function() -> None:
-    with pytest.raises(ToolCreationError, match="must define a function named"):
+    with pytest.raises(ToolCreationError, match="must define a top-level function"):
         validate_impl_defines_function("x = 1\ny = 2\n", "sample")
 
 
@@ -229,3 +229,30 @@ def test_validate_impl_rejects_wrong_function_name() -> None:
 def test_validate_impl_rejects_empty_code() -> None:
     with pytest.raises(ToolCreationError, match="must not be empty"):
         validate_impl_defines_function("   ", "sample")
+
+
+def test_validate_impl_rejects_indented_def_of_matching_name() -> None:
+    """A class method with the right name but no top-level function must fail.
+
+    Regression guard: the previous regex allowed `\\s*` before `def`, so
+    class methods would sneak past validation, and the registry would
+    reject the import at test-fixture time after a pointless round-trip.
+    """
+    class_only = (
+        "class Container:\n"
+        "    def sample(self, q: str) -> dict:\n"
+        "        return {}\n"
+    )
+    with pytest.raises(ToolCreationError, match="top-level function"):
+        validate_impl_defines_function(class_only, "sample")
+
+
+def test_validate_impl_accepts_top_level_def_after_imports() -> None:
+    code = (
+        "import json\n"
+        "from typing import Any\n"
+        "\n"
+        "def sample(q: str) -> dict:\n"
+        "    return {}\n"
+    )
+    validate_impl_defines_function(code, "sample")

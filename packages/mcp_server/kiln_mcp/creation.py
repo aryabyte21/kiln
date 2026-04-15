@@ -5,6 +5,7 @@ import os
 import re
 from typing import Any
 
+import httpx
 import yaml
 
 from kiln_shared.httpx_client import async_client
@@ -141,10 +142,11 @@ def build_spec_yaml(
 def validate_impl_defines_function(impl_code: str, function_name: str) -> None:
     if not impl_code.strip():
         raise ToolCreationError("impl_code must not be empty")
-    pattern = re.compile(rf"^\s*(async\s+)?def\s+{re.escape(function_name)}\b", re.MULTILINE)
+    pattern = re.compile(rf"^(async\s+)?def\s+{re.escape(function_name)}\b", re.MULTILINE)
     if not pattern.search(impl_code):
         raise ToolCreationError(
-            f"impl_code must define a function named {function_name!r}"
+            f"impl_code must define a top-level function named {function_name!r} "
+            f"(no leading indentation — class methods don't count)"
         )
 
 
@@ -170,12 +172,22 @@ async def submit_to_registry(
         "impl_file": (entrypoint, impl_code.encode("utf-8"), "text/x-python"),
     }
 
-    async with async_client(timeout=60) as client:
-        resp = await client.post(
-            f"{REGISTRY_URL}/tools/register",
-            files=files,
-            headers=headers,
-        )
+    try:
+        async with async_client(timeout=60) as client:
+            resp = await client.post(
+                f"{REGISTRY_URL}/tools/register",
+                files=files,
+                headers=headers,
+            )
+    except httpx.TimeoutException as exc:
+        raise ToolCreationError(
+            f"registry timed out after 60s while validating the tool "
+            f"(fixtures may be too slow): {exc}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ToolCreationError(
+            f"registry unreachable at {REGISTRY_URL}: {exc}"
+        ) from exc
 
     if resp.status_code >= 400:
         detail: Any
@@ -185,4 +197,10 @@ async def submit_to_registry(
             detail = resp.text
         raise ToolCreationError(f"registry rejected tool: {detail}")
 
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise ToolCreationError(
+            f"registry returned a non-JSON response (status {resp.status_code}): "
+            f"{resp.text[:200]}"
+        ) from exc
