@@ -50,6 +50,11 @@ def build_callback_route(
         if state is None:
             return JSONResponse({"error": "Invalid or tampered state parameter"}, status_code=400)
 
+        # The __session cookie only propagates when the MCP server and Clerk
+        # share a parent domain. Cross-domain deployments need a different
+        # integration (custom sign-in page in registry_ui that forwards the
+        # session token via a POST, or a Clerk backend-API ticket exchange
+        # using the __clerk_ticket query param + CLERK_SECRET_KEY).
         session_token = request.cookies.get("__session")
         if not session_token:
             return JSONResponse(
@@ -106,6 +111,12 @@ async def _resolve_clerk_user(token: str, clerk_domain: str) -> str | None:
             logger.warning("No matching signing key for kid=%s", kid)
             return None
 
+        # Clerk session tokens do not carry a stable `aud` claim -- Clerk
+        # scopes access via `azp` (authorized party) instead. We verify the
+        # issuer (scoping the token to our Clerk instance) and the signing
+        # key (scoping it to Clerk's JWKS), which are the binding claims for
+        # session tokens issued by Clerk. This matches the pattern used in
+        # kiln_shared/auth.py::_verify_jwt.
         payload = jwt.decode(
             token,
             signing_key.key,

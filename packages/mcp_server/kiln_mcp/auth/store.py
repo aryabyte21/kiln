@@ -73,6 +73,6 @@ class InMemoryOAuthStore:
     def cleanup(self) -> None:
         now = time.time()
         for store in (self._auth_codes, self._access_tokens, self._refresh_tokens):
-            expired = [k for k, (_, exp) in store.items() if now > exp]
+            expired = [k for k, (_, exp) in list(store.items()) if now > exp]
             for k in expired:
-                del store[k]
+                store.pop(k, None)

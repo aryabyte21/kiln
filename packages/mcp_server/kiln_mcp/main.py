@@ -206,9 +206,7 @@ def build_http_app() -> Starlette:
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
-        mcp_lifespan_cm = mcp_app.router.lifespan_context(_app)
-        await mcp_lifespan_cm.__aenter__()
-        try:
+        async with mcp_app.router.lifespan_context(_app):
             try:
                 await tool_module.sync_tools(mcp)
                 logger.info(
@@ -232,13 +230,6 @@ def build_http_app() -> Starlette:
                     cleanup_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await cleanup_task
-        except Exception:
-            import sys
-
-            await mcp_lifespan_cm.__aexit__(*sys.exc_info())
-            raise
-        else:
-            await mcp_lifespan_cm.__aexit__(None, None, None)
 
     return Starlette(
         routes=[*extra_routes, Mount("/", app=mcp_app)],
