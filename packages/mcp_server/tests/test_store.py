@@ -19,6 +19,12 @@ def test_get_missing_client_returns_none(store: InMemoryOAuthStore) -> None:
     assert store.get_client("missing") is None
 
 
+def test_delete_client(store: InMemoryOAuthStore) -> None:
+    store.save_client("c1", {"client_id": "c1"})
+    store.delete_client("c1")
+    assert store.get_client("c1") is None
+
+
 def test_store_and_retrieve_auth_code(store: InMemoryOAuthStore) -> None:
     data = {"code": "abc", "client_id": "c1", "user_id": "u1"}
     store.save_auth_code("abc", data, ttl=60)
@@ -80,4 +86,4 @@ def test_cleanup_removes_expired_entries(store: InMemoryOAuthStore) -> None:
     assert store.get_auth_code("exp") is None
     assert store.get_access_token("exp") is None
     assert store.get_refresh_token("exp") is None
-    assert store.get_auth_code("live") is not None
+    assert store.get_auth_code("live") == {"code": "live"}

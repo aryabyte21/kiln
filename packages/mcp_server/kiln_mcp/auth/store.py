@@ -19,6 +19,9 @@ class InMemoryOAuthStore:
     def get_client(self, client_id: str) -> dict[str, Any] | None:
         return self._clients.get(client_id)
 
+    def delete_client(self, client_id: str) -> None:
+        self._clients.pop(client_id, None)
+
     def save_auth_code(self, code: str, data: dict[str, Any], *, ttl: int) -> None:
         self._auth_codes[code] = (data, time.time() + ttl)
 
