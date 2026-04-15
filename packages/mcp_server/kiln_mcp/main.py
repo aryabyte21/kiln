@@ -245,7 +245,10 @@ async def kiln_create_tool(
     declared = list(required_env_vars or [])
     user_id = _current_user_id()
     try:
-        detected = creation.detect_env_var_refs(impl_code)
+        # Parse once and share the AST across every validator — avoids a
+        # second ast.parse() per create call.
+        tree = creation.parse_impl(impl_code)
+        detected = creation.detect_env_var_refs(tree)
         creation.reconcile_env_vars(detected=detected, declared=declared)
         spec_yaml = creation.build_spec_yaml(
             tool_id=tool_id,
@@ -260,7 +263,7 @@ async def kiln_create_tool(
             category=category,
             required_env_vars=declared,
         )
-        creation.validate_impl_defines_function(impl_code, name)
+        creation.validate_impl_defines_function(tree, name)
         result = await creation.submit_to_registry(
             spec_yaml=spec_yaml,
             impl_code=impl_code,

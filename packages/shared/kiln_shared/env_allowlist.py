@@ -13,6 +13,14 @@ from __future__ import annotations
 
 import re
 
+# Policy: this list contains single-service API keys whose blast radius, if
+# leaked by a malicious tool, is bounded to that service (and typically
+# capped/rotatable via the provider's dashboard). Broad-scope session
+# credentials — GitHub PATs, Slack bot tokens, cloud-provider keys — are
+# deliberately excluded: their compromise gives repo-wide / workspace-wide /
+# account-wide access, which is exactly the fishing target the allowlist is
+# meant to prevent. Those integrations should use per-call OAuth flows instead
+# of an env-var injected into sandboxed code.
 PROVIDER_ENV_ALLOWLIST: frozenset[str] = frozenset({
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -26,8 +34,6 @@ PROVIDER_ENV_ALLOWLIST: frozenset[str] = frozenset({
     "SERPAPI_API_KEY",
     "TAVILY_API_KEY",
     "BRAVE_API_KEY",
-    "GITHUB_TOKEN",
-    "SLACK_BOT_TOKEN",
     "NOTION_API_KEY",
     "LINEAR_API_KEY",
     "ELEVENLABS_API_KEY",

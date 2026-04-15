@@ -9,6 +9,8 @@ Covers the three mechanisms added to close the silent-secret-consumption gap:
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 import yaml
 
@@ -17,7 +19,9 @@ from kiln_mcp.creation import (
     ToolCreationError,
     build_spec_yaml,
     detect_env_var_refs,
+    parse_impl,
     reconcile_env_vars,
+    validate_impl_defines_function,
 )
 from kiln_shared.env_allowlist import PROVIDER_ENV_ALLOWLIST
 
@@ -51,11 +55,11 @@ def test_detect_os_getenv() -> None:
 import os
 def run() -> dict:
     a = os.getenv("STRIPE_SECRET_KEY")
-    b = os.getenv("GITHUB_TOKEN", "default")
+    b = os.getenv("NOTION_API_KEY", "default")
     return {"a": a, "b": b}
 """
     scan = detect_env_var_refs(src)
-    assert scan.literals == frozenset({"STRIPE_SECRET_KEY", "GITHUB_TOKEN"})
+    assert scan.literals == frozenset({"STRIPE_SECRET_KEY", "NOTION_API_KEY"})
 
 
 def test_detect_from_os_import_environ_getenv() -> None:
@@ -125,6 +129,43 @@ def run(d: dict) -> dict:
 def test_detect_rejects_syntax_error() -> None:
     with pytest.raises(ToolCreationError, match="syntax error"):
         detect_env_var_refs("def broken(:")
+
+
+def test_detect_handles_import_os_as_alias() -> None:
+    # Gemini review: previously missed `import os as X`. With aliasing fixed,
+    # both the attribute access and the os.getenv call should be picked up.
+    src = """
+import os as my_os
+def run() -> dict:
+    a = my_os.environ["OPENAI_API_KEY"]
+    b = my_os.getenv("ANTHROPIC_API_KEY")
+    return {"a": a, "b": b}
+"""
+    scan = detect_env_var_refs(src)
+    assert scan.literals == frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY"})
+    assert scan.has_dynamic_access is False
+
+
+def test_detect_accepts_prebuilt_ast() -> None:
+    # Callers that already parsed the source should reuse the tree instead of
+    # paying for a second ast.parse().
+    src = """
+import os
+def run() -> dict:
+    return {"k": os.environ["OPENAI_API_KEY"]}
+"""
+    tree = parse_impl(src)
+    assert isinstance(tree, ast.Module)
+    scan = detect_env_var_refs(tree)
+    assert scan.literals == frozenset({"OPENAI_API_KEY"})
+
+
+def test_validate_impl_defines_function_accepts_prebuilt_ast() -> None:
+    src = "def run(x: int) -> dict:\n    return {'x': x}\n"
+    tree = parse_impl(src)
+    validate_impl_defines_function(tree, "run")
+    with pytest.raises(ToolCreationError, match="top-level function"):
+        validate_impl_defines_function(tree, "missing")
 
 
 # ── Reconciliation ─────────────────────────────────────────────────────────────

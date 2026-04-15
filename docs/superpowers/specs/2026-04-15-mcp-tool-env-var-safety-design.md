@@ -111,8 +111,6 @@ PROVIDER_ENV_ALLOWLIST: frozenset[str] = frozenset({
     "SERPAPI_API_KEY",
     "TAVILY_API_KEY",
     "BRAVE_API_KEY",
-    "GITHUB_TOKEN",
-    "SLACK_BOT_TOKEN",
     "NOTION_API_KEY",
     "LINEAR_API_KEY",
 })

@@ -179,75 +179,94 @@ class EnvVarScan:
     dynamic_access_lines: tuple[int, ...]
 
 
-def detect_env_var_refs(impl_code: str) -> EnvVarScan:
-    """Find every `os.environ[...]`, `os.environ.get(...)`, and `os.getenv(...)` reference.
+def parse_impl(impl_code: str) -> ast.Module:
+    """Parse impl source, raising ``ToolCreationError`` on syntax errors.
 
-    Handles both attribute access on `os` and names pulled in via
-    `from os import environ, getenv` (which may be renamed with `as`). The
-    returned `literals` set contains the constant string names; `has_dynamic_access`
-    is True if any lookup uses a non-literal key (e.g. `os.environ[var]`).
-
-    We deliberately don't resolve shadowing or re-assignment — if a tool author
-    does `os = something_else`, the scan may produce false positives. That's
-    acceptable: declared vars are already validated against the allowlist, and
-    false-positive detection just adds a harmless declaration.
+    Exposed so the create-tool flow can parse once and feed the same tree to
+    every validator — avoiding redundant re-parses.
     """
     try:
-        tree = ast.parse(impl_code)
+        return ast.parse(impl_code)
     except SyntaxError as exc:
         raise ToolCreationError(
             f"impl_code has a Python syntax error: {exc.msg} (line {exc.lineno})"
         ) from exc
 
+
+def detect_env_var_refs(impl_code: str | ast.Module) -> EnvVarScan:
+    """Find every `os.environ[...]`, `os.environ.get(...)`, and `os.getenv(...)` reference.
+
+    Tracks three kinds of aliasing in a single ``ast.walk`` pass:
+
+    - ``import os`` / ``import os as my_os`` → names bound to the ``os`` module
+    - ``from os import environ [as X]``      → names bound to ``os.environ``
+    - ``from os import getenv [as X]``       → names bound to ``os.getenv``
+
+    The returned ``literals`` set contains the constant string names read;
+    ``has_dynamic_access`` is True if any lookup uses a non-literal key (e.g.
+    ``os.environ[var]``).
+
+    We deliberately don't resolve shadowing or re-assignment — if a tool author
+    does ``os = something_else``, the scan may produce false positives. That's
+    acceptable: declared vars are already validated against the allowlist, and
+    false-positive detection just adds a harmless declaration.
+
+    Accepts either raw source or a pre-parsed ``ast.Module`` so callers can
+    reuse a single parse across multiple validators.
+    """
+    tree = impl_code if isinstance(impl_code, ast.Module) else parse_impl(impl_code)
+
+    os_aliases: set[str] = {"os"}
     environ_aliases: set[str] = set()
     getenv_aliases: set[str] = set()
+    subscripts: list[ast.Subscript] = []
+    calls: list[ast.Call] = []
+
+    # One walk: collect imports (to build the alias sets) and candidate nodes
+    # (to resolve after the walk completes, against the fully-built sets).
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "os":
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "os":
+                    os_aliases.add(alias.asname or "os")
+        elif isinstance(node, ast.ImportFrom) and node.module == "os":
             for alias in node.names:
                 bound = alias.asname or alias.name
                 if alias.name == "environ":
                     environ_aliases.add(bound)
                 elif alias.name == "getenv":
                     getenv_aliases.add(bound)
+        elif isinstance(node, ast.Subscript):
+            subscripts.append(node)
+        elif isinstance(node, ast.Call):
+            calls.append(node)
 
     literals: set[str] = set()
     dynamic_lines: list[int] = []
 
-    def _record_key(node: ast.AST, lineno: int) -> None:
+    def record(node: ast.AST, lineno: int) -> None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             literals.add(node.value)
         else:
             dynamic_lines.append(lineno)
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Subscript) and _is_environ_ref(node.value, environ_aliases):
-            _record_key(node.slice, node.lineno)
+    for sub in subscripts:
+        if _is_environ_ref(sub.value, os_aliases, environ_aliases):
+            record(sub.slice, sub.lineno)
+
+    for call in calls:
+        if not call.args:
             continue
-        if isinstance(node, ast.Call):
-            func = node.func
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "get"
-                and _is_environ_ref(func.value, environ_aliases)
-                and node.args
-            ):
-                _record_key(node.args[0], node.lineno)
-                continue
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "getenv"
+        func = call.func
+        if isinstance(func, ast.Attribute):
+            if func.attr == "get" and _is_environ_ref(func.value, os_aliases, environ_aliases) or (
+                func.attr == "getenv"
                 and isinstance(func.value, ast.Name)
-                and func.value.id == "os"
-                and node.args
+                and func.value.id in os_aliases
             ):
-                _record_key(node.args[0], node.lineno)
-                continue
-            if (
-                isinstance(func, ast.Name)
-                and func.id in getenv_aliases
-                and node.args
-            ):
-                _record_key(node.args[0], node.lineno)
+                record(call.args[0], call.lineno)
+        elif isinstance(func, ast.Name) and func.id in getenv_aliases:
+            record(call.args[0], call.lineno)
 
     return EnvVarScan(
         literals=frozenset(literals),
@@ -256,10 +275,12 @@ def detect_env_var_refs(impl_code: str) -> EnvVarScan:
     )
 
 
-def _is_environ_ref(node: ast.AST, environ_aliases: set[str]) -> bool:
-    """True if `node` evaluates to `os.environ` (either via attribute or alias)."""
+def _is_environ_ref(
+    node: ast.AST, os_aliases: set[str], environ_aliases: set[str]
+) -> bool:
+    """True if `node` evaluates to `os.environ` via any known alias."""
     if isinstance(node, ast.Attribute) and node.attr == "environ":
-        return isinstance(node.value, ast.Name) and node.value.id == "os"
+        return isinstance(node.value, ast.Name) and node.value.id in os_aliases
     if isinstance(node, ast.Name):
         return node.id in environ_aliases
     return False
@@ -302,15 +323,21 @@ def reconcile_env_vars(
         )
 
 
-def validate_impl_defines_function(impl_code: str, function_name: str) -> None:
-    if not impl_code.strip():
-        raise ToolCreationError("impl_code must not be empty")
-    try:
-        tree = ast.parse(impl_code)
-    except SyntaxError as exc:
-        raise ToolCreationError(
-            f"impl_code has a Python syntax error: {exc.msg} (line {exc.lineno})"
-        ) from exc
+def validate_impl_defines_function(
+    impl_code: str | ast.Module, function_name: str
+) -> None:
+    """Check that `impl_code` has a top-level sync/async def of `function_name`.
+
+    Accepts either raw source or a pre-parsed ``ast.Module``; syntax errors in
+    source form are normalized to ``ToolCreationError``.
+    """
+    if isinstance(impl_code, ast.Module):
+        tree = impl_code
+    else:
+        if not impl_code.strip():
+            raise ToolCreationError("impl_code must not be empty")
+        tree = parse_impl(impl_code)
+
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
             return
