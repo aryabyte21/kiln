@@ -132,14 +132,14 @@ services:
     depends_on:
       - registry_api
 
-  # ── Registry UI (Next.js — port 3000) ───────────────────────────────────────
+  # ── Registry UI (Next.js — port 3001) ───────────────────────────────────────
   registry_ui:
     build:
       context: ./packages/registry_ui
       dockerfile: ../../docker/Dockerfile.nextjs
-    command: npm run dev -- --hostname 0.0.0.0
+    command: npm run dev -- --hostname 0.0.0.0 -p 3001
     ports:
-      - "3000:3000"
+      - "3001:3001"
     volumes:
       - ./packages/registry_ui/src:/app/src
       - ./packages/registry_ui/public:/app/public
@@ -150,6 +150,12 @@ services:
       - REGISTRY_API_INTERNAL=http://registry_api:8766
       - NEXT_PUBLIC_CHAT_BACKEND=http://localhost:8765
       - CHAT_BACKEND_INTERNAL=http://chat_backend:8765
+      - NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:8768
+      - MCP_SERVER_INTERNAL=http://mcp_server:8768
+      - NEXT_PUBLIC_TOOL_EXECUTOR_URL=http://localhost:8767
+      - TOOL_EXECUTOR_INTERNAL=http://tool_executor:8767
+      - NEXT_PUBLIC_SYNTHESIS_SERVICE_URL=http://localhost:8002
+      - SYNTHESIS_SERVICE_INTERNAL=http://synthesis_service:8002
     depends_on:
       - registry_api
       - chat_backend

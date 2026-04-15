@@ -118,7 +118,7 @@ async function streamKilnRun(runId, timeoutMs = 60_000) {
 // ── Test 1: /chat page renders ──────────────────────────────────────────────
 
 const ok1 = await runTest('chat-page-renders', async ({ page, consoleErrors }) => {
-  const response = await page.goto('http://localhost:3000/chat', {
+  const response = await page.goto('http://localhost:3001/chat', {
     waitUntil: 'networkidle2',
     timeout: 30_000,
   })

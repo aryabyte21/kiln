@@ -22,7 +22,7 @@ def test_resolve_origins_defaults_to_localhost_in_dev(
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
     monkeypatch.delenv("KILN_ENV", raising=False)
     origins = resolve_cors_origins()
-    assert "http://localhost:3000" in origins
+    assert "http://localhost:3001" in origins
 
 
 def test_resolve_origins_honors_explicit_env_var(
@@ -76,7 +76,7 @@ def test_install_cors_exposes_request_id_header(
     # Use a real GET with Origin header (not OPTIONS) — the
     # access-control-expose-headers field only appears on actual CORS
     # responses, not preflights.
-    resp = client.get("/ping", headers={"Origin": "http://localhost:3000"})
+    resp = client.get("/ping", headers={"Origin": "http://localhost:3001"})
     assert resp.status_code == 200
     # Starlette normalises header keys to lowercase.
     expose = resp.headers.get("access-control-expose-headers", "").lower()

@@ -49,7 +49,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://localhost:8766",
+        "http://localhost:3001,http://localhost:8766",
     ).split(","),
     allow_methods=["*"],
     allow_headers=["*"],

@@ -14,7 +14,7 @@ export const SCREENSHOT_DIR = join(__dirname, 'screenshots')
 export const SERVICES = {
   registry_api: { url: 'http://localhost:8766/health', name: 'kiln-registry-api' },
   chat_backend: { url: 'http://localhost:8765/health', name: 'kiln-chat-backend' },
-  registry_ui: { url: 'http://localhost:3000', name: 'registry-ui' },
+  registry_ui: { url: 'http://localhost:3001', name: 'registry-ui' },
 }
 
 /**

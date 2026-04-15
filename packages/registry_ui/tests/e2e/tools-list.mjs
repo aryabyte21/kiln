@@ -9,7 +9,7 @@ import { preflightHealthChecks, runTest } from './_lib.mjs'
 await preflightHealthChecks(['registry_ui', 'registry_api'])
 
 const ok = await runTest('tools-list', async ({ page }) => {
-  await page.goto('http://localhost:3000', {
+  await page.goto('http://localhost:3001', {
     waitUntil: 'networkidle2',
     timeout: 30_000,
   })
