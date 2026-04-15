@@ -1,274 +1,191 @@
-# Babel
+# Kiln
 
 **A self-evolving tool registry for AI agents.**
 
-Babel is a local-first platform where AI agents can discover, execute, and — when a tool doesn't exist yet — synthesize new tools on the fly. No MCP servers, no restarts, no manual wiring. Ask for something, and Babel figures out how to do it.
+Kiln is a platform where AI agents discover, execute, and — when a tool doesn't exist yet — synthesize new tools on the fly. Ask for something in natural language, and Kiln figures out how to do it. No restarts, no hand-wired integrations.
 
 ---
 
 ## The Problem
 
-Every AI agent framework (LangChain, AG2, CrewAI, etc.) requires you to pre-define tools before the agent can use them. Need a new tool? Stop the agent, write the code, register it, restart. This creates a bottleneck: agents are only as capable as the tools you've already built.
+Every AI agent framework (LangChain, AG2, CrewAI, Anthropic's MCP) requires you to pre-define tools before an agent can use them. Need a new tool? Stop the agent, write the code, register it, restart. This creates a hard ceiling: agents are only as capable as the tools you've already built.
 
 ## The Solution
 
-Babel removes this bottleneck entirely:
+Kiln removes the ceiling:
 
-1. **You ask** something in natural language via Babel Chat
-2. **ARIA** (the planning agent) decomposes your request into a task graph
-3. If a required tool **doesn't exist**, ARIA triggers **Vibe** (Mistral's coding agent) to synthesize it — spec, implementation, and tests — in seconds
-4. The new tool is **hot-loaded** into the registry. No restart needed.
-5. ARIA continues execution with the freshly created tool
-6. Optionally, **push the tool** to a remote Babel registry for others to use
+1. **You ask** something in natural language via the Kiln chat UI, any MCP client (Claude Desktop, ChatGPT, Cursor, VS Code Copilot), or the registry HTTP API.
+2. **ARIA** (the planning agent) decomposes your request into a directed task graph.
+3. If a required tool **doesn't exist**, ARIA triggers **Vibe** (OpenCode/NIM-backed coding agent) to synthesize it — spec + implementation + tests — in seconds.
+4. The new tool is **hot-loaded** into the registry. No restart.
+5. ARIA continues execution with the freshly created tool.
+6. MCP clients see the new tool appear automatically through polling-driven refresh.
 
 ```
 "What's the weather in Tokyo and convert it to Fahrenheit?"
 
   ARIA: I need weather_lookup (exists) and temp_converter (missing)
-    → Vibe synthesizes temp_converter in ~15 seconds
-    → Tool registered, tested, loaded
-    → ARIA executes the full plan
-    → Answer delivered
+    -> Vibe synthesizes temp_converter in ~15 seconds
+    -> Tool registered, tested, loaded
+    -> ARIA executes the full plan
+    -> Answer delivered
 ```
 
 ---
 
-## System Architecture
+## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        User's Machine                           │
-│                                                                  │
-│  ┌─────────────┐     ┌──────────────────────────────────────┐   │
-│  │  Babel Chat  │────▶│          BabelServer (:8765)         │   │
-│  │  (React UI)  │◀────│                                      │   │
-│  └─────────────┘ SSE │  ┌────────────┐  ┌────────────────┐  │   │
-│                      │  │   ARIA     │  │  Tool Registry │  │   │
-│                      │  │  Planner   │  │   (SQLite +    │  │   │
-│                      │  │  + Graph   │  │    in-memory)  │  │   │
-│                      │  │  Executor  │  │                │  │   │
-│                      │  └─────┬──────┘  └───────▲────────┘  │   │
-│                      │        │                 │            │   │
-│                      │        │ missing tool?   │ register   │   │
-│                      │        ▼                 │            │   │
-│                      │  ┌─────────────────────────────┐     │   │
-│                      │  │     Vibe Callback Handler   │     │   │
-│                      │  └────────────▲────────────────┘     │   │
-│                      └───────────────┼───────────────────────┘   │
-│                                      │                           │
-│                          POST /vibe/callback                     │
-│                          (spec.yaml + impl.py)                   │
-│                                      │                           │
-│  ┌───────────────────────────────────┴───────────────────────┐   │
-│  │              Vibe Tool Service (:8002)                    │   │
-│  │                    (Docker)                               │   │
-│  │                                                           │   │
-│  │   ┌─────────────┐    ┌──────────────────────────────┐    │   │
-│  │   │  Synthesis   │───▶│  Mistral Vibe CLI (devstral) │    │   │
-│  │   │  Pipeline    │◀───│  Generates spec.yaml +       │    │   │
-│  │   │              │    │  impl.py in workspace        │    │   │
-│  │   └─────────────┘    └──────────────────────────────┘    │   │
-│  └───────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ┌───────────────────────────────────────────────────────────┐   │
-│  │  Local Registry (disk)                                    │   │
-│  │  registry/tools/                                          │   │
-│  │    com.aria.tools.weather/1.0.0/spec.yaml + weather.py    │   │
-│  │    com.aria.tools.news/1.0.0/spec.yaml + news.py          │   │
-│  │    com.aria.tools.<synthesized>/1.0.0/spec.yaml + impl.py │   │
-│  └───────────────────────────────────────────────────────────┘   │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-                              │
-                    (optional) push to
-                              ▼
-                 ┌──────────────────────┐
-                 │   Remote Babel       │
-                 │   Registry (hosted)  │
-                 └──────────────────────┘
++------------------------------------------------------------------+
+|                            Clients                               |
+|                                                                  |
+|   Browser (Next.js UI)     Claude Desktop / ChatGPT / Cursor     |
+|         |                              |                         |
+|         | Clerk JWT                    | OAuth 2.1 + PKCE        |
+|         v                              v                         |
+|   +-------------+                +--------------+                |
+|   | chat_backend|                |  mcp_server  |                |
+|   |   :8765     |                |    :8768     |                |
+|   |  Planning   |                |  MCP bridge  |                |
+|   |  (Mistral)  |                |  + Auth AS   |                |
+|   +------+------+                +-------+------+                |
+|          |                               |                       |
+|          |  tool execution (HTTP)        |                       |
+|          v                               v                       |
+|   +--------------------------------------------+                 |
+|   |            registry_api  :8766             |                 |
+|   |   Tool CRUD, search, execute, auth         |                 |
+|   +---------+--------------------------+-------+                 |
+|             |                          |                         |
+|             v                          v                         |
+|   +------------------+      +------------------+                 |
+|   |  tool_executor   |      | synthesis_service|                 |
+|   |      :8767       |      |      :8002       |                 |
+|   |  Sandboxed run   |      |  OpenCode + NIM  |                 |
+|   +------------------+      +--------+---------+                 |
+|                                      | webhook on completion     |
+|                                      v                           |
+|                              registry/tools/ on disk             |
+|                                                                  |
+|   PostgreSQL :5432 . Redis :6379 (cache, rate-limit)             |
++------------------------------------------------------------------+
 ```
 
 ---
 
-## Components
+## Services
 
-### Babel Registry (`babel_registry/`)
-
-The core of the system. A local HTTP service that stores, discovers, and executes tools.
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /tools` | List all tools with LLM-ready JSON schemas |
-| `GET /tools/{id}` | Get a single tool's spec and schema |
-| `POST /tools/register` | Register a new tool (multipart: spec.yaml + impl.py) |
-| `POST /tools/{id}/execute` | Execute a tool with arguments |
-| `POST /tools/{id}/test` | Run a tool's test fixtures |
-| `POST /aria/start` | Submit a request, get a task graph plan |
-| `POST /aria/execute/{run_id}` | Execute a planned task graph |
-| `GET /aria/stream/{run_id}` | SSE stream of execution events |
-| `POST /vibe/synthesize` | Trigger tool synthesis via Vibe |
-| `POST /vibe/callback` | Receive synthesized tool from Vibe |
-
-**Storage**: Tools are persisted as `registry/tools/{tool_id}/1.0.0/spec.yaml + impl.py` on disk, with metadata indexed in SQLite for fast queries.
-
-### ARIA Agent (`aria/`)
-
-The planning and execution brain. ARIA takes a natural language request and:
-
-1. **Plans** — Calls Mistral Large to decompose the request into a directed task graph (nodes = subtasks, edges = dependencies)
-2. **Detects gaps** — Compares required tools against the registry; flags missing ones
-3. **Orchestrates synthesis** — Triggers Vibe to create missing tools, waits for registration
-4. **Executes** — Runs the task graph using AG2 multi-agent framework, with topological ordering for correct dependency resolution
-5. **Streams** — Pushes real-time events (node_start, tool_call, tool_result, node_complete) via SSE
-
-### Vibe Tool Service (`vibe_tool/`)
-
-A FastAPI wrapper around Mistral's Vibe CLI (coding agent). Runs as a Docker container for isolation.
-
-**Synthesis pipeline**:
-1. Receives synthesis request (tool name, description, inputs, outputs)
-2. Prepares a workspace with `CONTEXT.md` (Babel spec format, implementation rules, testing requirements)
-3. Spawns Vibe CLI subprocess in streaming mode
-4. Vibe generates `spec.yaml` + `impl.py`, tests them
-5. Artifacts are validated, then POSTed back to BabelServer via webhook
-6. BabelServer runs fixture tests, saves to disk, and registers the tool
-
-### Babel Chat (`aria-ui/`)
-
-React frontend providing a chat interface for ARIA. Shows:
-- Plan visualization (task graph with nodes and edges)
-- Synthesis progress when new tools are being created
-- Real-time execution tracking via SSE
-- Final results
+| Service | Port | Language | Responsibility |
+|---------|------|----------|----------------|
+| `registry_api` | 8766 | Python | Tool registry: CRUD, search, execution, Clerk auth |
+| `chat_backend` | 8765 | Python | Mistral planner → task DAG → AG2 multi-agent executor → SSE stream |
+| `synthesis_service` | 8002 | Python | Spawns OpenCode + NIM to generate `spec.yaml` + `impl.py`, calls back to registry |
+| `tool_executor` | 8767 | Python | Stub for sandboxed tool execution (gVisor migration planned) |
+| `mcp_server` | 8768 | Python | MCP JSON-RPC bridge + OAuth 2.1/PKCE Authorization Server (Clerk for identity) |
+| `registry_ui` | 3001 | TypeScript | Next.js 16 + React 19 frontend (chat, catalog, publish, settings) |
+| `postgres` | 5432 | — | Tool metadata, user profiles, usage stats |
+| `redis` | 6379 | — | Cache, per-user rate limiting, session state |
 
 ---
 
-## The Babel Tool Format
+## Tool Format
 
-Every tool in Babel follows a simple, framework-agnostic pattern:
+Every tool is a pair of files on disk: `registry/tools/{id}/{version}/spec.yaml` + `{entrypoint}.py`.
 
-**`spec.yaml`** — What the tool does:
+**`spec.yaml`** — what the tool does:
 ```yaml
-babel_version: "1.0"
+kiln_version: "1.0"
 
 tool:
-  id: com.aria.tools.weather
-  name: weather
-  version: 1.0.0
-  description: Get current weather for a city
-  author: vibe_tool
+  id: com.kiln.tools.fetch_url
+  name: fetch_url
+  version: "1.0.0"
+  description: "Fetch any public URL and return plain-text content with HTML stripped."
+  author: aria
 
 interface:
   inputs:
-    - name: city
+    - name: url
       type: string
-      description: City name
+      description: "Full URL to fetch"
       required: true
+    - name: max_chars
+      type: integer
+      required: false
+      default: 3000
   outputs:
-    - name: temperature
-      type: float
-      description: Temperature in Celsius
+    - name: title
+      type: string
+    - name: content
+      type: string
+
+implementation:
+  runtime: python3.10
+  entrypoint: fetch_url.py
+  dependencies:
+    - requests>=2.28.0
+    - beautifulsoup4>=4.12.0
 
 testing:
   fixtures:
     - input:
-        city: "London"
-      expected_output_contains:
-        - temperature
+        url: "https://en.wikipedia.org/wiki/Singapore"
+      expected_output_contains: [title, content]
+
+metadata:
+  tags: [web, scraping]
+  category: research
 ```
 
-**`impl.py`** — How it works:
+**`{entrypoint}.py`** — how it works:
 ```python
-REQUIRED_ENV_VARS = []
+REQUIRED_ENV_VARS = []  # env vars the tool needs to run
 
-def weather(**kwargs) -> dict:
-    city = kwargs.get("city", "London")
-    # ... actual API call ...
-    return {"temperature": 15.2, "condition": "cloudy"}
+def fetch_url(**kwargs) -> dict:
+    url = kwargs["url"]
+    # ... actual implementation ...
+    return {"title": "...", "content": "...", "success": True}
 ```
 
-This pattern is framework-agnostic. Babel includes **compilers** that convert specs into AG2, Mistral, LangChain, or Pydantic AI tool definitions automatically.
+The format is framework-agnostic. Kiln's `compiler/` module translates specs to AG2, Mistral, LangChain, or Pydantic AI tool definitions on the fly, so any tool — hand-written or synthesized — works with any supported framework without modification.
 
 ---
 
-## How It All Connects
+## MCP Support
 
-```
-User: "Analyze the latest arxiv papers on LLMs and email me a summary"
+Kiln exposes every registered tool over the [Model Context Protocol](https://modelcontextprotocol.io/) via `mcp_server` on port 8768. Standard MCP clients connect and use Kiln tools directly.
 
-  1. POST /aria/start
-     → ARIA fetches available tools from registry
-     → Calls Mistral Large with request + tool list
-     → Returns task graph:
-         [arxiv_fetcher] → [topic_analyzer] → [send_email]
-         All tools exist ✓
+- **Auth**: OAuth 2.1 with PKCE. The MCP server is itself the OAuth Authorization Server; Clerk provides user identity via redirect.
+- **Dynamic client registration** (RFC 7591) is enabled — MCP clients register themselves without manual config.
+- **User context**: once authenticated, the user's saved tool env vars (e.g. `NEWS_API_KEY`, `SERPER_API_KEY`) stored in Clerk `private_metadata` are injected into tool execution automatically.
+- **Hot refresh**: newly synthesized tools become available to MCP clients through 30-second polling (and via the `kiln_refresh_tools` utility tool).
+- **Fallback**: if `CLERK_DOMAIN` is unset, the server runs unauthenticated for local dev.
 
-  2. POST /aria/execute/{run_id}
-     → Topological sort: arxiv_fetcher first, then topic_analyzer, then send_email
-     → Each node: spawn AG2 agent, call tool via HTTP, collect result
-     → Stream events to frontend via SSE
-
-  3. GET /aria/stream/{run_id}
-     → node_start: arxiv_fetcher
-     → tool_call: arxiv_fetcher(query="LLMs", max_results=10)
-     → tool_result: [{title: "...", abstract: "..."}]
-     → node_complete: arxiv_fetcher
-     → node_start: topic_analyzer (receives arxiv results as context)
-     → ...
-     → flow_complete: "Here's your summary: ..."
-```
-
-**When a tool is missing:**
-
-```
-User: "Get Bitcoin price and predict next week's trend"
-
-  1. POST /aria/start
-     → Tools needed: crypto_price (exists), price_predictor (MISSING)
-     → Response includes missing_tools: ["price_predictor"]
-
-  2. BabelServer triggers synthesis:
-     → POST to Vibe Tool: synthesize "price_predictor"
-     → Vibe CLI generates spec.yaml + impl.py
-     → Tests pass inside container
-     → POST /vibe/callback with artifacts
-     → BabelServer validates, saves, registers
-
-  3. Tool appears in registry (~15-30 seconds)
-     → ARIA re-plans with full tool set
-     → Execution proceeds normally
-```
+To connect **Claude Desktop** (or any MCP client), point it at `http://localhost:8768/mcp`. The browser will open Clerk's sign-in page, then hand control back to the client.
 
 ---
 
-## Security Model
-
-- **Vibe runs in Docker** — Synthesized code executes in an isolated container, not on the host
-- **Tools are tested before registration** — Fixture tests must pass before a tool enters the registry
-- **Env vars are declared explicitly** — Each tool declares its `REQUIRED_ENV_VARS`; missing vars are flagged before execution
-- **Local-first** — Everything runs on the user's machine. No data leaves unless you explicitly push to a remote registry
-- **API keys stay local** — Keys in `.env` are passed to Docker via environment variables, never embedded in code
-
----
-
-## How to Run Locally in 60 Seconds
+## Quick Start
 
 ### Prerequisites
 
 - Docker & Docker Compose
-- A [Mistral API key](https://console.mistral.ai/)
+- A [Mistral API key](https://console.mistral.ai/) for the planner
+- An [NVIDIA NIM API key](https://build.nvidia.com/) for Vibe synthesis
 - A [Clerk](https://dashboard.clerk.com) project (publishable + secret keys)
 
-For local development without Docker you'll also need Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 20+, and [pnpm](https://pnpm.io/).
+Local development without Docker additionally needs Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 20+, and [pnpm](https://pnpm.io/).
 
 ### 1. Clone and configure
 
 ```bash
-git clone <repo-url> kiln
+git clone git@github.com:aryabyte21/kiln.git
 cd kiln
 cp .env.example .env
-# Edit .env — fill in MISTRAL_API_KEY, CLERK_DOMAIN, CLERK_SECRET_KEY,
-# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, and KILN_INTERNAL_SECRET
+# Fill in .env:
+#   MISTRAL_API_KEY, NVIDIA_API_KEY
+#   CLERK_DOMAIN, CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+#   KILN_INTERNAL_SECRET (generate: python -c "import secrets; print(secrets.token_hex(32))")
 ```
 
 ### 2. Start everything
@@ -277,100 +194,114 @@ cp .env.example .env
 ./dev.sh
 ```
 
-This builds and starts all services via Docker Compose with hot-reload:
-
-| Service | Port | Description |
-|---------|------|-------------|
-| registry_api | 8766 | Tool registry, execution, search |
-| chat_backend | 8765 | Planning (Mistral Large) + DAG execution |
-| synthesis_service | 8002 | Tool synthesis via Mistral Vibe CLI |
-| mcp_server | 8768 | MCP bridge (exposes Kiln tools as MCP tools) |
-| registry_ui | 3000 | Next.js web UI |
-| postgres | 5432 | Database |
-| redis | 6379 | Caching |
+This builds and starts all services via Docker Compose with hot-reload enabled. Container health checks gate startup order so dependents wait for the registry.
 
 ### 3. Use it
 
-Open http://localhost:3000, sign in via Clerk, and start chatting. ARIA will plan, synthesize missing tools, and execute — all automatically.
+- **Web UI**: [http://localhost:3001](http://localhost:3001) — sign in via Clerk, start chatting
+- **Registry API**: [http://localhost:8766](http://localhost:8766) — direct HTTP access
+- **MCP server**: `http://localhost:8768/mcp` — connect from Claude Desktop, ChatGPT, etc.
 
-### Local Development (without Docker)
+---
+
+## Local Development (without Docker)
 
 ```bash
-# Install Python dependencies
+# Install Python deps (uv workspace across all packages)
 uv sync
 
-# Install frontend dependencies
-cd packages/registry_ui && npm install && cd ../..
+# Install frontend deps
+cd packages/registry_ui && pnpm install && cd ../..
 
 # Run services individually (each in its own terminal)
 uv run uvicorn kiln_registry.main:app --host 0.0.0.0 --port 8766 --reload
 uv run uvicorn kiln_chat_backend.main:app --host 0.0.0.0 --port 8765 --reload
-cd packages/registry_ui && npm run dev
+uv run uvicorn kiln_synthesis.main:app --host 0.0.0.0 --port 8002
+uv run python -m kiln_mcp.main streamable-http
+cd packages/registry_ui && pnpm run dev
+```
 
-# Run tests
-uv run pytest                                    # Python (89 tests)
-uv run ruff check packages/                      # Lint
+### Tests & lint
+
+```bash
+uv run pytest                                    # All Python tests
+uv run pytest packages/mcp_server/tests/ -v      # Per-package
+uv run ruff check packages/                      # Lint Python
 uv run mypy packages/                            # Type check
-cd packages/registry_ui && npm run lint           # Frontend lint
-cd packages/registry_ui && npm run build          # Frontend build
+cd packages/registry_ui && pnpm run lint         # Frontend lint (zero warnings)
+cd packages/registry_ui && pnpm run build        # Frontend build
+```
+
+### Monorepo orchestration
+
+```bash
+pnpm nx run <project>:<target>   # Nx-cached tasks across the workspace
 ```
 
 ---
 
-## Project Structure
+## Repository Layout
 
 ```
-babel_project/
-├── babel_registry/          # Core registry + HTTP server
-│   ├── server.py            # FastAPI endpoints (port 8765)
-│   ├── registry.py          # In-memory tool registry
-│   ├── sqlite_registry.py   # SQLite-backed persistence
-│   ├── loader.py            # Load tools from spec.yaml + impl.py
-│   ├── spec.py              # BabelTool spec model
-│   └── compiler/            # Framework adapters (ag2, langchain, etc.)
-├── aria/                    # ARIA planning + execution agent
-│   ├── planner.py           # Task graph generation (Mistral Large)
-│   └── graph_flow.py        # Multi-agent graph executor (AG2)
-├── vibe_tool/               # Vibe CLI wrapper service
-│   ├── Dockerfile           # Container definition
-│   ├── app/
-│   │   ├── main.py          # FastAPI app (port 8002)
-│   │   ├── synthesis/       # Pipeline, runner, prompt builder
-│   │   └── jobs/            # Job tracking + SSE streaming
-│   └── vibe_config.toml     # Vibe CLI configuration
-├── aria-ui/                 # React chat frontend
-│   └── src/App.tsx          # Main UI component
-├── registry/tools/          # Persisted tools (spec.yaml + impl.py)
-├── docker-compose.yml       # Vibe Tool service definition
-├── run_server.py            # BabelServer entry point
+kiln/
+├── packages/
+│   ├── shared/              # kiln_shared — auth, rate-limit, config, CORS, logging
+│   ├── registry_api/        # kiln_registry — tool CRUD, search, execute, Clerk auth
+│   ├── chat_backend/        # kiln_chat_backend — planner, DAG executor, SSE
+│   ├── synthesis_service/   # kiln_synthesis — OpenCode + NIM wrapper
+│   ├── tool_executor/       # kiln_executor — sandboxed execution
+│   ├── mcp_server/          # kiln_mcp — MCP bridge + OAuth 2.1 AS
+│   │   └── kiln_mcp/auth/   # store, provider, Clerk callback
+│   └── registry_ui/         # Next.js 16 / React 19 / Tailwind 4 / Clerk
+├── registry/
+│   └── tools/               # All registered tools (spec.yaml + impl.py per version)
+├── docs/
+│   └── superpowers/
+│       ├── specs/           # Design specs for major features
+│       └── plans/           # Implementation plans
+├── infra/
+│   └── terraform/           # GCP infrastructure (GKE + Cloud SQL)
+├── docker-compose.yml       # Dev stack definition
+├── docker/                  # Service Dockerfiles
+├── dev.sh                   # Convenience launcher
+├── pyproject.toml           # uv workspace root
+├── package.json             # pnpm root + Nx config
 └── .env                     # API keys (git-ignored)
 ```
 
 ---
 
-## Local vs Remote Registry
+## Tech Stack
 
-| | Local Registry | Remote Registry |
-|---|---|---|
-| **Where** | `registry/tools/` on your machine | Hosted Babel service |
-| **Who** | Just you | Shared across users |
-| **Tools** | Hand-written + synthesized | Curated, versioned |
-| **Push** | Automatic on synthesis | Opt-in per tool |
-| **Pull** | N/A | On-demand download |
-
-When Vibe synthesizes a new tool, it lives in your local registry by default. If it's useful, you can push it to the remote Babel registry for others to discover and use.
+| Layer | Stack |
+|-------|-------|
+| Backend | Python 3.12+, FastAPI, SQLAlchemy 2.0, asyncpg/aiosqlite, Alembic-ready |
+| Multi-agent | PyAutoGen (AG2) |
+| LLM | Mistral Large (planning), Mistral Codestral / NVIDIA NIM (synthesis) |
+| Auth | Clerk (JWT for browser, API keys for CLI, OAuth 2.1 for MCP clients) |
+| Frontend | Next.js 16, React 19, TypeScript 5.9, Tailwind 4, shadcn/ui, TanStack Query, Vercel AI SDK |
+| MCP | Anthropic MCP SDK 1.26+, streamable HTTP transport |
+| Infra (local) | Docker Compose, PostgreSQL 17, Redis 7 |
+| Infra (cloud) | Terraform, GKE Autopilot, Cloud SQL, Artifact Registry, GitHub Actions CI/CD |
+| Tooling | uv (Python), pnpm + Nx (monorepo), ruff, mypy, ESLint |
 
 ---
 
-## Framework Support
+## Security Model
 
-Babel tools are framework-agnostic by design. The `compiler/` module converts Babel specs to:
+- **Synthesized code runs in a constrained subprocess** — dangerous imports and built-ins (shell execution, unsafe deserializers, direct socket access, GUI automation, etc.) are rejected at registration and execution time via AST validation.
+- **Per-tool env vars declared explicitly** — each tool's `REQUIRED_ENV_VARS` list is surfaced to the user; keys are stored encrypted in Clerk `private_metadata` and injected at execution time.
+- **OAuth 2.1 + PKCE** for MCP clients — HMAC-signed state, single-use auth codes, paired access/refresh token revocation, client-bound token lookups.
+- **Service-to-service auth** via `X-Internal-Secret` header for inter-service calls inside the Docker network.
+- **Rate limiting** per user/IP via slowapi + Redis.
+- **CORS** strictly allowlisted by `KILN_ENV` — production refuses to start without an explicit `CORS_ORIGINS`.
 
-| Framework | Compiler | Output |
-|-----------|----------|--------|
-| AG2 (AutoGen) | `ag2.py` | Function tool with schema |
-| Mistral | `mistral.py` | Mistral tool format |
-| LangChain | `langchain.py` | `@tool` decorated function |
-| Pydantic AI | `pydantic_ai.py` | Pydantic tool model |
+---
 
-This means any tool in the registry — whether hand-written or synthesized — works with any supported framework without modification.
+## Project Status
+
+Kiln is a **CS5224 Cloud Computing** project at NUS (AY2025/26 Semester 2). The architecture targets deployment on GCP: GKE Autopilot for compute, Cloud SQL for persistence, Artifact Registry for images, with CI/CD via GitHub Actions. See `docs/` for design specs and implementation plans.
+
+## License
+
+TBD.
