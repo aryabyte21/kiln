@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { ClerkProvider, Show, UserButton, SignInButton } from "@clerk/nextjs"
 import { dark } from "@clerk/themes"
-import { Geist, Geist_Mono } from "next/font/google"
+import { Figtree, Geist_Mono } from "next/font/google"
 import Link from "next/link"
 import { Flame } from "lucide-react"
 
@@ -10,7 +10,12 @@ import { Providers } from "@/app/_components/providers"
 import { Button } from "@/components/ui/button"
 import "./globals.css"
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
+const figtree = Figtree({
+  variable: "--font-figtree",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  display: "swap",
+})
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] })
 
 export const metadata: Metadata = {
@@ -29,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full bg-background antialiased`}
+      className={`${figtree.variable} ${geistMono.variable} dark h-full bg-background antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full bg-background text-foreground">

@@ -12,8 +12,9 @@ import contextlib
 import json
 import logging
 import os
+from typing import Any
 
-from mcp.server.auth.provider import ProviderTokenVerifier
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
@@ -24,6 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from kiln_mcp import creation
 from kiln_mcp import tools as tool_module
 from kiln_mcp.auth.clerk_callback import build_callback_route
 from kiln_mcp.auth.provider import KilnOAuthProvider
@@ -51,10 +53,12 @@ _auth_enabled = bool(CLERK_DOMAIN)
 def _build_mcp() -> FastMCP:
     common_kwargs = dict(
         instructions=(
-            "Kiln is a self-evolving tool registry for AI agents. "
-            "All tools are dynamically loaded from the Kiln registry. "
-            "When you need a tool that doesn't exist, describe what you need "
-            "and it may be synthesized automatically."
+            "Kiln is a self-evolving tool registry. Before creating anything "
+            "new, call `kiln_route_intent` (best match) or `kiln_search_tools` "
+            "(ranked list) to see if an existing tool already covers the task. "
+            "If no tool matches, use `kiln_create_tool` to publish one — you "
+            "write the Python yourself and this server registers, validates, "
+            "and sandboxes it."
         ),
         stateless_http=True,
         json_response=True,
@@ -64,7 +68,6 @@ def _build_mcp() -> FastMCP:
             "Kiln",
             **common_kwargs,
             auth_server_provider=_oauth_provider,
-            token_verifier=ProviderTokenVerifier(_oauth_provider),
             auth=AuthSettings(
                 issuer_url=AnyHttpUrl(ISSUER_URL),
                 resource_server_url=None,
@@ -84,50 +87,185 @@ def _build_mcp() -> FastMCP:
 mcp = _build_mcp()
 
 
+def _current_user_id() -> str | None:
+    token = get_access_token()
+    if token is None:
+        return None
+    return getattr(token, "user_id", None)
+
+
 @mcp.tool()
-async def kiln_search_tools(query: str, ctx: Context[ServerSession, None]) -> str:
-    """Search the Kiln tool registry by keyword. Returns matching tools."""
-    await ctx.info(f"Searching for: {query}")
+async def kiln_search_tools(
+    query: str,
+    ctx: Context[ServerSession, None],
+    limit: int = 8,
+) -> str:
+    """Find tools in the Kiln registry that match a natural-language query.
+
+    Ranks the whole registry by semantic similarity (BM25 over tool names,
+    descriptions, tags, and ids) so paraphrases work — "ycombinator news"
+    finds hackernews_top, "latest bitcoin price" finds crypto_price. Prefer
+    this over kiln_route_intent when the caller wants to browse several
+    candidates; use kiln_route_intent when a single best match is needed.
+    """
+    await ctx.info(f"Semantic search: {query}")
+    limit = max(1, min(limit, 25))
     try:
         async with async_client(timeout=10) as client:
-            resp = await client.get(f"{REGISTRY_URL}/tools/search", params={"q": query})
+            resp = await client.get(
+                f"{REGISTRY_URL}/tools/search",
+                params={"q": query, "mode": "semantic", "limit": limit},
+            )
             resp.raise_for_status()
             results = resp.json()
-            if not results:
-                return "No tools found matching your query."
-            return "\n".join(
-                f"- **{t['name']}** (`{t['id']}`): {t['description']}" for t in results
+    except Exception as exc:
+        return json.dumps({"error": f"Search failed: {exc}"})
+
+    if not results:
+        return json.dumps({"query": query, "matches": []})
+
+    matches = [
+        {
+            "id": t["id"],
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "confidence": t.get("confidence"),
+            "score": t.get("score"),
+        }
+        for t in results
+    ]
+    return json.dumps({"query": query, "matches": matches}, indent=2)
+
+
+@mcp.tool()
+async def kiln_route_intent(
+    intent: str,
+    ctx: Context[ServerSession, None],
+    min_confidence: float = 0.0,
+) -> str:
+    """Route a natural-language intent to the single best Kiln tool.
+
+    Use before creating a new tool: ask "which tool solves X?" first, and
+    synthesize only if the top match's confidence is too low. `min_confidence`
+    (0..1) is a hard gate — set it to 0.82 or higher to suppress weak matches
+    and fall through to tool creation.
+    """
+    await ctx.info(f"Routing intent: {intent}")
+    try:
+        async with async_client(timeout=10) as client:
+            resp = await client.post(
+                f"{REGISTRY_URL}/tools/route",
+                json={"intent": intent, "min_confidence": min_confidence, "limit": 3},
             )
-    except Exception as e:
-        return f"Search failed: {e}"
+            resp.raise_for_status()
+            return json.dumps(resp.json(), indent=2)
+    except Exception as exc:
+        return json.dumps({"error": f"Routing failed: {exc}"})
 
 
 @mcp.tool()
 async def kiln_refresh_tools(ctx: Context[ServerSession, None]) -> str:
-    """Refresh the tool catalog from the Kiln registry."""
+    """Pull the latest tool catalog from the Kiln registry.
+
+    Idempotent. New tools are registered; tools removed upstream are
+    unregistered locally so stale handlers don't leak into the client's
+    tool list.
+    """
     await ctx.info("Refreshing tools from registry...")
-    added = await tool_module.sync_tools(mcp)
-    if added > 0:
-        try:
+    added, removed = await tool_module.sync_tools(mcp)
+    if added or removed:
+        with contextlib.suppress(Exception):
             await ctx.session.send_tool_list_changed()
-            await ctx.info(f"Added {added} new tools and notified client")
-        except Exception:
-            await ctx.info(f"Added {added} new tools (notification not supported by client)")
     total = tool_module.get_registered_tool_count()
-    return f"Refreshed. {added} new tools added. Total: {total} tools available."
+    return json.dumps({"added": added, "removed": removed, "total": total})
 
 
 @mcp.tool()
 async def kiln_registry_stats(ctx: Context[ServerSession, None]) -> str:
-    """Get statistics about the Kiln tool registry."""
+    """Return registry-wide statistics (total tools, categories, tags, authors)."""
     await ctx.info("Fetching registry stats")
     try:
         async with async_client(timeout=10) as client:
             resp = await client.get(f"{REGISTRY_URL}/tools/stats")
             resp.raise_for_status()
             return json.dumps(resp.json(), indent=2)
-    except Exception as e:
-        return f"Failed to fetch stats: {e}"
+    except Exception as exc:
+        return json.dumps({"error": f"Failed to fetch stats: {exc}"})
+
+
+@mcp.tool()
+async def kiln_create_tool(
+    tool_id: str,
+    name: str,
+    description: str,
+    params: list[dict[str, Any]],
+    impl_code: str,
+    ctx: Context[ServerSession, None],
+    returns: dict[str, Any] | None = None,
+    dependencies: list[str] | None = None,
+    tags: list[str] | None = None,
+    category: str = "general",
+    version: str = "1.0.0",
+    author: str = "mcp_client",
+) -> str:
+    """Publish a new tool to the Kiln registry from code you (the MCP client) write.
+
+    Kiln deliberately does not invoke an LLM here — you generate the spec
+    and the Python implementation yourself, and this call registers it.
+    The server validates the spec schema, runs any declared test fixtures,
+    rejects blocked imports, and makes the tool callable from every agent
+    framework immediately on success.
+
+    Arguments:
+        tool_id:      dotted identifier, e.g. "com.kiln.tools.my_weather".
+        name:         Python identifier; becomes the function name and the
+                      entrypoint filename.
+        description:  one-sentence explanation shown to the LLM to help it
+                      decide when to call this tool.
+        params:       list of {name, type, description, required, default?, enum?}.
+                      `type` is one of str/int/float/bool/list/dict/any.
+        impl_code:    full Python source. Must define a function matching
+                      `name` (sync or async). Blocked imports are rejected
+                      server-side.
+        returns:      optional {type, description} for the output.
+        dependencies: pip specs, e.g. ["requests>=2.28"]. Installed in a
+                      sandbox at execution time; keep the set small.
+        tags:         free-form labels for catalog grouping.
+        category:     broad bucket like "data", "media", "productivity".
+    """
+    await ctx.info(f"Creating tool {tool_id}")
+    try:
+        spec_yaml = creation.build_spec_yaml(
+            tool_id=tool_id,
+            name=name,
+            description=description,
+            params=params,
+            returns=returns,
+            dependencies=dependencies,
+            version=version,
+            author=author,
+            tags=tags,
+            category=category,
+        )
+        creation.validate_impl_defines_function(impl_code, name)
+        result = await creation.submit_to_registry(
+            spec_yaml=spec_yaml,
+            impl_code=impl_code,
+            entrypoint=f"{name}.py",
+            user_id=_current_user_id(),
+        )
+    except creation.ToolCreationError as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    except Exception as exc:
+        logger.exception("kiln_create_tool failed")
+        return json.dumps({"success": False, "error": f"unexpected: {exc}"})
+
+    added, removed = await tool_module.sync_tools(mcp)
+    with contextlib.suppress(Exception):
+        await ctx.session.send_tool_list_changed()
+
+    result["mcp_catalog"] = {"added": added, "removed": removed}
+    return json.dumps(result, indent=2)
 
 
 async def _livez(_request: Request) -> JSONResponse:
@@ -169,12 +307,12 @@ async def _poll_registry() -> None:
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         try:
-            added = await asyncio.wait_for(
+            added, removed = await asyncio.wait_for(
                 tool_module.sync_tools(mcp),
                 timeout=POLL_INTERVAL * 0.8,
             )
-            if added > 0:
-                logger.info("Added %d new tools from registry", added)
+            if added or removed:
+                logger.info("Registry poll: +%d / -%d tools", added, removed)
         except TimeoutError:
             logger.error("Registry poll timed out")
         except Exception as e:
