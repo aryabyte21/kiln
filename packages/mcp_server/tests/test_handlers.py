@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 
-from kiln_mcp.main import _build_mcp_tool_schema, _make_tool_handler
+import pytest
+
+from kiln_mcp import tools as tool_module
+from kiln_mcp.tools import _build_mcp_tool_schema, _make_tool_handler
 
 # ── _build_mcp_tool_schema ───────────────────────────────────────────────────
 
@@ -146,3 +149,205 @@ def test_make_tool_handler_signature_matches_params() -> None:
 
     assert list(sig.parameters.keys()) == ["amount", "from_currency", "to_currency"]
     assert sig.parameters["to_currency"].default == "USD"
+
+
+# ── sync_tools: stale tracking and name collisions ──────────────────────────
+
+
+class _FakeMCP:
+    """Minimal stand-in for FastMCP.tool() -- records registrations."""
+
+    def __init__(self) -> None:
+        self.registered: list[tuple[str, str]] = []
+
+    def tool(self, name: str, description: str = ""):
+        def decorator(fn):
+            self.registered.append((name, description))
+            return fn
+        return decorator
+
+
+@pytest.fixture(autouse=True)
+def reset_tool_state() -> None:
+    tool_module._registered_tools.clear()
+    tool_module._registered_names.clear()
+    tool_module._stale_tool_ids.clear()
+
+
+@pytest.mark.asyncio
+async def test_sync_tools_adds_new_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_fetch() -> list[dict]:
+        return [{"id": "com.a", "name": "a", "description": "", "params": []}]
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch)
+
+    mcp = _FakeMCP()
+    added = await tool_module.sync_tools(mcp)
+
+    assert added == 1
+    assert ("a", "") in mcp.registered
+
+
+@pytest.mark.asyncio
+async def test_sync_tools_rejects_name_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools_v1 = [{"id": "com.a.v1", "name": "shared", "description": "", "params": []}]
+    tools_v2 = [{"id": "com.a.v2", "name": "shared", "description": "", "params": []}]
+
+    async def _fake_fetch_v1() -> list[dict]:
+        return tools_v1
+
+    async def _fake_fetch_v2() -> list[dict]:
+        return tools_v1 + tools_v2
+
+    mcp = _FakeMCP()
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_v1)
+    await tool_module.sync_tools(mcp)
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_v2)
+    added = await tool_module.sync_tools(mcp)
+
+    assert added == 0
+    assert "com.a.v1" in tool_module._registered_tools
+    assert "com.a.v2" not in tool_module._registered_tools
+
+
+@pytest.mark.asyncio
+async def test_sync_tools_marks_removed_tools_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools_initial = [{"id": "com.a", "name": "a", "description": "", "params": []}]
+
+    async def _fake_fetch_initial() -> list[dict]:
+        return tools_initial
+
+    async def _fake_fetch_empty() -> list[dict]:
+        return [{"id": "com.b", "name": "b", "description": "", "params": []}]
+
+    mcp = _FakeMCP()
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_initial)
+    await tool_module.sync_tools(mcp)
+    assert "com.a" in tool_module._registered_tools
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_empty)
+    await tool_module.sync_tools(mcp)
+
+    assert "com.a" in tool_module._stale_tool_ids
+    assert "com.a" not in tool_module._registered_tools
+    assert "a" not in tool_module._registered_names
+
+
+@pytest.mark.asyncio
+async def test_sync_tools_reregisters_previously_stale_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for the stale-tool re-registration bug."""
+    tools_initial = [{"id": "com.a", "name": "a", "description": "", "params": []}]
+
+    async def _fake_fetch_with_a() -> list[dict]:
+        return tools_initial
+
+    async def _fake_fetch_other() -> list[dict]:
+        return [{"id": "com.other", "name": "other", "description": "", "params": []}]
+
+    mcp = _FakeMCP()
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_with_a)
+    await tool_module.sync_tools(mcp)
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_other)
+    await tool_module.sync_tools(mcp)
+    assert "com.a" in tool_module._stale_tool_ids
+
+    monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_with_a)
+    added = await tool_module.sync_tools(mcp)
+
+    assert added == 1
+    assert "com.a" not in tool_module._stale_tool_ids
+    assert "com.a" in tool_module._registered_tools
+
+
+def test_make_tool_handler_rejects_invalid_tool_name() -> None:
+    """exec injection guard: non-identifier name must raise."""
+    spec = {"name": "foo()#evil", "description": "", "params": []}
+    with pytest.raises(ValueError, match="Invalid tool name"):
+        tool_module._make_tool_handler("com.evil", spec)
+
+
+def test_make_tool_handler_rejects_invalid_param_name() -> None:
+    """exec injection guard: non-identifier param name must raise."""
+    spec = {
+        "name": "safe_tool",
+        "description": "",
+        "params": [{"name": "bad;import os", "type": "str"}],
+    }
+    with pytest.raises(ValueError, match="Invalid param name"):
+        tool_module._make_tool_handler("com.evil", spec)
+
+
+def test_make_tool_handler_sanitizes_description() -> None:
+    """Triple-quotes in description must not break the exec'd docstring."""
+    spec = {
+        "name": "safe_tool",
+        "description": 'has """ triple quotes""" inside',
+        "params": [],
+    }
+    handler = tool_module._make_tool_handler("com.safe", spec)
+    assert callable(handler)
+    assert '"""' not in (handler.__doc__ or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_safe_injects_user_id_from_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that when an auth context is present, user_id flows to _execute_tool."""
+    from types import SimpleNamespace
+
+    fake_token = SimpleNamespace(user_id="user_ctx_test")
+
+    def _fake_get_token() -> SimpleNamespace:
+        return fake_token
+
+    monkeypatch.setattr(tool_module, "get_access_token", _fake_get_token)
+
+    captured = {}
+
+    async def _fake_execute(tool_id: str, args: dict, *, user_id: str | None = None) -> dict:
+        captured["tool_id"] = tool_id
+        captured["user_id"] = user_id
+        return {"success": True, "result": "ok"}
+
+    monkeypatch.setattr(tool_module, "_execute_tool", _fake_execute)
+
+    await tool_module._execute_tool_safe("com.test", {"x": 1})
+
+    assert captured["tool_id"] == "com.test"
+    assert captured["user_id"] == "user_ctx_test"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_safe_no_user_id_when_no_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no auth context is present, user_id stays None."""
+
+    def _no_token() -> None:
+        return None
+
+    monkeypatch.setattr(tool_module, "get_access_token", _no_token)
+
+    captured = {}
+
+    async def _fake_execute(tool_id: str, args: dict, *, user_id: str | None = None) -> dict:
+        captured["user_id"] = user_id
+        return {"success": True, "result": "ok"}
+
+    monkeypatch.setattr(tool_module, "_execute_tool", _fake_execute)
+
+    await tool_module._execute_tool_safe("com.test", {})
+
+    assert captured["user_id"] is None

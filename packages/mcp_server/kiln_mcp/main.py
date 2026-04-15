@@ -1,32 +1,8 @@
 """
 kiln_mcp/main.py
-────────────────
-Kiln MCP Server — bridges the MCP JSON-RPC protocol to the Kiln Registry API.
-
-Any MCP-compatible client (Claude Desktop, Cursor, VS Code Copilot, Windsurf)
-can connect to this server and immediately access every tool in the registry.
-
-Features:
-  - tools/list → returns all registered Kiln tools as MCP tools
-  - tools/call → proxies execution to registry_api /tools/{id}/execute
-  - Dynamic tool refresh — polls registry_api for new tools and notifies clients
-  - Streamable HTTP transport for production, stdio for local dev
-
-Usage:
-    # Streamable HTTP (production)
-    uv run python -m kiln_mcp.main
-
-    # Or via Nx
-    nx run mcp-server:dev
-
-MCP client config (e.g., Claude Desktop):
-    {
-      "mcpServers": {
-        "kiln": {
-          "url": "http://localhost:8768/mcp"
-        }
-      }
-    }
+----------------
+Kiln MCP Server -- bridges the MCP JSON-RPC protocol to the Kiln Registry API
+with OAuth 2.1 + PKCE authentication (delegating user identity to Clerk).
 """
 
 from __future__ import annotations
@@ -37,257 +13,76 @@ import json
 import logging
 import os
 
-import httpx
+from mcp.server.auth.provider import ProviderTokenVerifier
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
+from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from kiln_mcp import tools as tool_module
+from kiln_mcp.auth.clerk_callback import build_callback_route
+from kiln_mcp.auth.provider import KilnOAuthProvider
+from kiln_mcp.auth.store import InMemoryOAuthStore
 from kiln_shared.httpx_client import async_client
 from kiln_shared.request_id import KilnRequestIDMiddleware
 
 logger = logging.getLogger(__name__)
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
 REGISTRY_URL = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
-POLL_INTERVAL = int(os.environ.get("KILN_MCP_POLL_INTERVAL", "30"))  # seconds
+POLL_INTERVAL = int(os.environ.get("KILN_MCP_POLL_INTERVAL", "30"))
+ISSUER_URL = os.environ.get("KILN_MCP_ISSUER_URL", "http://localhost:8768")
+CLERK_DOMAIN = os.environ.get("CLERK_DOMAIN", "").strip()
 
-# ── MCP Server ────────────────────────────────────────────────────────────────
-
-mcp = FastMCP(
-    "Kiln",
-    instructions=(
-        "Kiln is a self-evolving tool registry for AI agents. "
-        "All tools are dynamically loaded from the Kiln registry. "
-        "When you need a tool that doesn't exist, describe what you need "
-        "and it may be synthesized automatically."
-    ),
-    stateless_http=True,
-    json_response=True,
+_oauth_store = InMemoryOAuthStore()
+_oauth_provider = KilnOAuthProvider(
+    store=_oauth_store,
+    clerk_domain=CLERK_DOMAIN,
+    issuer_url=ISSUER_URL,
 )
 
-# ── Tool Registry State ──────────────────────────────────────────────────────
-
-_registered_tools: dict[str, dict] = {}  # tool_id → tool spec from registry API
-_tool_lock = asyncio.Lock()
+_auth_enabled = bool(CLERK_DOMAIN)
 
 
-def _fetch_tools_sync() -> list[dict]:
-    """Fetch all tools from the Kiln Registry API (sync, for startup)."""
-    try:
-        resp = httpx.get(f"{REGISTRY_URL}/tools", timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        logger.warning("Failed to fetch tools from registry: %s", e)
-        return []
-
-
-async def _fetch_tools() -> list[dict]:
-    """Fetch all tools from the Kiln Registry API (async, for polling).
-
-    Uses the request-id-aware client so refresh polls are correlated
-    with the originating MCP request when one is in flight.
-    """
-    try:
-        async with async_client(timeout=10) as client:
-            resp = await client.get(f"{REGISTRY_URL}/tools")
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as e:
-        logger.error("Failed to fetch tools from registry: %s", e)
-        return []
-
-
-async def _execute_tool(tool_id: str, args: dict) -> dict:
-    """Execute a tool via the Kiln Registry API."""
-    async with async_client(timeout=30) as client:
-        resp = await client.post(
-            f"{REGISTRY_URL}/tools/{tool_id}/execute",
-            json={"args": args},
-            headers={"X-Internal-Secret": os.environ.get("KILN_INTERNAL_SECRET", "")},
+def _build_mcp() -> FastMCP:
+    common_kwargs = dict(
+        instructions=(
+            "Kiln is a self-evolving tool registry for AI agents. "
+            "All tools are dynamically loaded from the Kiln registry. "
+            "When you need a tool that doesn't exist, describe what you need "
+            "and it may be synthesized automatically."
+        ),
+        stateless_http=True,
+        json_response=True,
+    )
+    if _auth_enabled:
+        return FastMCP(
+            "Kiln",
+            **common_kwargs,
+            auth_server_provider=_oauth_provider,
+            token_verifier=ProviderTokenVerifier(_oauth_provider),
+            auth=AuthSettings(
+                issuer_url=AnyHttpUrl(ISSUER_URL),
+                resource_server_url=None,
+                client_registration_options=ClientRegistrationOptions(
+                    enabled=True,
+                    valid_scopes=["kiln:tools"],
+                    default_scopes=["kiln:tools"],
+                ),
+            ),
         )
-        resp.raise_for_status()
-        return resp.json()
+    logger.warning(
+        "CLERK_DOMAIN not set -- OAuth disabled, running unauthenticated (dev only)"
+    )
+    return FastMCP("Kiln", **common_kwargs)
 
 
-def _build_mcp_tool_schema(tool_spec: dict) -> dict:
-    """Convert a Kiln tool spec's params into MCP-compatible JSON Schema."""
-    type_map = {
-        "str": "string", "int": "integer", "float": "number",
-        "bool": "boolean", "list": "array", "dict": "object",
-    }
-    properties = {}
-    required = []
-    for p in tool_spec.get("params", []):
-        prop: dict = {
-            "type": type_map.get(p.get("type", "str"), "string"),
-            "description": p.get("description", ""),
-        }
-        if p.get("enum"):
-            prop["enum"] = p["enum"]
-        if p.get("default") is not None:
-            prop["default"] = p["default"]
-        properties[p["name"]] = prop
-        if p.get("required", True):
-            required.append(p["name"])
+mcp = _build_mcp()
 
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    }
-
-
-def _make_tool_handler(tool_id: str, tool_spec: dict):
-    """
-    Create an async handler function with proper typed signature for FastMCP.
-
-    FastMCP introspects function signatures to generate JSON schema for MCP clients.
-    We use exec() to dynamically build a function with the exact parameter types
-    matching the Kiln tool spec — same pattern used in graph_flow.py.
-    """
-    name = tool_spec["name"]
-    description = tool_spec.get("description", "")
-    params = tool_spec.get("params", [])
-
-    _TYPE_MAP = {
-        "str": "str", "int": "int", "float": "float",
-        "bool": "bool", "list": "list", "dict": "dict",
-    }
-
-    # Build typed function signature: e.g. "location: str, units: str = 'celsius'"
-    sig_parts = []
-    for p in params:
-        t = _TYPE_MAP.get(p.get("type", "str"), "str")
-        if not p.get("required", True) and p.get("default") is not None:
-            sig_parts.append(f"{p['name']}: {t} = {repr(p['default'])}")
-        elif not p.get("required", True):
-            sig_parts.append(f"{p['name']}: {t} = None")
-        else:
-            sig_parts.append(f"{p['name']}: {t}")
-
-    sig_str = ", ".join(sig_parts)
-    kwargs_str = ", ".join(f'"{p["name"]}": {p["name"]}' for p in params)
-
-    tool_id_repr = repr(tool_id)
-    fn_source = f'''
-async def {name}({sig_str}) -> str:
-    """{description}"""
-    _args = {{{kwargs_str}}}
-    return await _execute({tool_id_repr}, _args)
-'''
-
-    namespace = {
-        "_execute": _execute_tool_safe,
-    }
-    exec(fn_source, namespace)  # noqa: S102
-    return namespace[name]
-
-
-async def _execute_tool_safe(tool_id: str, args: dict) -> str:
-    """Execute a tool and return JSON result string (safe — catches all errors)."""
-    try:
-        result = await _execute_tool(tool_id, args)
-        if result.get("success"):
-            return json.dumps(result.get("result", {}), indent=2, default=str)
-        return json.dumps({"error": result.get("detail", "Unknown error")})
-    except httpx.HTTPStatusError as e:
-        error_detail = e.response.text
-        with contextlib.suppress(Exception):
-            error_detail = e.response.json().get("detail", error_detail)
-        return json.dumps({"error": str(error_detail)})
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-
-async def sync_tools() -> int:
-    """
-    Fetch tools from registry and register/unregister as needed.
-    Returns the number of new tools added.
-    """
-    tools = await _fetch_tools()
-    if not tools:
-        return 0
-
-    async with _tool_lock:
-        current_ids = set(_registered_tools.keys())
-        new_ids = {t["id"] for t in tools}
-
-        # Register new tools
-        added = 0
-        for tool in tools:
-            tid = tool["id"]
-            if tid not in current_ids:
-                handler = _make_tool_handler(tid, tool)
-
-
-                # Register with FastMCP using the low-level API
-                mcp.tool(
-                    name=tool["name"],
-                    description=tool.get("description", ""),
-                )(handler)
-
-                _registered_tools[tid] = tool
-                added += 1
-                logger.info("Registered MCP tool: %s (%s)", tool["name"], tid)
-
-        # Log removed tools (can't easily unregister from FastMCP, but they become stale)
-        removed = current_ids - new_ids
-        if removed:
-            logger.warning("Tools removed from registry (stale in MCP): %s", removed)
-
-        return added
-
-
-# ── Background Poller ─────────────────────────────────────────────────────────
-
-_poll_task: asyncio.Task | None = None
-
-
-async def _poll_registry():
-    """Periodically check for new tools and notify clients."""
-    while True:
-        await asyncio.sleep(POLL_INTERVAL)
-        try:
-            added = await sync_tools()
-            if added > 0:
-                logger.info("Added %d new tools from registry", added)
-                # Notify all connected MCP clients that tools changed
-                # (FastMCP handles this internally when tools are added)
-        except Exception as e:
-            logger.error("Registry poll failed: %s", e)
-
-
-def load_tools_on_startup() -> int:
-    """Synchronously load tools from registry before the event loop starts."""
-    tools = _fetch_tools_sync()
-    if not tools:
-        return 0
-
-    added = 0
-    for tool in tools:
-        tid = tool["id"]
-        if tid not in _registered_tools:
-            handler = _make_tool_handler(tid, tool)
-
-            mcp.tool(
-                name=tool["name"],
-                description=tool.get("description", ""),
-            )(handler)
-
-            _registered_tools[tid] = tool
-            added += 1
-            logger.info("Registered MCP tool: %s (%s)", tool["name"], tid)
-
-    return added
-
-
-# ── Built-in Utility Tools ───────────────────────────────────────────────────
 
 @mcp.tool()
 async def kiln_search_tools(query: str, ctx: Context[ServerSession, None]) -> str:
@@ -295,35 +90,30 @@ async def kiln_search_tools(query: str, ctx: Context[ServerSession, None]) -> st
     await ctx.info(f"Searching for: {query}")
     try:
         async with async_client(timeout=10) as client:
-            resp = await client.get(
-                f"{REGISTRY_URL}/tools/search",
-                params={"q": query},
-            )
+            resp = await client.get(f"{REGISTRY_URL}/tools/search", params={"q": query})
             resp.raise_for_status()
-            tools = resp.json()
-            if not tools:
+            results = resp.json()
+            if not results:
                 return "No tools found matching your query."
-            result = []
-            for t in tools:
-                result.append(f"- **{t['name']}** (`{t['id']}`): {t['description']}")
-            return "\n".join(result)
+            return "\n".join(
+                f"- **{t['name']}** (`{t['id']}`): {t['description']}" for t in results
+            )
     except Exception as e:
         return f"Search failed: {e}"
 
 
 @mcp.tool()
 async def kiln_refresh_tools(ctx: Context[ServerSession, None]) -> str:
-    """Refresh the tool catalog from the Kiln registry. Call this after publishing new tools."""
+    """Refresh the tool catalog from the Kiln registry."""
     await ctx.info("Refreshing tools from registry...")
-    added = await sync_tools()
+    added = await tool_module.sync_tools(mcp)
     if added > 0:
-        # Notify the MCP client that the tool list has changed
         try:
             await ctx.session.send_tool_list_changed()
             await ctx.info(f"Added {added} new tools and notified client")
         except Exception:
             await ctx.info(f"Added {added} new tools (notification not supported by client)")
-    total = len(_registered_tools)
+    total = tool_module.get_registered_tool_count()
     return f"Refreshed. {added} new tools added. Total: {total} tools available."
 
 
@@ -340,31 +130,14 @@ async def kiln_registry_stats(ctx: Context[ServerSession, None]) -> str:
         return f"Failed to fetch stats: {e}"
 
 
-# ── Health endpoints ─────────────────────────────────────────────────────────
-#
-# FastMCP doesn't expose HTTP routes for liveness/readiness, so we wrap its
-# ASGI app in a parent Starlette app that adds /livez, /readyz, /health
-# routes alongside the streamable-http MCP transport. This lets orchestrators
-# health-check the MCP server the same way they check the other services.
-
-
 async def _livez(_request: Request) -> JSONResponse:
-    """Cheap liveness probe — process is up. No dependency calls."""
     return JSONResponse({"status": "ok", "service": "kiln-mcp-server"})
 
 
 async def _readyz(_request: Request) -> JSONResponse:
-    """Real readiness probe — pings registry_api as a HARD dependency.
-
-    Without registry_api the MCP server has no tools to expose; every
-    `tools/list` call would return only the built-in utility tools.
-    Returns 503 if the registry is unreachable so orchestrators stop
-    routing MCP clients here.
-    """
     checks: dict[str, str] = {}
     overall = "ok"
 
-    # Registry: hard dependency.
     try:
         async with async_client(timeout=2.0) as client:
             resp = await client.get(f"{REGISTRY_URL}/livez")
@@ -377,49 +150,95 @@ async def _readyz(_request: Request) -> JSONResponse:
         checks["registry_api"] = f"unreachable: {exc!s}"
         overall = "degraded"
 
-    # In-process tool count — proves load_tools_on_startup ran.
-    checks["registered_tools"] = f"ok ({len(_registered_tools)} tools)"
+    checks["registered_tools"] = f"ok ({tool_module.get_registered_tool_count()} tools)"
+    checks["auth"] = (
+        "enabled (clerk)" if _auth_enabled else "disabled (CLERK_DOMAIN not set)"
+    )
 
-    body = {
-        "status": overall,
-        "service": "kiln-mcp-server",
-        "checks": checks,
-    }
+    body = {"status": overall, "service": "kiln-mcp-server", "checks": checks}
     if overall != "ok":
         return JSONResponse(status_code=503, content=body)
     return JSONResponse(body)
 
 
 async def _health(request: Request) -> JSONResponse:
-    """Combined health endpoint kept for backwards compatibility."""
     return await _readyz(request)
 
 
-def build_http_app() -> Starlette:
-    """Build the parent Starlette app: health routes + mounted MCP transport.
+async def _poll_registry() -> None:
+    while True:
+        await asyncio.sleep(POLL_INTERVAL)
+        try:
+            added = await asyncio.wait_for(
+                tool_module.sync_tools(mcp),
+                timeout=POLL_INTERVAL * 0.8,
+            )
+            if added > 0:
+                logger.info("Added %d new tools from registry", added)
+        except TimeoutError:
+            logger.error("Registry poll timed out")
+        except Exception as e:
+            logger.error("Registry poll failed: %s", e)
 
-    Exposed as a separate function so tests can call it without spawning
-    uvicorn. The MCP streamable HTTP transport is mounted at the root so
-    MCP clients still hit `/mcp` etc as before.
-    """
+
+async def _cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            _oauth_store.cleanup()
+        except Exception as e:
+            logger.error("OAuth store cleanup failed: %s", e)
+
+
+def build_http_app() -> Starlette:
     mcp_app = mcp.streamable_http_app()
+
+    extra_routes: list[Route] = [
+        Route("/livez", _livez, methods=["GET"]),
+        Route("/readyz", _readyz, methods=["GET"]),
+        Route("/health", _health, methods=["GET"]),
+    ]
+
+    if _auth_enabled:
+        extra_routes.append(
+            build_callback_route(store=_oauth_store, clerk_domain=CLERK_DOMAIN)
+        )
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        async with mcp_app.router.lifespan_context(_app):
+            try:
+                await tool_module.sync_tools(mcp)
+                logger.info(
+                    "Initial tool sync complete (%d tools)",
+                    tool_module.get_registered_tool_count(),
+                )
+            except Exception as e:
+                logger.error("Initial tool sync failed: %s", e)
+
+            poll_task = asyncio.create_task(_poll_registry())
+            cleanup_task = (
+                asyncio.create_task(_cleanup_loop()) if _auth_enabled else None
+            )
+            try:
+                yield
+            finally:
+                poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poll_task
+                if cleanup_task is not None:
+                    cleanup_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await cleanup_task
+
     return Starlette(
-        routes=[
-            Route("/livez", _livez, methods=["GET"]),
-            Route("/readyz", _readyz, methods=["GET"]),
-            Route("/health", _health, methods=["GET"]),
-            Mount("/", app=mcp_app),
-        ],
+        routes=[*extra_routes, Mount("/", app=mcp_app)],
         middleware=[Middleware(KilnRequestIDMiddleware)],
-        # Honor MCP app's lifespan (its session manager sets up streams).
-        lifespan=mcp_app.router.lifespan_context,
+        lifespan=lifespan,
     )
 
 
-# ── Entry Point ──────────────────────────────────────────────────────────────
-
 def main():
-    """CLI entry point for the Kiln MCP Server."""
     import sys
 
     from kiln_shared.logging_config import setup_logging
@@ -429,16 +248,14 @@ def main():
     host = os.environ.get("KILN_MCP_HOST", "127.0.0.1")
     port = int(os.environ.get("KILN_MCP_PORT", "8768"))
 
-    # Load tools synchronously before the event loop starts
-    count = load_tools_on_startup()
-    logger.info("Loaded %d tools from registry (%s)", count, REGISTRY_URL)
-    logger.info("Starting Kiln MCP Server on %s:%s (transport: %s)", host, port, transport)
+    logger.info(
+        "Starting Kiln MCP Server on %s:%s (transport: %s, auth: %s)",
+        host, port, transport, "enabled" if _auth_enabled else "disabled",
+    )
 
     if transport == "stdio":
         mcp.run(transport="stdio")
     else:
-        # For HTTP transports, build the wrapped Starlette app (MCP transport
-        # plus /livez /readyz /health routes) and run with uvicorn directly.
         import uvicorn
         app = build_http_app()
         uvicorn.run(app, host=host, port=port)

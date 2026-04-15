@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import requests
@@ -436,11 +437,9 @@ class KilnGraphFlow:
                 logger.info(f"Running node: [{node_id}]  role={node['role']}")
                 logger.info(f"Tools: {node.get('tools', []) or '(none)'}")
 
-            try:
-                result = self._run_node(node, context, task_graph["task"])
-            except Exception as exc:
-                logger.error("Node '%s' raised an exception: %s", node_id, exc)
-                result = f"(error: node '{node_id}' crashed: {exc})"
+            result = self._run_node_with_backoff(
+                node, context, task_graph["task"]
+            )
 
             # ── Retry once if a non-exit node failed ─────────────────────────
             if node_id != exit_node and self._is_failure(result):
@@ -460,11 +459,9 @@ class KilnGraphFlow:
                         "- If ALL tools fail, say so honestly — do NOT make up data"
                     ),
                 }
-                try:
-                    result = self._run_node(retry_node, context, task_graph["task"])
-                except Exception as exc:
-                    logger.error("Node '%s' retry also failed: %s", node_id, exc)
-                    result = f"(error: node '{node_id}' retry crashed: {exc})"
+                result = self._run_node_with_backoff(
+                    retry_node, context, task_graph["task"]
+                )
 
             context[node_id] = result
             self._emit("node_complete", node_id=node_id, result=result)
@@ -475,6 +472,44 @@ class KilnGraphFlow:
         return context.get(exit_node, "(no result)")
 
     # ── Node execution ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        err_str = str(exc).lower()
+        return (
+            "429" in err_str
+            or "rate limit" in err_str
+            or "rate_limited" in err_str
+            or "capacity" in err_str
+        )
+
+    def _run_node_with_backoff(
+        self, node: dict, context: dict[str, str], original_task: str
+    ) -> str:
+        """Run a node, retrying on LLM rate limits with exponential backoff.
+
+        Non-rate-limit exceptions are surfaced immediately as failure strings,
+        so the caller's generic retry path can kick in.
+        """
+        node_id = node["id"]
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self._run_node(node, context, original_task)
+            except Exception as exc:
+                last_exc = exc
+                if self._is_rate_limit_error(exc) and attempt < 2:
+                    wait = 2 ** attempt * 2  # 2s, 4s
+                    logger.warning(
+                        "Node '%s' hit LLM rate limit (attempt %d/3), retrying in %ds",
+                        node_id, attempt + 1, wait,
+                    )
+                    self._emit("node_retry", node_id=node_id, reason=f"rate limited; waiting {wait}s")
+                    time.sleep(wait)
+                    continue
+                break
+        logger.error("Node '%s' raised an exception: %s", node_id, last_exc)
+        return f"(error: node '{node_id}' crashed: {last_exc})"
 
     def _run_node(self, node: dict, context: dict[str, str], original_task: str) -> str:
         """Build an AG2 agent pair for this node, register its tools, run it."""

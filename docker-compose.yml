@@ -96,6 +96,9 @@ services:
     environment:
       - KILN_REGISTRY_URL=http://registry_api:8766
       - KILN_MCP_HOST=0.0.0.0
+      - KILN_MCP_ISSUER_URL=${KILN_MCP_ISSUER_URL:-http://localhost:8768}
+      - CLERK_DOMAIN=${CLERK_DOMAIN:-}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
     depends_on:
       registry_api:
         condition: service_healthy
