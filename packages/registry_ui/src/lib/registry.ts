@@ -52,19 +52,19 @@ export interface ToolStats {
 }
 
 export async function fetchTools(): Promise<Tool[]> {
-  const res = await fetch(`${REGISTRY_URL}/tools`, { next: { revalidate: 30 } })
+  const res = await fetch(`${REGISTRY_URL}/tools`, { cache: "no-store" })
   if (!res.ok) throw new Error("Failed to fetch tools")
   return res.json()
 }
 
 export async function fetchTool(toolId: string): Promise<Tool> {
-  const res = await fetch(`${REGISTRY_URL}/tools/${toolId}`, { next: { revalidate: 30 } })
+  const res = await fetch(`${REGISTRY_URL}/tools/${toolId}`, { cache: "no-store" })
   if (!res.ok) throw new Error(`Tool ${toolId} not found`)
   return res.json()
 }
 
 export async function fetchToolStats(): Promise<ToolStats> {
-  const res = await fetch(`${REGISTRY_URL}/tools/stats`, { next: { revalidate: 60 } })
+  const res = await fetch(`${REGISTRY_URL}/tools/stats`, { cache: "no-store" })
   if (!res.ok) throw new Error("Failed to fetch stats")
   return res.json()
 }
@@ -76,7 +76,7 @@ export async function searchTools(query: string): Promise<Tool[]> {
 }
 
 export async function fetchToolVersions(toolId: string): Promise<{ tool_id: string; versions: Array<{ version: string; description: string; author: string }>; count: number }> {
-  const res = await fetch(`${REGISTRY_URL}/tools/versions/${toolId}`, { next: { revalidate: 30 } })
+  const res = await fetch(`${REGISTRY_URL}/tools/versions/${toolId}`, { cache: "no-store" })
   if (!res.ok) throw new Error("Failed to fetch versions")
   return res.json()
 }

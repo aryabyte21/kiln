@@ -519,6 +519,7 @@ function KilnChat() {
 
   const abortRef = useRef<AbortController | null>(null)
   const lastLoadedIdRef = useRef<string | null>(null)
+  const messagesSyncedIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!hydrated) return
@@ -542,6 +543,10 @@ function KilnChat() {
   useEffect(() => {
     if (!hydrated || !activeId) return
     if (lastLoadedIdRef.current !== activeId) return
+    if (messagesSyncedIdRef.current !== activeId) {
+      messagesSyncedIdRef.current = activeId
+      return
+    }
     persistMessages(activeId, messages)
   }, [messages, activeId, hydrated, persistMessages])
 
