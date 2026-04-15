@@ -4,8 +4,12 @@ version = "1.0.0"
 description = "A self-evolving tool registry for autonomous AI agents"
 requires-python = ">=3.12"
 dependencies = [
-    "kiln-shared",
-    "kiln-registry-api",
+    # Inside the monorepo we pull the `[server]` extras so every workspace
+    # member can import its server-side modules (FastAPI, SQLAlchemy, JWT,
+    # slowapi, redis). Consumers outside the monorepo only get what they
+    # explicitly `pip install kiln-registry-api[server]` etc.
+    "kiln-shared[server]",
+    "kiln-registry-api[server,langchain,pydantic_ai]",
     "kiln-chat-backend",
     "kiln-synthesis-service",
     "kiln-tool-executor",

@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Kiln Tool Executor — isolated subprocess execution with blocked-package validation"
 requires-python = ">=3.12"
 dependencies = [
-    "kiln-shared",
+    "kiln-shared[server]>=1.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.0",

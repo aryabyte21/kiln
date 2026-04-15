@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Kiln MCP Server - bridges MCP JSON-RPC to the Registry API"
 requires-python = ">=3.12"
 dependencies = [
-    "kiln-shared",
+    "kiln-shared[server]>=1.0.0",
     "mcp>=1.0.0",
     "httpx>=0.27.0",
     "pydantic>=2.0",

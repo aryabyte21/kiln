@@ -475,6 +475,35 @@ async def get_tool_stats(tool_id: str):
     }
 
 
+@app.get("/tools/{tool_id:path}/integrations", summary="Copy-pasteable integration snippets for every supported framework")
+def get_tool_integrations(tool_id: str, request: Request):
+    """Generate cURL / Python / OpenAI / AG2 / LangChain / Pydantic-AI /
+    Mistral / MCP snippets for one tool. Snippet generation is purely
+    textual and does not import any framework SDK.
+    """
+    from .integrations import integrations_for
+
+    registry = get_global_registry()
+    tool = registry.get(tool_id)
+    if tool is None:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
+
+    # Use the public registry URL the request came in on so snippets
+    # reference whatever host the user actually hits (localhost in dev,
+    # custom domain in prod). Falls back to env-configured value.
+    public_url = (
+        os.environ.get("KILN_PUBLIC_REGISTRY_URL")
+        or f"{request.url.scheme}://{request.url.netloc}"
+    )
+    mcp_url = os.environ.get("KILN_PUBLIC_MCP_URL")  # None falls back to heuristic
+    return {
+        "tool_id": tool.id,
+        "name": tool.spec.name,
+        "registry_url": public_url,
+        "integrations": integrations_for(tool, public_url, mcp_url=mcp_url),
+    }
+
+
 @app.get("/tools/{tool_id:path}", summary="Get a single tool by ID")
 def get_tool(tool_id: str):
     """Returns the full spec + LLM tool_def for one tool."""

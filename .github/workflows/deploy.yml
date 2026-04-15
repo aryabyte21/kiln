@@ -1,14 +1,32 @@
 name: CD — Build, Push, Deploy to GKE
 
+# Manual trigger only. Automatic runs on every merge are disabled until a
+# GCP project is wired up (requires `GCP_PROJECT` variable + a Workload
+# Identity provider secret). Running on push to main without these
+# configured is a guaranteed failure — wasteful, noisy, and it buries real
+# CI failures under a sea of red.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 env:
   GCP_REGION: asia-southeast1
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail clearly if GCP project isn't configured
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          if [[ -z "$GCP_PROJECT" || -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]]; then
+            echo "::error::GCP deployment is not configured."
+            echo "::error::Set repository variables GCP_PROJECT and GCP_WORKLOAD_IDENTITY_PROVIDER,"
+            echo "::error::or remove .github/workflows/deploy.yml if you don't intend to deploy to GCP."
+            exit 1
+          fi
+
   build-push:
     runs-on: ubuntu-latest
     permissions:
