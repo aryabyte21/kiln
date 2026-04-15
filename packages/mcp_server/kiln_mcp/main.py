@@ -15,7 +15,6 @@ import os
 from typing import Any
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import ProviderTokenVerifier
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
@@ -69,7 +68,6 @@ def _build_mcp() -> FastMCP:
             "Kiln",
             **common_kwargs,
             auth_server_provider=_oauth_provider,
-            token_verifier=ProviderTokenVerifier(_oauth_provider),
             auth=AuthSettings(
                 issuer_url=AnyHttpUrl(ISSUER_URL),
                 resource_server_url=None,

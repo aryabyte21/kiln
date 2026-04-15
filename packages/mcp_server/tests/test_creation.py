@@ -256,3 +256,39 @@ def test_validate_impl_accepts_top_level_def_after_imports() -> None:
         "    return {}\n"
     )
     validate_impl_defines_function(code, "sample")
+
+
+def test_validate_impl_rejects_syntax_error() -> None:
+    """AST-based validation catches bad Python before we round-trip to the registry."""
+    with pytest.raises(ToolCreationError, match="syntax error"):
+        validate_impl_defines_function("def sample(:\n    pass\n", "sample")
+
+
+def test_validate_impl_not_fooled_by_def_inside_a_string() -> None:
+    """A matching-name `def` hidden in a docstring must not satisfy validation.
+
+    Regex-based validators would accept this and fail later at import time;
+    AST walk only sees the real top-level module body.
+    """
+    code = (
+        '"""Docstring example:\n'
+        "\n"
+        "    def sample():\n"
+        "        ...\n"
+        '"""\n'
+        "x = 1\n"
+    )
+    with pytest.raises(ToolCreationError, match="top-level function"):
+        validate_impl_defines_function(code, "sample")
+
+
+def test_validate_impl_rejects_nested_def_only() -> None:
+    """A `def sample` only inside a wrapper function shouldn't qualify."""
+    code = (
+        "def outer():\n"
+        "    def sample():\n"
+        "        return 1\n"
+        "    return sample\n"
+    )
+    with pytest.raises(ToolCreationError, match="top-level function"):
+        validate_impl_defines_function(code, "sample")

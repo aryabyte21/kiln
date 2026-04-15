@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import re
@@ -142,12 +143,19 @@ def build_spec_yaml(
 def validate_impl_defines_function(impl_code: str, function_name: str) -> None:
     if not impl_code.strip():
         raise ToolCreationError("impl_code must not be empty")
-    pattern = re.compile(rf"^(async\s+)?def\s+{re.escape(function_name)}\b", re.MULTILINE)
-    if not pattern.search(impl_code):
+    try:
+        tree = ast.parse(impl_code)
+    except SyntaxError as exc:
         raise ToolCreationError(
-            f"impl_code must define a top-level function named {function_name!r} "
-            f"(no leading indentation — class methods don't count)"
-        )
+            f"impl_code has a Python syntax error: {exc.msg} (line {exc.lineno})"
+        ) from exc
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            return
+    raise ToolCreationError(
+        f"impl_code must define a top-level function named {function_name!r} "
+        f"(class methods and nested defs don't count)"
+    )
 
 
 async def submit_to_registry(
