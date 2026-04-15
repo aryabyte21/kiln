@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
   Search,
@@ -9,21 +9,19 @@ import {
   User,
   Layers,
   X,
-  Users,
-  FolderOpen,
-  BoxesIcon,
   PackageSearch,
   Sparkles,
   ArrowRight,
-  Flame,
   PlayCircle,
   CheckCircle2,
   Star,
   Activity,
   ShieldCheck,
   ShieldAlert,
+  Loader2,
 } from "lucide-react"
-import type { Tool, ToolStats } from "@/lib/registry"
+import type { Tool, ToolStats, RankedTool } from "@/lib/registry"
+import { searchToolsSemantic } from "@/lib/registry"
 import type { SystemStatus } from "@/lib/system-status"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -34,93 +32,42 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { SmartSearch } from "@/app/_components/smart-search"
+import { cn } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  color,
-  gradient,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: string | number
-  color: string
-  gradient: string
-}) {
-  return (
-    <Card className="section-surface relative overflow-hidden py-0 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_22px_56px_hsl(223_80%_4%_/_0.48)]">
-      {/* Subtle gradient background */}
-      <div className={`pointer-events-none absolute inset-0 ${gradient}`} />
-      <CardContent className="relative flex items-center gap-3 py-4">
-        <div
-          className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${color}`}
-        >
-          <Icon className="size-5" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-2xl font-bold tracking-tight">{value}</p>
-          <p className="truncate text-xs text-muted-foreground">{label}</p>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function StatsRow({ stats }: { stats: ToolStats }) {
-  const categoryCount = Object.keys(stats.categories).length
-  const tagCount = Object.keys(stats.tags).length
-
-  const items = [
-    {
-      icon: BoxesIcon,
-      label: "Total Tools",
-      value: stats.total,
-      color:
-        "bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400",
-      gradient:
-        "bg-gradient-to-br from-blue-500/[0.07] via-blue-400/[0.03] to-transparent",
-    },
-    {
-      icon: FolderOpen,
-      label: "Categories",
-      value: categoryCount,
-      color:
-        "bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400",
-      gradient:
-        "bg-gradient-to-br from-violet-500/[0.07] via-purple-400/[0.03] to-transparent",
-    },
-    {
-      icon: Users,
-      label: "Authors",
-      value: stats.unique_authors,
-      color:
-        "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400",
-      gradient:
-        "bg-gradient-to-br from-emerald-500/[0.07] via-green-400/[0.03] to-transparent",
-    },
-    {
-      icon: Tag,
-      label: "Unique Tags",
-      value: tagCount,
-      color:
-        "bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400",
-      gradient:
-        "bg-gradient-to-br from-amber-500/[0.07] via-yellow-400/[0.03] to-transparent",
-    },
+  const items: Array<{ label: string; value: number }> = [
+    { label: "Tools", value: stats.total },
+    { label: "Categories", value: Object.keys(stats.categories).length },
+    { label: "Authors", value: stats.unique_authors },
+    { label: "Tags", value: Object.keys(stats.tags).length },
   ]
 
+  // Single bordered strip with cells separated by hairline dividers.
+  // Numbers in monospace tabular-nums so the row doesn't reflow as values
+  // change. No icons, no gradients — Linear-style restraint: information
+  // first, decoration zero.
   return (
-    <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {items.map((item) => (
-        <StatCard key={item.label} {...item} />
+    <div className="mb-6 grid grid-cols-2 divide-x divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-card/40 sm:grid-cols-4">
+      {items.map((item, idx) => (
+        <div
+          key={item.label}
+          className={cn(
+            "flex flex-col gap-0.5 px-4 py-3",
+            idx >= 2 && "border-t border-border/60 sm:border-t-0",
+          )}
+        >
+          <span className="font-mono text-lg tabular-nums tracking-tight text-foreground">
+            {item.value}
+          </span>
+          <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground/70">
+            {item.label}
+          </span>
+        </div>
       ))}
     </div>
   )
@@ -216,7 +163,7 @@ function relativeTime(iso: string | null): string | null {
   return new Date(ts).toLocaleDateString()
 }
 
-function ToolCard({ tool }: { tool: Tool }) {
+function ToolCard({ tool, confidence }: { tool: Tool; confidence?: number }) {
   const truncatedDescription =
     tool.description.length > 120
       ? tool.description.slice(0, 120).trimEnd() + "..."
@@ -265,12 +212,27 @@ function ToolCard({ tool }: { tool: Tool }) {
                 {tool.name}
               </span>
             </CardTitle>
-            <Badge
-              variant="secondary"
-              className="shrink-0 rounded-full border border-border/80 bg-background/60 px-2.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-            >
-              v{tool.version}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {confidence !== undefined && confidence >= 0.6 && (
+                <span
+                  title={`Semantic match confidence ${Math.round(confidence * 100)}%`}
+                  className={cn(
+                    "rounded-full px-2 py-0.5 font-mono text-[10px] tabular-nums ring-1",
+                    confidence >= 0.85
+                      ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30"
+                      : "bg-amber-500/10 text-amber-300 ring-amber-500/30",
+                  )}
+                >
+                  {Math.round(confidence * 100)}%
+                </span>
+              )}
+              <Badge
+                variant="secondary"
+                className="rounded-full border border-border/80 bg-background/60 px-2.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+              >
+                v{tool.version}
+              </Badge>
+            </div>
           </div>
           <CardDescription className="line-clamp-2 pt-0.5 text-sm leading-6 text-muted-foreground/95">
             {truncatedDescription}
@@ -418,90 +380,199 @@ export function CatalogClient({
   const [search, setSearch] = useState("")
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
 
+  // Semantic ranking from the registry's BM25 index. `null` means no
+  // semantic response yet (use lexical fallback); `[]` means the registry
+  // explicitly returned no matches.
+  const [ranked, setRanked] = useState<RankedTool[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [semanticFailed, setSemanticFailed] = useState(false)
+  const latestSearchRef = useRef(0)
+
+  const trimmedQuery = search.trim()
+
+  // Debounced semantic search. Each keystroke schedules a new fetch 180ms
+  // later; only the most recent response is allowed to mutate state so
+  // out-of-order responses can't overwrite the current ranking.
+  useEffect(() => {
+    if (!trimmedQuery) {
+      setRanked(null)
+      setSearching(false)
+      setSemanticFailed(false)
+      return
+    }
+    const my = ++latestSearchRef.current
+    setSearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const hits = await searchToolsSemantic(trimmedQuery, 50)
+        if (my !== latestSearchRef.current) return
+        setRanked(hits)
+        setSemanticFailed(false)
+      } catch {
+        if (my !== latestSearchRef.current) return
+        // Registry unreachable — fall back to local lexical match below.
+        setRanked(null)
+        setSemanticFailed(true)
+      } finally {
+        if (my === latestSearchRef.current) setSearching(false)
+      }
+    }, 180)
+    return () => clearTimeout(t)
+  }, [trimmedQuery])
+
   // Derive unique categories
   const categories = useMemo(() => {
     const set = new Set(tools.map((t) => t.category))
     return Array.from(set).sort()
   }, [tools])
 
-  // Filter logic
+  // Confidence map keyed by tool id — drives the per-card score chip.
+  const confidenceById = useMemo(() => {
+    if (!ranked) return new Map<string, number>()
+    return new Map(ranked.map((r) => [r.id, r.confidence]))
+  }, [ranked])
+
+  // Final filter+rank pipeline:
+  //   1. Empty query → all tools, original order.
+  //   2. Semantic ranked list available → reorder by rank, drop misses.
+  //   3. Semantic failed/pending → local lexical filter (substring) so
+  //      offline / 5xx doesn't block the user from finding anything.
+  //   4. Category pill restricts the result set after ranking.
   const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim()
+    const q = trimmedQuery.toLowerCase()
 
-    return tools.filter((tool) => {
-      // Category filter
-      if (activeCategory && tool.category !== activeCategory) return false
-
-      // Text search
-      if (!q) return true
-      return (
-        tool.name.toLowerCase().includes(q) ||
-        tool.description.toLowerCase().includes(q) ||
-        tool.id.toLowerCase().includes(q) ||
-        tool.tags.some((tag) => tag.toLowerCase().includes(q))
+    let base: Tool[]
+    if (!q) {
+      base = tools
+    } else if (ranked && ranked.length > 0) {
+      const byId = new Map(tools.map((t) => [t.id, t]))
+      base = ranked
+        .map((r) => byId.get(r.id))
+        .filter((t): t is Tool => Boolean(t))
+    } else if (ranked && ranked.length === 0) {
+      base = []
+    } else {
+      // Pre-response or semantic-failed: lexical fallback
+      base = tools.filter(
+        (tool) =>
+          tool.name.toLowerCase().includes(q) ||
+          tool.description.toLowerCase().includes(q) ||
+          tool.id.toLowerCase().includes(q) ||
+          tool.tags.some((tag) => tag.toLowerCase().includes(q)),
       )
-    })
-  }, [tools, search, activeCategory])
+    }
+
+    if (activeCategory) {
+      return base.filter((t) => t.category === activeCategory)
+    }
+    return base
+  }, [tools, trimmedQuery, ranked, activeCategory])
 
   return (
     <div className="w-full">
-      {/* Hero section with gradient */}
-      <div className="hero-surface mb-10">
-        {/* Background gradient orbs */}
-        <div className="pointer-events-none absolute -left-20 -top-20 size-64 rounded-full bg-gradient-to-br from-primary/[0.16] to-primary/[0.02] blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-16 -right-16 size-48 rounded-full bg-gradient-to-br from-sky-400/[0.12] to-violet-400/[0.02] blur-3xl" />
-
-        <div className="relative flex items-center gap-4">
-          <div className="relative flex size-12 items-center justify-center">
-            <span className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/35 to-primary/10 blur-lg" />
-            <div className="relative flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/10 ring-1 ring-primary/35">
-              <Flame className="size-6 text-primary" />
-            </div>
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Tool Catalog</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Browse and discover tools in the Kiln registry
-              {tools.length > 0 && (
-                <span className="ml-1.5 inline-flex items-center gap-1 font-medium text-foreground">
-                  <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-                  {filtered.length}
-                  {filtered.length !== tools.length &&
-                    ` of ${tools.length}`}{" "}
-                  available
-                </span>
-              )}
-            </p>
-          </div>
+      {/* Header — single line, no gradient orbs, no oversized icon. The
+          live count moves to a quiet status pill on the right. */}
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Tools</h1>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Discover and run any tool in the Kiln registry.
+          </p>
         </div>
+        {tools.length > 0 && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 px-2.5 py-1 text-[11px] tabular-nums text-muted-foreground">
+            <span className="size-1.5 rounded-full bg-emerald-500" />
+            {filtered.length === tools.length
+              ? `${tools.length} available`
+              : `${filtered.length} / ${tools.length}`}
+          </span>
+        )}
       </div>
 
       {/* Stats row */}
       {stats && <StatsRow stats={stats} />}
       {systemStatus && <SystemStatusPanel systemStatus={systemStatus} />}
 
-      {/* Natural-language tool discovery — the headline demo feature. */}
-      <SmartSearch />
-
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/60" />
-        <Input
-          placeholder="Search by name, description, id, or tag..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-11 rounded-xl border-border/70 bg-card/70 pl-10 pr-10 text-sm shadow-sm ring-1 ring-border/60 transition-all duration-300 placeholder:text-muted-foreground/60 focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-primary/35"
-        />
-        {search && (
-          <div className="absolute right-2 top-1/2 -translate-y-1/2">
-            <Button
-              variant="ghost"
-              size="icon-xs"
+      {/* Unified search: one bar that does both keyword AND natural-language
+          discovery. As the user types, the registry's BM25 router ranks
+          every tool; the grid below re-orders to match. The "ai-ranked"
+          chip on the right makes the mode visible without forcing the user
+          to choose. Empty state surfaces sample intents inline. */}
+      <div className="mb-6 overflow-hidden rounded-lg border border-border/60 bg-card/40">
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5">
+          {searching ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground/70" />
+          ) : (
+            <Search className="size-3.5 shrink-0 text-muted-foreground/70" />
+          )}
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, tag, or describe what you need…"
+            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/55 focus:outline-none"
+            aria-label="Search tools"
+          />
+          {trimmedQuery && (
+            <span
+              className={cn(
+                "hidden h-5 items-center rounded border px-1.5 font-mono text-[10px] sm:inline-flex",
+                ranked && ranked.length > 0
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : semanticFailed
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                    : "border-border/70 bg-muted/60 text-muted-foreground",
+              )}
+              title={
+                ranked && ranked.length > 0
+                  ? "Results ranked by the semantic router"
+                  : semanticFailed
+                    ? "Semantic router unavailable — using local match"
+                    : "Searching"
+              }
+            >
+              {ranked && ranked.length > 0
+                ? "ai-ranked"
+                : semanticFailed
+                  ? "local"
+                  : "ranking…"}
+            </span>
+          )}
+          {trimmedQuery && (
+            <button
+              type="button"
               onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+              className="rounded-md p-0.5 text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground"
             >
               <X className="size-3.5" />
-            </Button>
+            </button>
+          )}
+        </div>
+
+        {/* Sample intents — only when the input is empty. Kept inline so
+            the search box isn't pushed off-screen on small viewports. */}
+        {!trimmedQuery && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/50 px-3.5 py-2">
+            <span className="text-[11px] text-muted-foreground/60">Try</span>
+            {[
+              "weather for Tokyo",
+              "top stories on ycombinator",
+              "latest bitcoin price",
+              "transcript of a youtube video",
+            ].map((s, i, arr) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSearch(s)}
+                className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {s}
+                {i < arr.length - 1 && (
+                  <span className="ml-2 text-muted-foreground/30">·</span>
+                )}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -581,7 +652,11 @@ export function CatalogClient({
       {filtered.length > 0 && (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {filtered.map((tool) => (
-            <ToolCard key={tool.id} tool={tool} />
+            <ToolCard
+              key={tool.id}
+              tool={tool}
+              confidence={confidenceById.get(tool.id)}
+            />
           ))}
         </div>
       )}
