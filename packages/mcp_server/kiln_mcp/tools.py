@@ -30,7 +30,14 @@ REGISTRY_URL = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
 _registered_tools: dict[str, dict] = {}
 _registered_names: dict[str, str] = {}
 _stale_tool_ids: set[str] = set()
-_tool_lock = asyncio.Lock()
+_tool_lock: asyncio.Lock | None = None
+
+
+def _get_lock() -> asyncio.Lock:
+    global _tool_lock
+    if _tool_lock is None:
+        _tool_lock = asyncio.Lock()
+    return _tool_lock
 
 
 def _build_mcp_tool_schema(tool_spec: dict) -> dict:
@@ -115,6 +122,13 @@ def _make_tool_handler(tool_id: str, tool_spec: dict):
     description = tool_spec.get("description", "")
     params = tool_spec.get("params", [])
 
+    if not name.isidentifier():
+        raise ValueError(f"Invalid tool name (not a Python identifier): {name!r}")
+    for p in params:
+        pname = p.get("name", "")
+        if not pname.isidentifier():
+            raise ValueError(f"Invalid param name for tool {name}: {pname!r}")
+
     _TYPE_MAP = {
         "str": "str", "int": "int", "float": "float",
         "bool": "bool", "list": "list", "dict": "dict",
@@ -162,7 +176,7 @@ async def sync_tools(mcp_server) -> int:
     if not tools:
         return 0
 
-    async with _tool_lock:
+    async with _get_lock():
         current_ids = set(_registered_tools.keys())
         new_ids = {t["id"] for t in tools}
 
@@ -170,6 +184,9 @@ async def sync_tools(mcp_server) -> int:
         for tool in tools:
             tid = tool["id"]
             tname = tool["name"]
+
+            if tid in _stale_tool_ids:
+                _stale_tool_ids.discard(tid)
 
             if tid in current_ids:
                 continue
@@ -182,7 +199,11 @@ async def sync_tools(mcp_server) -> int:
                 )
                 continue
 
-            handler = _make_tool_handler(tid, tool)
+            try:
+                handler = _make_tool_handler(tid, tool)
+            except ValueError as e:
+                logger.error("Skipping tool %s: %s", tid, e)
+                continue
             mcp_server.tool(name=tname, description=tool.get("description", ""))(handler)
             _registered_tools[tid] = tool
             _registered_names[tname] = tid
@@ -192,6 +213,9 @@ async def sync_tools(mcp_server) -> int:
         newly_stale = current_ids - new_ids
         for rid in newly_stale:
             _stale_tool_ids.add(rid)
+            stale_spec = _registered_tools.pop(rid, None)
+            if stale_spec is not None:
+                _registered_names.pop(stale_spec.get("name", ""), None)
         if newly_stale:
             logger.warning(
                 "Tools removed from registry (now stale in MCP): %s",
