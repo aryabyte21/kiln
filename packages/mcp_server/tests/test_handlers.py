@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from kiln_mcp.main import _build_mcp_tool_schema, _make_tool_handler
+from kiln_mcp.tools import _build_mcp_tool_schema, _make_tool_handler
 
 # ── _build_mcp_tool_schema ───────────────────────────────────────────────────
 
