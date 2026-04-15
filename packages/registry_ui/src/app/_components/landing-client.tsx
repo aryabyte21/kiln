@@ -178,7 +178,7 @@ function Hero({ toolCount }: { toolCount: number }) {
           </span>
           <span className="block text-[clamp(2.75rem,8.5vw,6.75rem)] font-semibold leading-[0.95] tracking-[-0.04em]">
             <RotatingWord
-              words={["build themselves.", "test themselves.", "ship themselves.", "evolve themselves."]}
+              words={["build themselves", "test themselves", "ship themselves", "evolve themselves"]}
               textClassName="bg-gradient-to-r from-primary via-orange-300 to-amber-200 bg-clip-text text-transparent"
             />
           </span>
@@ -679,7 +679,7 @@ function FinalCta() {
             className="bg-gradient-to-r from-primary via-orange-300 to-amber-200 bg-clip-text text-transparent"
             style={{ backgroundSize: "200% 100%", animation: "gradientSlide 6s ease-in-out infinite" }}
           >
-            Start using them.
+            Start using them
           </span>
         </h2>
         <p className="mx-auto mt-7 max-w-xl text-[14.5px] leading-relaxed text-muted-foreground/80">
