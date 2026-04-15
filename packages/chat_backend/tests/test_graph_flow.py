@@ -118,3 +118,71 @@ TERMINATE
 def test_sanitize_agent_output_leaves_normal_text_alone() -> None:
     clean = "Bitcoin is trading higher today.\nTERMINATE"
     assert _sanitize_agent_output(clean) == "Bitcoin is trading higher today."
+
+
+# ── Rate-limit backoff ────────────────────────────────────────────────────────
+
+
+def test_is_rate_limit_error_detects_429() -> None:
+    from kiln_chat_backend.graph_flow import KilnGraphFlow
+
+    assert KilnGraphFlow._is_rate_limit_error(Exception("Error code: 429"))
+    assert KilnGraphFlow._is_rate_limit_error(Exception("rate_limited"))
+    assert KilnGraphFlow._is_rate_limit_error(Exception("rate limit exceeded"))
+    assert KilnGraphFlow._is_rate_limit_error(Exception("service at capacity"))
+    assert not KilnGraphFlow._is_rate_limit_error(Exception("404 not found"))
+    assert not KilnGraphFlow._is_rate_limit_error(Exception("connection refused"))
+
+
+def test_run_node_with_backoff_retries_on_rate_limit(monkeypatch) -> None:
+    """Rate limit errors trigger exponential backoff and retry."""
+    from kiln_chat_backend.graph_flow import KilnGraphFlow
+
+    flow = KilnGraphFlow.__new__(KilnGraphFlow)
+    flow._emit = lambda *a, **kw: None  # type: ignore[attr-defined]
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "kiln_chat_backend.graph_flow.time.sleep", lambda s: sleeps.append(s)
+    )
+
+    call_count = 0
+
+    def fake_run(node, context, original_task):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise RuntimeError("Error code: 429 - Rate limit exceeded")
+        return "ok"
+
+    monkeypatch.setattr(flow, "_run_node", fake_run)
+
+    result = flow._run_node_with_backoff({"id": "n"}, {}, "")
+    assert result == "ok"
+    assert call_count == 3
+    assert sleeps == [2, 4]  # exponential backoff
+
+
+def test_run_node_with_backoff_does_not_retry_non_rate_limit(monkeypatch) -> None:
+    """Non-rate-limit errors return the error string without retrying."""
+    from kiln_chat_backend.graph_flow import KilnGraphFlow
+
+    flow = KilnGraphFlow.__new__(KilnGraphFlow)
+    flow._emit = lambda *a, **kw: None  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        "kiln_chat_backend.graph_flow.time.sleep", lambda s: None
+    )
+
+    call_count = 0
+
+    def fake_run(node, context, original_task):
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(flow, "_run_node", fake_run)
+
+    result = flow._run_node_with_backoff({"id": "n"}, {}, "")
+    assert "crashed" in result
+    assert "connection refused" in result
+    assert call_count == 1  # no retry for non-rate-limit errors
