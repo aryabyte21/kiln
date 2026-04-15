@@ -98,11 +98,13 @@ async def test_cache_expires_after_ttl() -> None:
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.get = AsyncMock(return_value=mock_resp)
 
-    with patch("kiln_mcp.user_env.httpx.AsyncClient", return_value=mock_client):
-        with patch.dict("os.environ", {"CLERK_SECRET_KEY": "sk_test_123"}):
-            with patch("kiln_mcp.user_env.time.time", return_value=1000.0):
-                await fetch_user_env_vars("user_123")
-            with patch("kiln_mcp.user_env.time.time", return_value=1500.0):
-                await fetch_user_env_vars("user_123")
+    with (
+        patch("kiln_mcp.user_env.httpx.AsyncClient", return_value=mock_client),
+        patch.dict("os.environ", {"CLERK_SECRET_KEY": "sk_test_123"}),
+    ):
+        with patch("kiln_mcp.user_env.time.time", return_value=1000.0):
+            await fetch_user_env_vars("user_123")
+        with patch("kiln_mcp.user_env.time.time", return_value=1500.0):
+            await fetch_user_env_vars("user_123")
 
     assert mock_client.get.call_count == 2

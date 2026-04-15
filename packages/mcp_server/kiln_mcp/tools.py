@@ -19,9 +19,8 @@ from typing import Any
 
 import httpx
 
-from kiln_shared.httpx_client import async_client
-
 from kiln_mcp.user_env import fetch_user_env_vars
+from kiln_shared.httpx_client import async_client
 
 logger = logging.getLogger(__name__)
 
