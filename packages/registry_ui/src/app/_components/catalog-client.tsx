@@ -393,14 +393,21 @@ export function CatalogClient({
   // Debounced semantic search. Each keystroke schedules a new fetch 180ms
   // later; only the most recent response is allowed to mutate state so
   // out-of-order responses can't overwrite the current ranking.
+  //
+  // Bumping `latestSearchRef` on EVERY effect run (including the empty-query
+  // branch) is what makes this race-free: any in-flight request from a
+  // previous query that hasn't resolved yet sees its `my` no longer match
+  // the ref and bails out before mutating `ranked`. Without this, clearing
+  // the input mid-flight would let the prior response repopulate `ranked`
+  // after we'd already cleared it.
   useEffect(() => {
+    const my = ++latestSearchRef.current
     if (!trimmedQuery) {
       setRanked(null)
       setSearching(false)
       setSemanticFailed(false)
       return
     }
-    const my = ++latestSearchRef.current
     setSearching(true)
     const t = setTimeout(async () => {
       try {
