@@ -139,6 +139,66 @@ def test_tools_list_includes_stats_field(client: TestClient) -> None:
     assert stats["last_status"] in {"never", "success", "error"}
 
 
+def test_tools_search_semantic_mode_ranks_by_intent(client: TestClient) -> None:
+    """GET /tools/search?mode=semantic ranks by paraphrased intent.
+
+    Guards the core discovery claim end-to-end: the HTTP layer wires the
+    BM25 index, normalizes confidence, and returns the right tool for a
+    query that doesn't contain its name.
+    """
+    resp = client.get("/tools/search", params={"q": "ycombinator news", "mode": "semantic"})
+    assert resp.status_code == 200
+    hits = resp.json()
+    assert hits, "semantic search must find something for a paraphrase we indexed"
+    assert hits[0]["id"] == "com.kiln.tools.hackernews_top"
+    assert hits[0]["confidence"] == 1.0
+    # score and confidence must be present so clients can gate on them.
+    assert "score" in hits[0]
+    assert "confidence" in hits[0]
+
+
+def test_tools_search_empty_query_returns_empty_list(client: TestClient) -> None:
+    resp = client.get("/tools/search", params={"q": "", "mode": "semantic"})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_tools_route_returns_best_match_and_args_suggestion(client: TestClient) -> None:
+    """POST /tools/route is the advertised public contract for agents."""
+    resp = client.post("/tools/route", json={"intent": "latest bitcoin price"})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # Top-level shape.
+    assert body["intent"] == "latest bitcoin price"
+    assert body["reranked"] is False, "rerank defaults off; no Mistral call"
+    assert isinstance(body["candidates"], list)
+    assert body["match"] is not None
+
+    match = body["match"]
+    # The match must include a tool_def so an agent can call /execute
+    # without a second round-trip to fetch the schema.
+    assert "tool_def" in match
+    assert match["tool_def"]["type"] == "function"
+    assert 0.0 <= match["confidence"] <= 1.0
+    # args_suggestion is present on the match (may be empty dict).
+    assert "args_suggestion" in match
+
+
+def test_tools_route_rejects_missing_intent(client: TestClient) -> None:
+    resp = client.post("/tools/route", json={})
+    assert resp.status_code == 422  # FastAPI validation error
+
+
+def test_tools_route_empty_intent_rejected(client: TestClient) -> None:
+    """An empty-string intent must be rejected by pydantic validation rather
+    than quietly returning the most-popular tool. Silent ranking on an empty
+    query would be worse than a 422 — the caller almost certainly has a bug.
+    """
+    resp = client.post("/tools/route", json={"intent": ""})
+    assert resp.status_code == 422
+
+
 def test_tool_stats_endpoint_returns_zeros_for_unused_tool(
     client: TestClient,
 ) -> None:

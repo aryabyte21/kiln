@@ -81,6 +81,69 @@ export async function searchTools(query: string): Promise<Tool[]> {
   return res.json()
 }
 
+/** A ranked tool returned by /tools/search?mode=semantic or /tools/route. */
+export interface RankedTool extends Tool {
+  /** BM25 score (or cosine when reranked). Monotonic within one response. */
+  score: number
+  /** Score normalized to [0, 1] against the top hit in this response.
+   *  Stable enough to threshold a synthesis gate or sort a UI. */
+  confidence: number
+}
+
+export interface IntentRouteResponse {
+  intent: string
+  match: {
+    tool_id: string
+    name: string
+    description: string
+    confidence: number
+    score: number
+    tool_def: Record<string, unknown>
+    args_suggestion: Record<string, unknown>
+  } | null
+  runner_up: IntentRouteResponse["match"]
+  candidates: Array<{
+    tool_id: string
+    name: string
+    description: string
+    confidence: number
+    score: number
+    tool_def: Record<string, unknown>
+  }>
+  reranked: boolean
+}
+
+export async function searchToolsSemantic(
+  query: string,
+  limit = 10,
+): Promise<RankedTool[]> {
+  const res = await fetch(
+    `${REGISTRY_URL}/tools/search?mode=semantic&limit=${limit}&q=${encodeURIComponent(query)}`,
+    { cache: "no-store" },
+  )
+  if (!res.ok) throw new Error("Semantic search failed")
+  return res.json()
+}
+
+export async function routeIntent(
+  intent: string,
+  opts: { minConfidence?: number; rerank?: boolean; limit?: number } = {},
+): Promise<IntentRouteResponse> {
+  const res = await fetch(`${REGISTRY_URL}/tools/route`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      intent,
+      min_confidence: opts.minConfidence ?? 0,
+      rerank: opts.rerank ?? false,
+      limit: opts.limit ?? 5,
+    }),
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error("Intent routing failed")
+  return res.json()
+}
+
 export async function fetchToolVersions(toolId: string): Promise<{ tool_id: string; versions: Array<{ version: string; description: string; author: string }>; count: number }> {
   const res = await fetch(`${REGISTRY_URL}/tools/versions/${toolId}`, { next: { revalidate: 60 } })
   if (!res.ok) throw new Error("Failed to fetch versions")

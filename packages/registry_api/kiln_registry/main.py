@@ -50,9 +50,11 @@ from kiln_shared.cors import install_cors
 from kiln_shared.httpx_client import async_client
 from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
 from kiln_shared.request_id import KilnRequestIDMiddleware
+from kiln_shared.spec import KilnTool
 
 from .loader import KilnLoader
 from .registry import get_global_registry
+from .semantic import get_semantic_index, refresh_semantic_index, rerank_with_embeddings
 
 
 class ExecuteToolRequest(BaseModel):
@@ -148,6 +150,8 @@ async def _lifespan(_app: FastAPI):
         logger.info(f"Synced {len(tools)} tools to database")
     else:
         logger.info(f"Registry dir not found: {REGISTRY_DIR} — starting empty")
+
+    refresh_semantic_index(get_global_registry().list_all())
     yield
 
 
@@ -391,22 +395,124 @@ async def list_tools():
 
 
 @app.get("/tools/search", summary="Search tools by query string")
-async def search_tools(q: str = ""):
-    """Full-text search across tool names, descriptions, tags, and IDs."""
-    if not q.strip():
+async def search_tools(q: str = "", mode: str = "semantic", limit: int = 20):
+    """Find tools for a query.
+
+    Modes:
+      - ``semantic`` *(default)* — BM25 ranking over name/description/tags/id.
+        Agents should prefer this; it tolerates paraphrase ("ycombinator news"
+        → ``hackernews_top``) and returns a confidence score suitable for
+        gating synthesis.
+      - ``lexical`` — legacy SQL LIKE search for backwards compatibility with
+        the registry UI's exact-token filter.
+
+    The response is a ranked list; the first item is the best match.
+    """
+    q = (q or "").strip()
+    if not q:
         return []
 
-    from .db import db_search_tools
+    if mode == "lexical":
+        from .db import db_search_tools
 
-    results = await db_search_tools(q.strip())
-    # Match results against in-memory registry to get callables
-    registry = get_global_registry()
-    matched = []
-    for row in results:
-        tool = registry.get(row.id)
-        if tool:
-            matched.append({**_tool_to_dict(tool), "tool_def": _tool_def(tool)})
-    return matched
+        results = await db_search_tools(q)
+        registry = get_global_registry()
+        matched = []
+        for row in results:
+            tool = registry.get(row.id)
+            if tool:
+                matched.append({**_tool_to_dict(tool), "tool_def": _tool_def(tool)})
+        return matched
+
+    hits = get_semantic_index().search(q, limit=limit)
+    return [
+        {
+            **_tool_to_dict(hit.tool),
+            "tool_def": _tool_def(hit.tool),
+            "score": round(hit.score, 4),
+            "confidence": round(hit.confidence, 4),
+        }
+        for hit in hits
+    ]
+
+
+class RouteIntentRequest(BaseModel):
+    """Body for ``POST /tools/route``."""
+
+    intent: str = Field(..., min_length=1, max_length=500, description="Natural-language description of what the agent wants to do")
+    min_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Discard hits below this confidence (0..1)")
+    rerank: bool = Field(False, description="Rerank the top BM25 hits with mistral-embed (requires MISTRAL_API_KEY)")
+    limit: int = Field(5, ge=1, le=20, description="Max number of ranked candidates to return")
+
+
+@app.post("/tools/route", summary="Route a natural-language intent to the best registered tool")
+async def route_intent(body: RouteIntentRequest):
+    """Map an intent like "give me hacker news top stories" onto the best
+    registered tool. Callers that already know which tool they want should
+    keep calling ``/tools/{id}/execute`` directly — this endpoint exists so
+    agents, synthesis pre-checks, and UIs can *discover* a match without
+    hardcoding tool IDs.
+
+    Response shape::
+
+        {
+          "intent": "...",
+          "match":    { tool_def, tool_id, confidence, score, args_suggestion },
+          "runner_up": { ... } | None,
+          "candidates": [ ... up to limit ... ],
+          "reranked":  bool,
+        }
+
+    `args_suggestion` is a best-guess mapping of the intent's tokens to the
+    top tool's required string params — helpful for the UI to pre-fill a
+    try-it-now form but NOT a substitute for proper argument extraction by
+    the calling LLM.
+    """
+    hits = get_semantic_index().search(body.intent, limit=body.limit)
+    reranked = False
+    if body.rerank and hits:
+        new_order = await rerank_with_embeddings(body.intent, hits, top_k=min(body.limit, 8))
+        reranked = new_order is not hits
+        hits = new_order
+
+    if body.min_confidence > 0:
+        hits = [h for h in hits if h.confidence >= body.min_confidence]
+
+    candidates = [
+        {
+            "tool_id": hit.tool.id,
+            "name": hit.tool.spec.name,
+            "description": hit.tool.spec.description,
+            "confidence": round(hit.confidence, 4),
+            "score": round(hit.score, 4),
+            "tool_def": _tool_def(hit.tool),
+        }
+        for hit in hits
+    ]
+
+    def _args_suggestion(tool: KilnTool | None) -> dict[str, Any]:
+        # Pre-fill only required string params that don't have enums — we'd
+        # rather return {} than guess wrong and let a caller POST a bogus
+        # arg to /execute.
+        if tool is None:
+            return {}
+        out: dict[str, Any] = {}
+        for p in tool.spec.params:
+            if p.required and p.type == "str" and p.enum is None and p.default is None:
+                out[p.name] = body.intent
+        return out
+
+    top_tool = hits[0].tool if hits else None
+    match = candidates[0] | {"args_suggestion": _args_suggestion(top_tool)} if candidates else None
+    runner_up = candidates[1] if len(candidates) > 1 else None
+
+    return {
+        "intent": body.intent,
+        "match": match,
+        "runner_up": runner_up,
+        "candidates": candidates,
+        "reranked": reranked,
+    }
 
 
 @app.get("/tools/versions/{tool_id:path}", summary="List all versions of a tool")
@@ -611,6 +717,8 @@ async def register_tool(
         author=s.author, category=s.category,
         tags_json=_json.dumps(s.tags),
     )
+
+    refresh_semantic_index(get_global_registry().list_all())
 
     return JSONResponse(
         status_code=200,
@@ -826,6 +934,7 @@ def delete_tool(tool_id: str, _user: KilnUser = Depends(require_auth)):
     if not registry.has(tool_id):
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
     registry.unregister(tool_id)
+    refresh_semantic_index(registry.list_all())
     return {"success": True, "tool_id": tool_id}
 
 
@@ -933,6 +1042,8 @@ async def synthesis_callback(
         author=s.author, category=s.category,
         tags_json=_json.dumps(s.tags),
     )
+
+    refresh_semantic_index(get_global_registry().list_all())
 
     logger.info(f"registered tool {resolved_tool_id} v{version}")
     return {

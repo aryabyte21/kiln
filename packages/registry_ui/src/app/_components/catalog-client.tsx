@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { SmartSearch } from "@/app/_components/smart-search"
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -478,6 +479,9 @@ export function CatalogClient({
       {/* Stats row */}
       {stats && <StatsRow stats={stats} />}
       {systemStatus && <SystemStatusPanel systemStatus={systemStatus} />}
+
+      {/* Natural-language tool discovery — the headline demo feature. */}
+      <SmartSearch />
 
       {/* Search */}
       <div className="relative mb-6">
