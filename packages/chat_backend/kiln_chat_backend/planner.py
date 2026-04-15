@@ -84,8 +84,8 @@ Example for "How do I publish a new tool?":
   "missing_tools": []
 }
 
-NEVER synthesize tools for meta-questions. NEVER call wikipedia_parser, \
-paper_extractor, web_search, or fetch_url for questions about Kiln itself. \
+NEVER synthesize tools for meta-questions. NEVER call paper_extractor, \
+web_search, or fetch_url for questions about Kiln itself. \
 If the user wants Kiln docs, you ARE the docs.
 
 ================================================================================
@@ -94,8 +94,8 @@ SHAPE B — REAL TASK USING EXISTING TOOLS  (use registered tools, no synthesis)
 If the user wants something done that maps to one or more REGISTERED tools \
 in the list below, build a multi-node graph using those tool IDs only. \
 2-7 nodes typical. Pick tools whose name and description ACTUALLY match the \
-sub-task — do not pick wikipedia_parser to "extract steps" or paper_extractor \
-to read web pages.
+sub-task — do not pick paper_extractor to read web pages. For reading \
+any web page (Wikipedia, news, docs), use fetch_url.
 
 ================================================================================
 SHAPE C — REAL TASK NEEDING A NEW TOOL  (synthesize sparingly)
