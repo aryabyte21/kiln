@@ -194,8 +194,16 @@ function AttachmentImage({
       </figure>
 
       <Dialog open={zoomed} onOpenChange={setZoomed}>
-        <DialogContent className="max-w-[min(92vw,1200px)] gap-0 overflow-hidden border border-white/10 bg-[#0b0d14] p-0">
-          <DialogHeader className="flex-row items-center justify-between gap-3 border-b border-white/5 px-5 py-3">
+        {/* Inline style forces a real width — DialogContent bakes in
+            `sm:max-w-sm` (384 px) which twMerge can't override with an
+            unprefixed `max-w-[...]` class. Inline style sits outside
+            Tailwind's cascade so the zoom modal always gets room for the
+            image regardless of viewport. */}
+        <DialogContent
+          style={{ width: "min(92vw, 1200px)", maxWidth: "min(92vw, 1200px)" }}
+          className="flex max-h-[92vh] flex-col gap-0 overflow-hidden border border-white/10 bg-[#0b0d14] p-0"
+        >
+          <DialogHeader className="flex flex-row items-center justify-between gap-3 border-b border-white/5 px-5 py-3">
             <div className="min-w-0">
               <DialogTitle className="truncate text-[13px] font-semibold tracking-tight text-foreground">
                 {caption}
@@ -213,22 +221,26 @@ function AttachmentImage({
               Download
             </button>
           </DialogHeader>
-          {/* Click anywhere on the image (or the surrounding pad) to close —
-              standard lightbox behavior. The Base UI Dialog backdrop closes
-              too, but users naturally click the image itself. */}
-          <button
-            type="button"
+          {/* Div (not button) because nested interactive elements complicate
+              keyboard focus, and the backdrop already handles dismiss. Clicking
+              the image still closes — we keep the cursor-zoom-out affordance. */}
+          <div
             onClick={() => setZoomed(false)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") setZoomed(false)
+            }}
             aria-label="Close image"
-            className="flex max-h-[78vh] w-full cursor-zoom-out items-center justify-center bg-black/40 p-4"
+            className="flex min-h-[60vh] flex-1 cursor-zoom-out items-center justify-center bg-black/40 p-4"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={attachment.data_url}
               alt={alt ?? caption}
-              className="max-h-[74vh] max-w-full object-contain"
+              className="max-h-[78vh] max-w-full object-contain"
             />
-          </button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

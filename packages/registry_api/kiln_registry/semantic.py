@@ -38,6 +38,7 @@ import threading
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 from kiln_shared.spec import KilnTool
 
@@ -211,6 +212,31 @@ class SemanticIndex:
 # keeps the embedding cost flat regardless of registry size and prevents
 # a misconfigured Mistral client from tanking routing latency.
 
+# Lazily-initialised singleton. A fresh `Mistral()` per call re-opens the
+# connection pool (and per-process TLS handshake) on every rerank — fine
+# for occasional use but wasteful once an agent starts routing every
+# intent. We cache the client and bind it to the API key so a rotated
+# env var forces a rebuild.
+_mistral_client: tuple[str, Any] | None = None
+
+
+def _get_mistral_client() -> Any | None:
+    """Return a cached Mistral client, or None if the key/SDK is missing."""
+    global _mistral_client
+    api_key = os.environ.get("MISTRAL_API_KEY")
+    if not api_key:
+        return None
+    if _mistral_client is not None and _mistral_client[0] == api_key:
+        return _mistral_client[1]
+    try:
+        from mistralai import Mistral
+    except ImportError:
+        return None
+    client = Mistral(api_key=api_key)
+    _mistral_client = (api_key, client)
+    return client
+
+
 async def rerank_with_embeddings(
     intent: str,
     hits: list[SearchHit],
@@ -222,20 +248,25 @@ async def rerank_with_embeddings(
     If the Mistral client or API key is missing, returns `hits` unchanged.
     Callers should treat this as a best-effort enhancement, not a hard
     dependency — semantic routing still works with BM25 alone.
-    """
-    if not hits or not os.environ.get("MISTRAL_API_KEY"):
-        return hits
 
-    try:
-        from mistralai import Mistral
-    except ImportError:
+    When reranking succeeds we return *only* the top-K (reranked) hits,
+    **not** ``rescored + hits[top_k:]``. Mixing cosine-scored heads with
+    BM25-scored tails would produce a list whose ``confidence`` fields
+    live on two incompatible scales — any downstream ``min_confidence``
+    gate would be lying to the caller. If a caller wants more than K
+    results, they can re-request with a larger ``top_k``; the cost is
+    one extra embedding per doc.
+    """
+    if not hits or top_k <= 0:
+        return hits
+    client = _get_mistral_client()
+    if client is None:
         return hits
 
     subset = hits[:top_k]
     docs = [SemanticIndex._doc_text(h.tool) for h in subset]
 
     try:
-        client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
         response = await client.embeddings.create_async(
             model="mistral-embed",
             inputs=[intent, *docs],
@@ -247,14 +278,17 @@ async def rerank_with_embeddings(
     vectors = [d.embedding for d in response.data]
     qv, dvs = vectors[0], vectors[1:]
 
-    def _cos(a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b, strict=True))
-        na = math.sqrt(sum(x * x for x in a)) or 1.0
-        nb = math.sqrt(sum(x * x for x in b)) or 1.0
-        return dot / (na * nb)
+    # Precompute the query norm once — it's constant across every doc
+    # comparison, so recomputing per-doc burns O(N · |qv|) for no reason.
+    q_norm = math.sqrt(sum(x * x for x in qv)) or 1.0
+
+    def _cos_score(dv: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(qv, dv, strict=True))
+        d_norm = math.sqrt(sum(x * x for x in dv)) or 1.0
+        return dot / (q_norm * d_norm)
 
     rescored = [
-        SearchHit(tool=h.tool, score=_cos(qv, dv), confidence=0.0)
+        SearchHit(tool=h.tool, score=_cos_score(dv), confidence=0.0)
         for h, dv in zip(subset, dvs, strict=True)
     ]
     rescored.sort(key=lambda h: h.score, reverse=True)
@@ -264,8 +298,7 @@ async def rerank_with_embeddings(
     # and embedding-rerank mode.
     for h in rescored:
         h.confidence = min(1.0, h.score / top)
-    tail = hits[top_k:]
-    return rescored + tail
+    return rescored
 
 
 # ── Global index singleton ───────────────────────────────────────────────────

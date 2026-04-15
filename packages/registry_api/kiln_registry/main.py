@@ -27,6 +27,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -55,6 +56,18 @@ from kiln_shared.spec import KilnTool
 from .loader import KilnLoader
 from .registry import get_global_registry
 from .semantic import get_semantic_index, refresh_semantic_index, rerank_with_embeddings
+
+
+async def _refresh_index_nonblocking() -> None:
+    """Rebuild the semantic index off the event loop.
+
+    ``refresh_semantic_index`` walks every registered tool to re-tokenize
+    and rebuild the inverted index. It's O(tokens) — milliseconds today,
+    but grows with the registry. Running it inline in an async handler
+    would pin the event loop; using ``asyncio.to_thread`` keeps request
+    latency flat as the registry scales.
+    """
+    await asyncio.to_thread(refresh_semantic_index, get_global_registry().list_all())
 
 
 class ExecuteToolRequest(BaseModel):
@@ -411,6 +424,9 @@ async def search_tools(q: str = "", mode: str = "semantic", limit: int = 20):
     q = (q or "").strip()
     if not q:
         return []
+    # Clamp `limit` so an unauthenticated caller can't force us to
+    # serialize arbitrarily large responses (OOM + bandwidth amplification).
+    limit = max(1, min(limit, 100))
 
     if mode == "lexical":
         from .db import db_search_tools
@@ -491,16 +507,21 @@ async def route_intent(body: RouteIntentRequest):
     ]
 
     def _args_suggestion(tool: KilnTool | None) -> dict[str, Any]:
-        # Pre-fill only required string params that don't have enums — we'd
-        # rather return {} than guess wrong and let a caller POST a bogus
-        # arg to /execute.
+        # Pre-fill only when the tool has exactly one required string param
+        # without an enum or default. For tools with multiple free-form
+        # string inputs (e.g. a translator taking {source_text, target_lang})
+        # we can't tell which slot the intent belongs in, so returning {}
+        # is safer than dumping the intent into every slot and producing
+        # garbage when the caller forwards it to /execute.
         if tool is None:
             return {}
-        out: dict[str, Any] = {}
-        for p in tool.spec.params:
-            if p.required and p.type == "str" and p.enum is None and p.default is None:
-                out[p.name] = body.intent
-        return out
+        candidates = [
+            p for p in tool.spec.params
+            if p.required and p.type == "str" and p.enum is None and p.default is None
+        ]
+        if len(candidates) == 1:
+            return {candidates[0].name: body.intent}
+        return {}
 
     top_tool = hits[0].tool if hits else None
     match = candidates[0] | {"args_suggestion": _args_suggestion(top_tool)} if candidates else None
@@ -718,7 +739,7 @@ async def register_tool(
         tags_json=_json.dumps(s.tags),
     )
 
-    refresh_semantic_index(get_global_registry().list_all())
+    await _refresh_index_nonblocking()
 
     return JSONResponse(
         status_code=200,
