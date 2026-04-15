@@ -20,12 +20,28 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO_ROOT"
 
 PUBLISH_URL=""
-if [[ "${1:-}" == "--test" ]]; then
-  PUBLISH_URL="--publish-url https://test.pypi.org/legacy/"
-  echo "→ Publishing to TestPyPI"
-else
-  echo "→ Publishing to PyPI"
-fi
+case "${1:-}" in
+  "")
+    echo "→ Publishing to PyPI"
+    ;;
+  --test)
+    PUBLISH_URL="--publish-url https://test.pypi.org/legacy/"
+    echo "→ Publishing to TestPyPI"
+    ;;
+  -h|--help)
+    echo "Usage: $0 [--test]"
+    echo "  (no args)   publish to PyPI"
+    echo "  --test      publish to TestPyPI"
+    exit 0
+    ;;
+  *)
+    echo "ERROR: Unknown argument '$1'." >&2
+    echo "Usage: $0 [--test]" >&2
+    echo "A mistyped flag must not silently publish to production, so" >&2
+    echo "this script rejects anything it doesn't recognise." >&2
+    exit 2
+    ;;
+esac
 
 if [[ -z "${UV_PUBLISH_TOKEN:-}" ]]; then
   echo "ERROR: UV_PUBLISH_TOKEN is not set. Mint one at"
@@ -52,7 +68,7 @@ uvx twine check dist/*
 echo
 echo "→ Smoke-testing in a clean venv (/tmp/kiln-publish-test)"
 rm -rf /tmp/kiln-publish-test
-python3.12 -m venv /tmp/kiln-publish-test
+python3 -m venv /tmp/kiln-publish-test
 /tmp/kiln-publish-test/bin/pip install --quiet \
   dist/kiln_shared-*-py3-none-any.whl \
   dist/kiln_registry_api-*-py3-none-any.whl

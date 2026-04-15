@@ -24,11 +24,6 @@ from typing import Any
 
 from kiln_shared.spec import KilnTool
 
-_PY_TYPE_HINT = {
-    "str": "str", "int": "int", "float": "float",
-    "bool": "bool", "list": "list", "dict": "dict",
-}
-
 _JSON_TYPE = {
     "str": "string", "int": "integer", "float": "number",
     "bool": "boolean", "list": "array", "dict": "object",
@@ -81,11 +76,16 @@ def _example_args(tool: KilnTool) -> dict[str, Any]:
 
 def _curl(tool: KilnTool, registry_url: str) -> str:
     args = json.dumps({"args": _example_args(tool)}, indent=2)
+    # Single-quoted bash strings don't support backslash-escaping, so embed
+    # an apostrophe by closing the quote, emitting a literal `'\''`, and
+    # reopening. `'` → `'\''`. This is the standard shell idiom for
+    # quoting arbitrary text safely.
+    args_escaped = args.replace("'", "'\\''")
     return (
         f"curl -X POST '{registry_url}/tools/{tool.id}/execute' \\\n"
         f"  -H 'Content-Type: application/json' \\\n"
         f"  -H 'Authorization: Bearer YOUR_KILN_API_KEY' \\\n"
-        f"  -d '{args}'"
+        f"  -d '{args_escaped}'"
     )
 
 

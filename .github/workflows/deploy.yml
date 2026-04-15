@@ -15,19 +15,28 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail clearly if GCP project isn't configured
+      - name: Fail clearly if GCP deployment isn't configured
+        # Validate the SAME names the real auth/push steps use below:
+        # `vars.GCP_PROJECT` for the project id + `secrets.WIF_PROVIDER`
+        # for the Workload Identity Federation provider. If those are out
+        # of sync with what's actually referenced at deploy time this
+        # check becomes useless.
         env:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
-          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
         run: |
-          if [[ -z "$GCP_PROJECT" || -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]]; then
-            echo "::error::GCP deployment is not configured."
-            echo "::error::Set repository variables GCP_PROJECT and GCP_WORKLOAD_IDENTITY_PROVIDER,"
-            echo "::error::or remove .github/workflows/deploy.yml if you don't intend to deploy to GCP."
+          missing=""
+          [[ -z "$GCP_PROJECT" ]] && missing="$missing vars.GCP_PROJECT"
+          [[ -z "$WIF_PROVIDER" ]] && missing="$missing secrets.WIF_PROVIDER"
+          if [[ -n "$missing" ]]; then
+            echo "::error::GCP deployment is not configured. Missing:$missing"
+            echo "::error::Set them at Settings → Secrets and variables → Actions,"
+            echo "::error::or remove .github/workflows/deploy.yml if you don't deploy to GCP."
             exit 1
           fi
 
   build-push:
+    needs: preflight
     runs-on: ubuntu-latest
     permissions:
       contents: read

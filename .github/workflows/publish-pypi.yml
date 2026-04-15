@@ -37,14 +37,20 @@ jobs:
       - name: Validate metadata
         run: uvx twine check dist/*
 
-      - name: Publish kiln-shared
+      - name: Publish kiln-shared (wheel + sdist)
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        # Enable nullglob + globstar + fail-on-no-match so a missing wheel
+        # or sdist fails loudly instead of silently skipping. Explicitly
+        # list both the .whl and .tar.gz globs so it's obvious we want
+        # BOTH artefacts uploaded to PyPI, not just the wheel.
         run: |
-          for f in dist/kiln_shared-*; do uv publish "$f"; done
+          shopt -s failglob
+          uv publish dist/kiln_shared-*.whl dist/kiln_shared-*.tar.gz
 
-      - name: Publish kiln-registry-api
+      - name: Publish kiln-registry-api (wheel + sdist)
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          for f in dist/kiln_registry_api-*; do uv publish "$f"; done
+          shopt -s failglob
+          uv publish dist/kiln_registry_api-*.whl dist/kiln_registry_api-*.tar.gz

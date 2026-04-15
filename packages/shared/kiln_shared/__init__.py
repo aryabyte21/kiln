@@ -20,11 +20,28 @@ __all__ = [
     "kiln_tool",
 ]
 
-try:  # Optional server extras
-    from .auth import KilnUser as KilnUser
-    from .auth import require_auth as require_auth
-    from .auth import require_jwt_auth as require_jwt_auth
-    __all__.extend(["KilnUser", "require_auth", "require_jwt_auth"])
-except ImportError:
-    # Server extras not installed — that's expected for SDK-only consumers.
-    pass
+# Optional server-only helpers. These live behind a targeted guard: we
+# catch ImportError *only* when the root cause is a missing server-extra
+# dependency (fastapi / httpx / jwt). Any other ImportError — a typo in
+# auth.py, a bad export, a circular import — must bubble up so it's
+# visible instead of silently dropping the KilnUser / require_auth
+# re-exports.
+def _load_auth_extras() -> list[str]:
+    from importlib import util as _iu
+
+    _server_deps = ("fastapi", "httpx", "jwt")
+    _missing = [dep for dep in _server_deps if _iu.find_spec(dep) is None]
+    if _missing:
+        # SDK-only install — server extras intentionally absent.
+        return []
+
+    from .auth import KilnUser, require_auth, require_jwt_auth
+
+    globals()["KilnUser"] = KilnUser
+    globals()["require_auth"] = require_auth
+    globals()["require_jwt_auth"] = require_jwt_auth
+    return ["KilnUser", "require_auth", "require_jwt_auth"]
+
+
+__all__.extend(_load_auth_extras())
+del _load_auth_extras
