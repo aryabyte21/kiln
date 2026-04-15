@@ -184,7 +184,9 @@ function SystemStatusPanel({ systemStatus }: { systemStatus: SystemStatus }) {
                   <ShieldAlert className="size-4 text-amber-300" />
                 )}
               </div>
-              <p className="mt-3 text-sm text-muted-foreground">{service.detail}</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {service.detail || (ok ? "Ready" : "Waiting for response")}
+              </p>
             </div>
           )
         })}

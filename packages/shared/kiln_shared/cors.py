@@ -17,7 +17,7 @@ Design goals:
    than silently opening up the dev localhost allowlist. This fail-loud
    behaviour is the cheapest way to catch a misconfigured prod deploy.
 4. **Dev-friendly default** — when ``KILN_ENV`` is unset or "development",
-   the installer uses ``http://localhost:3000`` (the registry_ui) plus
+   the installer uses ``http://localhost:3001`` (the registry_ui) plus
    the two legacy Vite ports.
 
 Usage in service main.py::
@@ -63,7 +63,7 @@ _DEFAULT_EXPOSE_HEADERS: list[str] = [
 ]
 
 _DEV_DEFAULT_ORIGINS: list[str] = [
-    "http://localhost:3000",
+    "http://localhost:3001",
     "http://localhost:5173",
     "http://localhost:5174",
 ]
@@ -80,7 +80,7 @@ def resolve_cors_origins() -> list[str]:
 
     Rules:
     - ``CORS_ORIGINS`` (comma-separated) is always honored when set.
-    - Otherwise, dev environments default to localhost:3000/5173/5174.
+    - Otherwise, dev environments default to localhost:3001/5173/5174.
     - Production environments WITHOUT ``CORS_ORIGINS`` raise RuntimeError
       so the service won't silently start with a permissive default.
     """

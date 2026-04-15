@@ -9,13 +9,13 @@ import { preflightHealthChecks, runTest } from './_lib.mjs'
 await preflightHealthChecks(['registry_ui'])
 
 const ok = await runTest('homepage', async ({ page, consoleErrors }) => {
-  const response = await page.goto('http://localhost:3000', {
+  const response = await page.goto('http://localhost:3001', {
     waitUntil: 'networkidle2',
     timeout: 30_000,
   })
 
   if (!response || !response.ok()) {
-    throw new Error(`http://localhost:3000 returned ${response ? response.status() : 'no response'}`)
+    throw new Error(`http://localhost:3001 returned ${response ? response.status() : 'no response'}`)
   }
 
   const title = await page.title()

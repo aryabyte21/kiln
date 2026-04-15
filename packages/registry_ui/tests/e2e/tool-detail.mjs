@@ -12,7 +12,7 @@ import { preflightHealthChecks, runTest } from './_lib.mjs'
 await preflightHealthChecks(['registry_ui', 'registry_api'])
 
 const TOOL_ID = 'com.kiln.tools.current_date'
-const URL = `http://localhost:3000/tools/${TOOL_ID}`
+const URL = `http://localhost:3001/tools/${TOOL_ID}`
 
 const ok = await runTest('tool-detail', async ({ page }) => {
   const response = await page.goto(URL, {

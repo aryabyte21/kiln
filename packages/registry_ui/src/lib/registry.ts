@@ -3,10 +3,9 @@
  * Used in API routes and Server Components.
  */
 
-// Server-side uses internal Docker network, client-side uses localhost
-const REGISTRY_URL = typeof window === "undefined"
-  ? (process.env.REGISTRY_API_INTERNAL || process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766")
-  : (process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766")
+import { getRegistryUrl } from "@/lib/service-urls"
+
+const REGISTRY_URL = getRegistryUrl()
 
 export interface ToolParam {
   name: string

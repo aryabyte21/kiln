@@ -18,6 +18,7 @@ import {
   Wrench,
   Zap,
   Code,
+  ExternalLink,
 } from "lucide-react"
 
 import { ChatSidebar } from "./_components/chat-sidebar"
@@ -276,42 +277,76 @@ function buildHistory(messages: UIMessage[]): string[] {
     .filter((line): line is string => line !== null)
 }
 
+const API_KEY_SIGNUP_URLS: Record<string, { url: string; label: string }> = {
+  NEWS_API_KEY: { url: "https://newsapi.org/register", label: "Get free key from NewsAPI.org" },
+  SERPER_API_KEY: { url: "https://serper.dev/api-key", label: "Get free key from Serper.dev" },
+  ALPHA_VANTAGE_API_KEY: { url: "https://www.alphavantage.co/support/#api-key", label: "Get free key from Alpha Vantage" },
+  GOOGLE_MAPS_API_KEY: { url: "https://console.cloud.google.com/apis/credentials", label: "Get key from Google Cloud Console" },
+  SENDGRID_API_KEY: { url: "https://app.sendgrid.com/settings/api_keys", label: "Get key from SendGrid" },
+  SLACK_BOT_TOKEN: { url: "https://api.slack.com/apps", label: "Create a Slack app" },
+}
+
 function ApiKeyConfigCard({
   missingEnvs,
   onSubmit,
   isSubmitting,
 }: {
-  missingEnvs: Array<{ var_name: string; description: string }>
+  missingEnvs: Array<{ var_name: string; description: string; has_saved_value?: boolean; signup_url?: string }>
   onSubmit: (envVars: Record<string, string>) => void
   isSubmitting: boolean
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
 
-  const allFilled = missingEnvs.every((env) => values[env.var_name]?.trim())
+  const allFilled = missingEnvs.every(
+    (env) => env.has_saved_value || values[env.var_name]?.trim(),
+  )
 
   return (
-    <Card className="border-primary/20 bg-card/85 p-4">
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+    <div className="rounded-xl border border-primary/15 bg-gradient-to-b from-primary/[0.04] to-transparent p-5">
+      <div className="mb-4 flex items-center gap-2.5">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
           <Key className="size-4 text-primary" />
-          API keys required
         </div>
-        <p className="text-xs text-muted-foreground">
-          These keys will be saved to your account so you don&apos;t have to enter them again.
-        </p>
-        <div className="space-y-3">
-          {missingEnvs.map((env) => (
-            <div key={env.var_name} className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground/80">
-                {env.var_name}
-                {env.description && (
-                  <span className="ml-1.5 font-normal text-muted-foreground">
-                    {" "}
-                    - {env.description}
-                  </span>
+        <div>
+          <p className="text-sm font-semibold text-foreground">API keys required</p>
+          <p className="text-[11px] text-muted-foreground">
+            Keys are saved to your account for future use
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {missingEnvs.map((env) => {
+          const fallback = API_KEY_SIGNUP_URLS[env.var_name]
+          const rawUrl = env.signup_url
+          const signup =
+            rawUrl && /^https?:\/\//.test(rawUrl)
+              ? { url: rawUrl, label: `Get ${env.var_name}` }
+              : fallback
+          return (
+            <div key={env.var_name} className="space-y-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <label className="text-xs font-semibold tracking-wide text-foreground/90">
+                  {env.var_name}
+                </label>
+                {signup && (
+                  <a
+                    href={signup.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 transition-colors"
+                  >
+                    {signup.label}
+                    <ExternalLink className="size-3" />
+                  </a>
                 )}
-              </label>
+              </div>
+              {env.description && (
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {env.description}
+                </p>
+              )}
               <div className="relative">
                 <input
                   type={visibility[env.var_name] ? "text" : "password"}
@@ -319,8 +354,9 @@ function ApiKeyConfigCard({
                   onChange={(e) =>
                     setValues((prev) => ({ ...prev, [env.var_name]: e.target.value }))
                   }
-                  placeholder={`Enter ${env.var_name}`}
-                  className="w-full rounded-lg border border-border/70 bg-card/75 px-3 py-2 pr-9 text-sm text-foreground shadow-inner shadow-black/10 ring-1 ring-border/70 placeholder:text-muted-foreground/50 outline-none transition-all focus:border-border focus:ring-2 focus:ring-primary/30"
+                  autoComplete="off"
+                  placeholder="Paste your API key here"
+                  className="w-full rounded-lg border border-border/50 bg-background/60 px-3 py-2.5 pr-9 font-mono text-xs text-foreground ring-1 ring-border/50 placeholder:text-muted-foreground/40 outline-none transition-all focus:border-primary/30 focus:bg-background/80 focus:ring-2 focus:ring-primary/20"
                 />
                 <button
                   type="button"
@@ -330,7 +366,7 @@ function ApiKeyConfigCard({
                       [env.var_name]: !prev[env.var_name],
                     }))
                   }
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40 transition-colors hover:text-muted-foreground"
                 >
                   {visibility[env.var_name] ? (
                     <EyeOff className="size-3.5" />
@@ -340,18 +376,26 @@ function ApiKeyConfigCard({
                 </button>
               </div>
             </div>
-          ))}
-        </div>
-        <Button
-          onClick={() => onSubmit(values)}
-          disabled={!allFilled || isSubmitting}
-          className="w-full"
-          size="sm"
-        >
-          {isSubmitting ? "Saving and continuing..." : "Save and continue"}
-        </Button>
+          )
+        })}
       </div>
-    </Card>
+
+      <Button
+        onClick={() => onSubmit(values)}
+        disabled={!allFilled || isSubmitting}
+        className="mt-5 w-full"
+        size="sm"
+      >
+        {isSubmitting ? (
+          <>
+            <Loader2 className="mr-2 size-3.5 animate-spin" />
+            Saving and running...
+          </>
+        ) : (
+          "Save and continue"
+        )}
+      </Button>
+    </div>
   )
 }
 
@@ -468,7 +512,7 @@ function KilnChat() {
   const [streamState, setStreamState] = useState<ExecutionState | null>(null)
   const [configPrompt, setConfigPrompt] = useState<{
     runId: string
-    missingEnvs: Array<{ var_name: string; description: string }>
+    missingEnvs: Array<{ var_name: string; description: string; has_saved_value?: boolean; signup_url?: string }>
     originalQuery: string
   } | null>(null)
   const [isSubmittingConfig, setIsSubmittingConfig] = useState(false)
@@ -858,25 +902,50 @@ function KilnChat() {
       setIsSubmittingConfig(true)
       try {
         const token = await getToken()
-        await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ env_vars: envVars }),
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+
+        // Only include non-empty values (empty means "use saved key from Clerk")
+        const nonEmpty: Record<string, string> = {}
+        for (const [k, v] of Object.entries(envVars)) {
+          if (v.trim()) nonEmpty[k] = v.trim()
+        }
+
+        // Save new keys to Clerk for future use (best-effort)
+        if (Object.keys(nonEmpty).length > 0) {
+          fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({ env_vars: nonEmpty }),
+          }).catch(() => {})
+        }
+
+        // Execute with the provided keys
+        const runId = configPrompt.runId
+        const execResp = await fetch(`${CHAT_BACKEND}/kiln/execute/${runId}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ env_vars: nonEmpty }),
         })
-        const query = configPrompt.originalQuery
+        if (!execResp.ok) {
+          const errBody = await execResp.json().catch(() => ({ detail: "Execution failed" }))
+          throw new Error(errBody.detail || `HTTP ${execResp.status}`)
+        }
+
         setConfigPrompt(null)
-        await runQuery(query)
+        setStreamState(emptyExecutionState())
+        setIsLoading(true)
+        await startStream(runId, token ? { Authorization: `Bearer ${token}` } : {})
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unknown error"
-        appendAssistantMessage(`Failed to save API keys: ${msg}. Please try again.`)
+        appendAssistantMessage(`Failed to execute with API keys: ${msg}. Please try again.`)
       } finally {
         setIsSubmittingConfig(false)
       }
     },
-    [appendAssistantMessage, configPrompt, getToken, runQuery],
+    [appendAssistantMessage, configPrompt, getToken, startStream],
   )
 
   const handleNewChat = useCallback(() => {

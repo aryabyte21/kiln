@@ -46,6 +46,11 @@ services:
       - DATABASE_URL=postgresql://kiln:kiln_dev@postgres:5432/kiln_registry
       - REDIS_URL=redis://redis:6379
       - TOOL_EXECUTOR_URL=http://tool_executor:8767
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766/livez')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,7 +78,8 @@ services:
       - SYNTHESIS_URL=http://synthesis_service:8002
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
     depends_on:
-      - registry_api
+      registry_api:
+        condition: service_healthy
 
   # ── MCP Server (Python — port 8768) ─────────────────────────────────────────
   mcp_server:
@@ -91,7 +97,8 @@ services:
       - KILN_REGISTRY_URL=http://registry_api:8766
       - KILN_MCP_HOST=0.0.0.0
     depends_on:
-      - registry_api
+      registry_api:
+        condition: service_healthy
 
   # ── Tool Executor (Python — port 8767) ───────────────────────────────────────
   tool_executor:
@@ -130,16 +137,17 @@ services:
       - ./packages/synthesis_service/kiln_synthesis:/app/kiln_synthesis
       - ./packages/shared/kiln_shared:/app/kiln_shared
     depends_on:
-      - registry_api
+      registry_api:
+        condition: service_healthy
 
-  # ── Registry UI (Next.js — port 3000) ───────────────────────────────────────
+  # ── Registry UI (Next.js — port 3001) ───────────────────────────────────────
   registry_ui:
     build:
       context: ./packages/registry_ui
       dockerfile: ../../docker/Dockerfile.nextjs
-    command: npm run dev -- --hostname 0.0.0.0
+    command: npm run dev -- --hostname 0.0.0.0 -p 3001
     ports:
-      - "3000:3000"
+      - "3001:3001"
     volumes:
       - ./packages/registry_ui/src:/app/src
       - ./packages/registry_ui/public:/app/public
@@ -150,9 +158,17 @@ services:
       - REGISTRY_API_INTERNAL=http://registry_api:8766
       - NEXT_PUBLIC_CHAT_BACKEND=http://localhost:8765
       - CHAT_BACKEND_INTERNAL=http://chat_backend:8765
+      - NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:8768
+      - MCP_SERVER_INTERNAL=http://mcp_server:8768
+      - NEXT_PUBLIC_TOOL_EXECUTOR_URL=http://localhost:8767
+      - TOOL_EXECUTOR_INTERNAL=http://tool_executor:8767
+      - NEXT_PUBLIC_SYNTHESIS_SERVICE_URL=http://localhost:8002
+      - SYNTHESIS_SERVICE_INTERNAL=http://synthesis_service:8002
     depends_on:
-      - registry_api
-      - chat_backend
+      registry_api:
+        condition: service_healthy
+      chat_backend:
+        condition: service_started
 
 volumes:
   pgdata:

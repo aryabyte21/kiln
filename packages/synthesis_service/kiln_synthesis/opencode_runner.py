@@ -97,6 +97,7 @@ async def run_opencode(
         # Per-line timeout is 120s (stalled I/O). Total process timeout is
         # opencode_timeout (default 600s) to guard against runaway processes.
         import time as _time
+        opencode_error: str | None = None
         line_timeout = 120
         deadline = _time.monotonic() + settings.opencode_timeout
         while True:
@@ -121,6 +122,20 @@ async def run_opencode(
             if on_event is not None:
                 try:
                     event = json.loads(line_str)
+                    if event.get("type") == "error":
+                        error_payload = event.get("error") or {}
+                        if isinstance(error_payload, dict):
+                            nested = error_payload.get("data") or {}
+                            if isinstance(nested, dict):
+                                opencode_error = (
+                                    nested.get("message")
+                                    or error_payload.get("message")
+                                    or line_str
+                                )
+                            else:
+                                opencode_error = error_payload.get("message") or line_str
+                        else:
+                            opencode_error = line_str
                     on_event({"type": "opencode", **event})
                 except json.JSONDecodeError:
                     on_event({"type": "opencode", "raw": line_str})
@@ -153,5 +168,9 @@ async def run_opencode(
         raise OpenCodeError(
             f"OpenCode CLI exited with code {proc.returncode}: {stderr_str[:500]}"
         )
+
+    if opencode_error:
+        logger.error("OpenCode reported an error despite zero exit code: %s", opencode_error)
+        raise OpenCodeError(opencode_error)
 
     logger.info("OpenCode CLI completed successfully in %s", workdir)

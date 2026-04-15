@@ -65,6 +65,21 @@ class JobStore:
         with self._lock:
             return list(self._jobs.values())
 
+    def find_latest_for_tool(self, tool_ref: str) -> JobInfo | None:
+        """Return the newest job for a tool id or short tool name."""
+        short_name = tool_ref.split(".")[-1]
+        with self._lock:
+            matches = [
+                job
+                for job in self._jobs.values()
+                if job.tool_id == tool_ref or job.tool_name == short_name
+            ]
+
+        if not matches:
+            return None
+
+        return max(matches, key=lambda job: job.updated_at)
+
     # -- Event queue for SSE streaming ----------------------------------------
 
     def get_event_queue(self, job_id: str) -> asyncio.Queue | None:

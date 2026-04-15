@@ -8,7 +8,7 @@ Requires env var: NEWS_API_KEY
 import os
 
 REQUIRED_ENV_VARS = [
-    {"name": "NEWS_API_KEY", "description": "API key from newsapi.org (free tier available)"},
+    {"name": "NEWS_API_KEY", "description": "API key from newsapi.org (free tier available)", "signup_url": "https://newsapi.org/register"},
 ]
 
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { useAuth, UserProfile, Show } from "@clerk/nextjs"
+import { UserProfile, Show } from "@clerk/nextjs"
 import { dark } from "@clerk/themes"
 import {
   Key,
@@ -29,16 +29,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 
-const REGISTRY_URL =
-  process.env.NEXT_PUBLIC_REGISTRY_URL || "http://localhost:8766"
-
 // ---------------------------------------------------------------------------
 // API Key Management
 // ---------------------------------------------------------------------------
 
 function ApiKeySection() {
-  const { getToken, isLoaded } = useAuth()
-
   const [apiKey, setApiKey] = useState<string | null>(null)
   const [isServerMaskedKey, setIsServerMaskedKey] = useState(false)
   const [isLoadingExisting, setIsLoadingExisting] = useState(true)
@@ -67,20 +62,14 @@ function ApiKeySection() {
     setError(null)
 
     try {
-      const token = await getToken()
-      if (!token) {
-        throw new Error("Authentication expired. Please sign in again.")
-      }
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      }
-
-      const res = await fetch(`${REGISTRY_URL}/auth/api-key`, {
+      const res = await fetch("/api/settings/api-key", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
       })
 
+      if (res.status === 401) {
+        throw new Error("Authentication expired. Please sign in again.")
+      }
       if (!res.ok) {
         throw new Error(await getErrorMessage(res, "Failed to generate API key"))
       }
@@ -91,34 +80,28 @@ function ApiKeySection() {
       setIsVisible(true)
     } catch (e) {
       if (e instanceof TypeError) {
-        setError("Could not reach the registry API. Check that port 8766 is running and CORS allows http://localhost:3000.")
+        setError("Could not reach the settings API. Check that the Next.js app and registry API are running.")
       } else {
         setError(e instanceof Error ? e.message : "Failed to generate API key")
       }
     } finally {
       setIsGenerating(false)
     }
-  }, [getToken, getErrorMessage])
+  }, [getErrorMessage])
 
   const regenerateApiKey = useCallback(async () => {
     setIsRegenerating(true)
     setError(null)
 
     try {
-      const token = await getToken()
-      if (!token) {
-        throw new Error("Authentication expired. Please sign in again.")
-      }
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      }
-
-      const res = await fetch(`${REGISTRY_URL}/auth/api-key/regenerate`, {
+      const res = await fetch("/api/settings/api-key/regenerate", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
       })
 
+      if (res.status === 401) {
+        throw new Error("Authentication expired. Please sign in again.")
+      }
       if (!res.ok) {
         throw new Error(
           await getErrorMessage(res, "Failed to regenerate API key")
@@ -131,7 +114,7 @@ function ApiKeySection() {
       setIsVisible(true)
     } catch (e) {
       if (e instanceof TypeError) {
-        setError("Could not reach the registry API. Check that port 8766 is running and CORS allows http://localhost:3000.")
+        setError("Could not reach the settings API. Check that the Next.js app and registry API are running.")
       } else {
         setError(
           e instanceof Error ? e.message : "Failed to regenerate API key"
@@ -140,7 +123,7 @@ function ApiKeySection() {
     } finally {
       setIsRegenerating(false)
     }
-  }, [getToken, getErrorMessage])
+  }, [getErrorMessage])
 
   const handleCopy = useCallback(() => {
     if (!apiKey || isServerMaskedKey) return
@@ -151,62 +134,48 @@ function ApiKeySection() {
   }, [apiKey, isServerMaskedKey])
 
   useEffect(() => {
-    let cancelled = false
-    const sleep = (ms: number) =>
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, ms)
-      })
+    const controller = new AbortController()
 
     const loadExistingKey = async () => {
       setIsLoadingExisting(true)
       setError(null)
 
       try {
-        while (!cancelled) {
-          const token = await getToken()
-          if (token) {
-            const res = await fetch(`${REGISTRY_URL}/auth/api-key`, {
-              method: "GET",
-              headers: { Authorization: `Bearer ${token}` },
-            })
+        const res = await fetch("/api/settings/api-key", {
+          method: "GET",
+          signal: controller.signal,
+        })
 
-            if (res.status === 404 || cancelled) return
-            if (!res.ok) {
-              throw new Error(
-                await getErrorMessage(res, "Failed to load existing API key")
-              )
-            }
-
-            const data = await res.json()
-            if (cancelled) return
-            setApiKey(data.api_key || data.key || null)
-            setIsServerMaskedKey(true)
-            setIsVisible(false)
-            return
-          }
-
-          await sleep(250)
+        if (res.status === 404 || res.status === 401) {
+          setApiKey(null)
+          return
         }
+        if (!res.ok) {
+          throw new Error(
+            await getErrorMessage(res, "Failed to load existing API key")
+          )
+        }
+
+        const data = await res.json()
+        setApiKey(data.api_key || data.key || null)
+        setIsServerMaskedKey(true)
+        setIsVisible(false)
       } catch (e) {
-        if (!cancelled) {
+        if (!(e instanceof DOMException && e.name === "AbortError")) {
           setError(
             e instanceof Error ? e.message : "Failed to load existing API key"
           )
         }
       } finally {
-        if (!cancelled) setIsLoadingExisting(false)
+        if (!controller.signal.aborted) setIsLoadingExisting(false)
       }
-    }
-
-    if (!isLoaded) {
-      return
     }
 
     loadExistingKey()
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [getToken, getErrorMessage, isLoaded])
+  }, [getErrorMessage])
 
   return (
     <Card className="section-surface gap-0 py-0">
@@ -359,7 +328,6 @@ function ApiKeySection() {
 // ---------------------------------------------------------------------------
 
 function ToolEnvVarsSection() {
-  const { getToken } = useAuth()
   const [envVars, setEnvVars] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -377,14 +345,15 @@ function ToolEnvVarsSection() {
 
   // Fetch saved env vars on mount
   useEffect(() => {
+    const controller = new AbortController()
+
     async function load() {
       try {
-        const token = await getToken()
-        const res = await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await fetch("/api/settings/tool-env-vars", {
+          signal: controller.signal,
         })
         if (!res.ok) {
-          if (res.status === 404) {
+          if (res.status === 404 || res.status === 401) {
             setEnvVars({})
             return
           }
@@ -393,21 +362,24 @@ function ToolEnvVarsSection() {
         const data = await res.json()
         setEnvVars(data.env_vars || {})
       } catch (err) {
-        setError(getErrorMessage(err))
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          setError(getErrorMessage(err))
+        }
       } finally {
-        setIsLoading(false)
+        if (!controller.signal.aborted) {
+          setIsLoading(false)
+        }
       }
     }
     load()
-  }, [getToken, getErrorMessage])
+    return () => controller.abort()
+  }, [getErrorMessage])
 
   const handleDelete = async (varName: string) => {
     setDeletingKey(varName)
     try {
-      const token = await getToken()
-      const res = await fetch(`${REGISTRY_URL}/auth/tool-env-vars/${varName}`, {
+      const res = await fetch(`/api/settings/tool-env-vars/${encodeURIComponent(varName)}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Delete failed: ${res.status}`)
       setEnvVars((prev) => {
@@ -427,12 +399,10 @@ function ToolEnvVarsSection() {
     setIsSaving(true)
     setError(null)
     try {
-      const token = await getToken()
-      const res = await fetch(`${REGISTRY_URL}/auth/tool-env-vars`, {
+      const res = await fetch("/api/settings/tool-env-vars", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ env_vars: { [newName.trim()]: newValue.trim() } }),
       })
