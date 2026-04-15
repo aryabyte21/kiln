@@ -551,8 +551,17 @@ function KilnChat() {
   const [isSubmittingConfig, setIsSubmittingConfig] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
-  const lastLoadedIdRef = useRef<string | null>(null)
-  const messagesSyncedIdRef = useRef<string | null>(null)
+  // Two refs gate the persist effect so we don't write the previous
+  // conversation's messages onto the newly-selected one during a switch:
+  //   loadedIdRef        — id whose messages the load effect *intended* to
+  //                         install. Updated synchronously in the load
+  //                         effect, before setMessages takes effect.
+  //   committedIdRef     — id whose messages have actually rendered into
+  //                         `messages` state. Lags loadedIdRef by exactly
+  //                         one render. The persist effect requires both
+  //                         refs to equal `activeId` before writing.
+  const loadedIdRef = useRef<string | null>(null)
+  const committedIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!hydrated) return
@@ -565,8 +574,8 @@ function KilnChat() {
 
   useEffect(() => {
     if (!activeConversation) return
-    if (lastLoadedIdRef.current === activeConversation.id) return
-    lastLoadedIdRef.current = activeConversation.id
+    if (loadedIdRef.current === activeConversation.id) return
+    loadedIdRef.current = activeConversation.id
     setMessages(activeConversation.messages)
     setStreamState(null)
     setConfigPrompt(null)
@@ -575,9 +584,14 @@ function KilnChat() {
 
   useEffect(() => {
     if (!hydrated || !activeId) return
-    if (lastLoadedIdRef.current !== activeId) return
-    if (messagesSyncedIdRef.current !== activeId) {
-      messagesSyncedIdRef.current = activeId
+    // Skip until the load effect has set its intent for activeId.
+    if (loadedIdRef.current !== activeId) return
+    // Skip the very first run after a switch: messages still references the
+    // previous conversation's array (setMessages hasn't committed yet).
+    // Mark this id as committed and bail; the next dependency change will
+    // reflect the freshly-loaded messages.
+    if (committedIdRef.current !== activeId) {
+      committedIdRef.current = activeId
       return
     }
     persistMessages(activeId, messages)

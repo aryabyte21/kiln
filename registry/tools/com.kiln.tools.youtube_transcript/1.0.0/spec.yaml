@@ -30,10 +30,23 @@ interface:
       type: string
     - name: title
       type: string
+      description: Video title (via YouTube oEmbed).
+    - name: author
+      type: string
+      description: Channel name (via YouTube oEmbed).
+    - name: language
+      type: string
+    - name: is_generated
+      type: boolean
+      description: Whether the captions are auto-generated.
     - name: text
       type: string
+    - name: char_count
+      type: integer
     - name: segments
       type: array
+    - name: url
+      type: string
 
 implementation:
   runtime: python3.10

@@ -32,10 +32,21 @@ interface:
   outputs:
     - name: success
       type: boolean
+    - name: url
+      type: string
+      description: The (normalised) URL that was rendered.
+    - name: device
+      type: string
+    - name: full_page
+      type: boolean
+    - name: dark
+      type: boolean
     - name: data_url
       type: string
     - name: file_path
       type: string
+    - name: bytes
+      type: integer
     - name: meta
       type: object
 

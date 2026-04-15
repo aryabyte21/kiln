@@ -27,9 +27,16 @@ _TILE_URLS = {
 
 def _lonlat_to_tile(lon: float, lat: float, z: int) -> tuple[int, int]:
     n = 2 ** z
+    # Clamp latitude to the slippy-map valid range; the Web Mercator math
+    # below diverges as |lat| → 90°. Then clamp the resulting tile indices
+    # to [0, n-1] so an edge-of-world coordinate doesn't request a 404 tile.
+    lat = max(-85.05112878, min(85.05112878, lat))
+    lon = ((lon + 180.0) % 360.0) - 180.0  # wrap longitude into [-180, 180)
     x = int((lon + 180.0) / 360.0 * n)
     lat_rad = math.radians(lat)
     y = int((1 - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi) / 2 * n)
+    x = max(0, min(n - 1, x))
+    y = max(0, min(n - 1, y))
     return x, y
 
 
@@ -75,11 +82,17 @@ def satellite_image(
 
         template = _TILE_URLS.get(style, _TILE_URLS["satellite"])
         tx, ty = _lonlat_to_tile(lon, lat, zoom)
+        n = 2 ** zoom
 
         canvas = Image.new("RGB", (256 * tiles, 256 * tiles))
         for dx in range(-pad, pad + 1):
             for dy in range(-pad, pad + 1):
-                url = template.format(z=zoom, x=tx + dx, y=ty + dy)
+                # Wrap longitude tile index horizontally (the world is
+                # cylindrical) and clamp latitude tile index vertically (it
+                # isn't) so edge-of-world coordinates can't 404.
+                x_idx = (tx + dx) % n
+                y_idx = max(0, min(n - 1, ty + dy))
+                url = template.format(z=zoom, x=x_idx, y=y_idx)
                 resp = requests.get(url, headers=_HEADERS, timeout=15)
                 resp.raise_for_status()
                 tile = Image.open(io.BytesIO(resp.content)).convert("RGB")

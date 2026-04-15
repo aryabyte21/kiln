@@ -58,7 +58,12 @@ def website_screenshot(
             shot_url = (data.get("data", {}) or {}).get("screenshot", {}).get("url")
             if not shot_url:
                 return {"success": False, "error": "No screenshot URL in response."}
-            png = requests.get(shot_url, timeout=30).content
+            shot_resp = requests.get(shot_url, timeout=30)
+            shot_resp.raise_for_status()
+            shot_ct = shot_resp.headers.get("Content-Type", "")
+            if not shot_ct.startswith("image/"):
+                return {"success": False, "error": f"Screenshot URL returned non-image content-type {shot_ct}."}
+            png = shot_resp.content
 
         b64 = base64.b64encode(png).decode("utf-8")
         tmp = tempfile.NamedTemporaryFile(suffix=".png", prefix="screenshot_", delete=False)

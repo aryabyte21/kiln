@@ -47,9 +47,18 @@ def stock_quote(symbol: str, interval: str = "5m", range_: str = "1d") -> dict:
         closes = [c for c in closes if c is not None][-150:]
 
         price = meta.get("regularMarketPrice")
-        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
-        change = (price - prev) if (price is not None and prev) else None
-        change_pct = (change / prev * 100) if (change is not None and prev) else None
+        prev_raw = meta.get("chartPreviousClose")
+        prev = prev_raw if prev_raw is not None else meta.get("previousClose")
+        # Use explicit None checks: a 0.0 previous close is unusual but
+        # legitimate (e.g. brand-new IPOs intraday) and shouldn't suppress
+        # the absolute change. Percent change still requires prev != 0 to
+        # avoid division-by-zero.
+        change = (price - prev) if (price is not None and prev is not None) else None
+        change_pct = (
+            (change / prev * 100)
+            if (change is not None and prev not in (None, 0))
+            else None
+        )
 
         return {
             "success": True,
