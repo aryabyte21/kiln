@@ -49,6 +49,7 @@ import jsonschema
 import yaml
 
 import kiln_shared
+from kiln_shared.env_allowlist import DisallowedEnvVarError, validate_env_var_name
 from kiln_shared.spec import KilnTool, KilnToolSpec, ToolParam, ToolReturn
 
 from .registry import register
@@ -291,6 +292,7 @@ class KilnLoader:
         tool_meta = raw["tool"]
         iface     = raw["interface"]
         meta      = raw.get("metadata", {})
+        impl      = raw.get("implementation", {})
 
         params = [
             ToolParam(
@@ -304,6 +306,10 @@ class KilnLoader:
             for inp in iface.get("inputs", [])
         ]
 
+        required_env_vars = _load_required_env_vars(
+            impl.get("required_env_vars", []), tool_id=tool_meta["id"]
+        )
+
         return KilnToolSpec(
             id=tool_meta["id"],
             name=tool_meta["name"],
@@ -314,4 +320,32 @@ class KilnLoader:
             author=tool_meta.get("author", ""),
             tags=meta.get("tags", []),
             category=meta.get("category", "general"),
+            required_env_vars=required_env_vars,
         )
+
+
+def _load_required_env_vars(raw: object, *, tool_id: str) -> list[str]:
+    if raw in (None, [], ""):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{tool_id}: implementation.required_env_vars must be a list, "
+            f"got {type(raw).__name__}"
+        )
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            raise ValueError(
+                f"{tool_id}: required_env_vars entries must be strings, "
+                f"got {type(entry).__name__}"
+            )
+        if entry in seen:
+            raise ValueError(f"{tool_id}: duplicate required_env_var {entry!r}")
+        try:
+            validate_env_var_name(entry)
+        except DisallowedEnvVarError as exc:
+            raise ValueError(f"{tool_id}: {exc}") from exc
+        seen.add(entry)
+        out.append(entry)
+    return out

@@ -30,6 +30,7 @@ from kiln_mcp import tools as tool_module
 from kiln_mcp.auth.clerk_callback import build_callback_route
 from kiln_mcp.auth.provider import KilnOAuthProvider
 from kiln_mcp.auth.store import InMemoryOAuthStore
+from kiln_mcp.user_env import fetch_user_env_vars
 from kiln_shared.httpx_client import async_client
 from kiln_shared.request_id import KilnRequestIDMiddleware
 
@@ -207,6 +208,7 @@ async def kiln_create_tool(
     category: str = "general",
     version: str = "1.0.0",
     author: str = "mcp_client",
+    required_env_vars: list[str] | None = None,
 ) -> str:
     """Publish a new tool to the Kiln registry from code you (the MCP client) write.
 
@@ -232,9 +234,22 @@ async def kiln_create_tool(
                       sandbox at execution time; keep the set small.
         tags:         free-form labels for catalog grouping.
         category:     broad bucket like "data", "media", "productivity".
+        required_env_vars: UPPER_SNAKE env var names the impl reads
+                      (e.g. ["OPENAI_API_KEY"]). Must match what impl_code
+                      references. Each entry must be on the Kiln provider
+                      allowlist. The sandbox will inject ONLY these names
+                      (from the invoking user's saved keys) at execution
+                      time — everything else is absent from os.environ.
     """
     await ctx.info(f"Creating tool {tool_id}")
+    declared = list(required_env_vars or [])
+    user_id = _current_user_id()
     try:
+        # Parse once and share the AST across every validator — avoids a
+        # second ast.parse() per create call.
+        tree = creation.parse_impl(impl_code)
+        detected = creation.detect_env_var_refs(tree)
+        creation.reconcile_env_vars(detected=detected, declared=declared)
         spec_yaml = creation.build_spec_yaml(
             tool_id=tool_id,
             name=name,
@@ -246,13 +261,14 @@ async def kiln_create_tool(
             author=author,
             tags=tags,
             category=category,
+            required_env_vars=declared,
         )
-        creation.validate_impl_defines_function(impl_code, name)
+        creation.validate_impl_defines_function(tree, name)
         result = await creation.submit_to_registry(
             spec_yaml=spec_yaml,
             impl_code=impl_code,
             entrypoint=f"{name}.py",
-            user_id=_current_user_id(),
+            user_id=user_id,
         )
     except creation.ToolCreationError as exc:
         return json.dumps({"success": False, "error": str(exc)})
@@ -265,7 +281,30 @@ async def kiln_create_tool(
         await ctx.session.send_tool_list_changed()
 
     result["mcp_catalog"] = {"added": added, "removed": removed}
+    result["required_env_vars"] = await _env_var_status(declared, user_id=user_id)
+    result["unused_declarations"] = sorted(set(declared) - detected.literals)
+    result["setup_hint"] = (
+        "Add any 'already_set: false' keys at Kiln → Settings → Tool Env Vars. "
+        "Each invoking user supplies their own keys; the creator's keys are not "
+        "shared."
+    )
     return json.dumps(result, indent=2)
+
+
+async def _env_var_status(
+    declared: list[str], *, user_id: str | None
+) -> list[dict[str, object]]:
+    """Return `[{name, already_set}]` for each declared var.
+
+    When unauthenticated (dev/stdio), `already_set` is None so the AI client
+    can still surface the names without pretending to know the user's state.
+    """
+    if not declared:
+        return []
+    if user_id is None:
+        return [{"name": n, "already_set": None} for n in declared]
+    saved = await fetch_user_env_vars(user_id)
+    return [{"name": n, "already_set": n in saved} for n in declared]
 
 
 async def _livez(_request: Request) -> JSONResponse:
