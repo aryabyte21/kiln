@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -13,7 +13,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy workspace config and install deps
 COPY pyproject.toml uv.lock* ./
 COPY packages/shared/pyproject.toml packages/shared/pyproject.toml
+COPY packages/shared/README.md packages/shared/LICENSE packages/shared/
 COPY packages/registry_api/pyproject.toml packages/registry_api/pyproject.toml
+COPY packages/registry_api/README.md packages/registry_api/LICENSE packages/registry_api/
 COPY packages/chat_backend/pyproject.toml packages/chat_backend/pyproject.toml
 COPY packages/mcp_server/pyproject.toml packages/mcp_server/pyproject.toml
 COPY packages/tool_executor/pyproject.toml packages/tool_executor/pyproject.toml
