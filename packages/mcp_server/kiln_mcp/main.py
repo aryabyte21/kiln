@@ -151,7 +151,9 @@ async def _readyz(_request: Request) -> JSONResponse:
         overall = "degraded"
 
     checks["registered_tools"] = f"ok ({tool_module.get_registered_tool_count()} tools)"
-    checks["auth"] = "enabled" if _auth_enabled else "disabled"
+    checks["auth"] = (
+        "enabled (clerk)" if _auth_enabled else "disabled (CLERK_DOMAIN not set)"
+    )
 
     body = {"status": overall, "service": "kiln-mcp-server", "checks": checks}
     if overall != "ok":
@@ -217,17 +219,25 @@ def build_http_app() -> Starlette:
                 logger.error("Initial tool sync failed: %s", e)
 
             poll_task = asyncio.create_task(_poll_registry())
-            cleanup_task = asyncio.create_task(_cleanup_loop())
+            cleanup_task = (
+                asyncio.create_task(_cleanup_loop()) if _auth_enabled else None
+            )
             try:
                 yield
             finally:
                 poll_task.cancel()
-                cleanup_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await poll_task
-                with contextlib.suppress(asyncio.CancelledError):
-                    await cleanup_task
-        finally:
+                if cleanup_task is not None:
+                    cleanup_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await cleanup_task
+        except Exception:
+            import sys
+
+            await mcp_lifespan_cm.__aexit__(*sys.exc_info())
+            raise
+        else:
             await mcp_lifespan_cm.__aexit__(None, None, None)
 
     return Starlette(
