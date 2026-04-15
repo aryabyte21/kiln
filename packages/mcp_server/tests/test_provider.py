@@ -306,6 +306,24 @@ def test_verify_state_rejects_tampered_payload() -> None:
     assert verify_state(encoded) is None
 
 
+@pytest.mark.asyncio
+async def test_authorize_rejects_unregistered_redirect_uri(provider: KilnOAuthProvider) -> None:
+    from mcp.server.auth.provider import AuthorizationParams
+
+    info = _make_client_info()
+    await provider.register_client(info)
+
+    params = AuthorizationParams(
+        state="x",
+        scopes=["kiln:tools"],
+        code_challenge="ch",
+        redirect_uri=AnyUrl("http://evil.example.com/callback"),
+        redirect_uri_provided_explicitly=True,
+    )
+    with pytest.raises(ValueError, match="not registered"):
+        await provider.authorize(info, params)
+
+
 def test_verify_state_rejects_malformed_input() -> None:
     from kiln_mcp.auth.provider import verify_state
 

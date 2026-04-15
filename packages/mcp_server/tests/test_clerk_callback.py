@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from base64 import urlsafe_b64encode
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.applications import Starlette
@@ -28,7 +29,6 @@ def app(store: InMemoryOAuthStore) -> Starlette:
     route = build_callback_route(
         store=store,
         clerk_domain="test.clerk.accounts.dev",
-        clerk_secret_key="sk_test_123",
     )
     return Starlette(routes=[route])
 
@@ -66,3 +66,43 @@ def test_missing_clerk_session_returns_401(client: TestClient) -> None:
 def test_malformed_state_returns_400(client: TestClient) -> None:
     resp = client.get("/oauth/callback?state=not-a-valid-state-at-all")
     assert resp.status_code == 400
+
+
+def test_successful_callback_generates_code_and_redirects(
+    store: InMemoryOAuthStore,
+) -> None:
+    route = build_callback_route(store=store, clerk_domain="test.clerk.accounts.dev")
+    app = Starlette(routes=[route])
+    client = TestClient(app, raise_server_exceptions=False)
+
+    state = _encoded_signed_state({
+        "oauth_state": "orig-state",
+        "code_challenge": "ch",
+        "redirect_uri": "http://localhost:3000/callback",
+        "redirect_uri_provided_explicitly": True,
+        "client_id": "c1",
+        "scopes": ["kiln:tools"],
+    })
+
+    with patch(
+        "kiln_mcp.auth.clerk_callback._resolve_clerk_user",
+        new_callable=AsyncMock,
+        return_value="user_abc",
+    ):
+        resp = client.get(
+            f"/oauth/callback?state={state}",
+            cookies={"__session": "fake-jwt"},
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert location.startswith("http://localhost:3000/callback?code=")
+    assert "state=orig-state" in location
+
+    stored_codes = [v[0] for v in store._auth_codes.values()]
+    assert len(stored_codes) == 1
+    stored = stored_codes[0]
+    assert stored["user_id"] == "user_abc"
+    assert stored["client_id"] == "c1"
+    assert stored["code_challenge"] == "ch"

@@ -17,12 +17,29 @@ logger = logging.getLogger(__name__)
 
 _AUTH_CODE_TTL = 600
 
+_JWKS_TTL = 300  # 5 minutes
+_jwks_cache: dict | None = None
+_jwks_cache_time: float = 0.0
+
+
+async def _fetch_jwks(clerk_domain: str) -> dict:
+    global _jwks_cache, _jwks_cache_time  # noqa: PLW0603
+    now = time.time()
+    if _jwks_cache is not None and (now - _jwks_cache_time) < _JWKS_TTL:
+        return _jwks_cache
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"https://{clerk_domain}/.well-known/jwks.json")
+        resp.raise_for_status()
+        _jwks_cache = resp.json()
+        _jwks_cache_time = now
+        return _jwks_cache
+
 
 def build_callback_route(
     *,
     store: InMemoryOAuthStore,
     clerk_domain: str,
-    clerk_secret_key: str,
 ) -> Route:
     async def oauth_callback(request: Request) -> JSONResponse | RedirectResponse:
         state_raw = request.query_params.get("state")
@@ -33,7 +50,7 @@ def build_callback_route(
         if state is None:
             return JSONResponse({"error": "Invalid or tampered state parameter"}, status_code=400)
 
-        session_token = request.query_params.get("__clerk_ticket") or request.cookies.get("__session")
+        session_token = request.cookies.get("__session")
         if not session_token:
             return JSONResponse(
                 {"error": "No Clerk session found. Please sign in first."},
@@ -68,17 +85,12 @@ def build_callback_route(
 
         return RedirectResponse(url=target, status_code=302)
 
-    _ = clerk_secret_key
-
     return Route("/oauth/callback", oauth_callback, methods=["GET"])
 
 
 async def _resolve_clerk_user(token: str, clerk_domain: str) -> str | None:
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            jwks_resp = await client.get(f"https://{clerk_domain}/.well-known/jwks.json")
-            jwks_resp.raise_for_status()
-            jwks_data = jwks_resp.json()
+        jwks_data = await _fetch_jwks(clerk_domain)
 
         jwk_set = jwt.PyJWKSet.from_dict(jwks_data)
         header = jwt.get_unverified_header(token)
@@ -105,6 +117,12 @@ async def _resolve_clerk_user(token: str, clerk_domain: str) -> str | None:
     except jwt.ExpiredSignatureError:
         logger.warning("Clerk session token expired")
         return None
-    except (jwt.InvalidTokenError, httpx.HTTPError, ValueError):
-        logger.warning("Failed to verify Clerk session token", exc_info=True)
+    except jwt.InvalidTokenError:
+        logger.warning("Invalid Clerk session token", exc_info=True)
+        return None
+    except httpx.HTTPError as e:
+        logger.error("JWKS fetch failed from Clerk: %s", e)
+        return None
+    except ValueError:
+        logger.warning("Malformed JWKS or JWT payload", exc_info=True)
         return None

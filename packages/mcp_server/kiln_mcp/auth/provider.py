@@ -92,6 +92,12 @@ class KilnOAuthProvider:
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
+        registered = {str(u) for u in client.redirect_uris}
+        if str(params.redirect_uri) not in registered:
+            raise ValueError(
+                f"redirect_uri {params.redirect_uri} is not registered for client {client.client_id}"
+            )
+
         state_payload = {
             "oauth_state": params.state,
             "code_challenge": params.code_challenge,
