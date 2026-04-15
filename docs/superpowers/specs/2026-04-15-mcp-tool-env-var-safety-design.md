@@ -59,7 +59,7 @@ In `kiln_create_tool` (`packages/mcp_server/kiln_mcp/main.py:197`), after `valid
 - `os.getenv("NAME", ...)`
 - `environ["NAME"]` / `getenv("NAME")` when `os.environ` / `os.getenv` are imported as `from os import ...`
 
-Extract the **literal string** in the first argument / subscript. Non-literal accesses (e.g. `os.environ[var]`) are ignored — they can't be declared anyway, and the sandbox allowlist will return empty for them.
+Extract the **literal string** in the first argument / subscript. Non-literal accesses (e.g. `os.environ[var]` where `var` is computed) are **rejected** with `ToolCreationError`: under the sandbox contract any undeclared name will be absent from the environment, so dynamic lookups are guaranteed to fail at runtime. Forcing them out at creation time gives the author a clear error instead of a runtime `KeyError`/`None` surprise.
 
 **b. Reconcile against `required_env_vars` in the spec:**
 
@@ -128,7 +128,8 @@ At tool execution time (registry-side, wherever the sandboxed subprocess is spaw
 - Read `implementation.required_env_vars` (default `[]`).
 - Intersect with the **invoking user's** `tool_env_vars` from `fetch_user_env_vars(user_id)`.
 - Pass **only that intersection** into the subprocess env. Everything else the parent process has (including the registry's own secrets, other users' cached data, etc.) stays out of the child env.
-- If a declared var is missing from the user's set, still spawn the subprocess — the tool will get an empty value and can raise its own error. (We don't pre-fail, because that couples execution to a Clerk round-trip and gives worse error messages than the upstream API's own auth failure.)
+- If a declared var is missing from the user's set, **omit it from the env entirely** (do not set it to an empty string). This matches standard Python idioms: `os.environ["X"]` raises `KeyError`, `os.getenv("X")` returns `None`. An explicit `""` would bypass `if os.getenv("X"):` truthiness checks and silently forward empty credentials to upstream APIs, producing confusing 401s instead of clear "not configured" errors.
+- We don't pre-fail if a declared var is absent — the tool's own `os.environ["X"]` raise gives a clearer stack than a synthetic server error, and we avoid an extra Clerk round-trip on the hot path.
 
 This replaces any current behavior of passing the whole `tool_env_vars` dict into the sandbox.
 

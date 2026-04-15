@@ -4,11 +4,13 @@ import ast
 import logging
 import os
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 import yaml
 
+from kiln_shared.env_allowlist import DisallowedEnvVarError, validate_env_var_name
 from kiln_shared.httpx_client import async_client
 
 logger = logging.getLogger(__name__)
@@ -106,6 +108,7 @@ def build_spec_yaml(
     author: str,
     tags: list[str] | None,
     category: str,
+    required_env_vars: list[str] | None = None,
 ) -> str:
     if not TOOL_ID_RE.match(tool_id):
         raise ToolCreationError(
@@ -137,6 +140,7 @@ def build_spec_yaml(
             "runtime": "python3.10",
             "entrypoint": f"{name}.py",
             "dependencies": list(dependencies or []),
+            "required_env_vars": _validate_required_env_vars(required_env_vars or []),
         },
         "metadata": {
             "tags": list(tags or []),
@@ -145,6 +149,157 @@ def build_spec_yaml(
         },
     }
     return yaml.safe_dump(spec, sort_keys=False)
+
+
+def _validate_required_env_vars(names: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for n in names:
+        if not isinstance(n, str):
+            raise ToolCreationError(
+                f"required_env_vars entries must be strings, got {type(n).__name__}"
+            )
+        if n in seen:
+            raise ToolCreationError(f"duplicate required_env_var: {n!r}")
+        try:
+            validate_env_var_name(n)
+        except DisallowedEnvVarError as exc:
+            raise ToolCreationError(str(exc)) from exc
+        seen.add(n)
+        cleaned.append(n)
+    return cleaned
+
+
+@dataclass(frozen=True)
+class EnvVarScan:
+    """Result of scanning impl source for env var references."""
+
+    literals: frozenset[str]
+    has_dynamic_access: bool
+    dynamic_access_lines: tuple[int, ...]
+
+
+def detect_env_var_refs(impl_code: str) -> EnvVarScan:
+    """Find every `os.environ[...]`, `os.environ.get(...)`, and `os.getenv(...)` reference.
+
+    Handles both attribute access on `os` and names pulled in via
+    `from os import environ, getenv` (which may be renamed with `as`). The
+    returned `literals` set contains the constant string names; `has_dynamic_access`
+    is True if any lookup uses a non-literal key (e.g. `os.environ[var]`).
+
+    We deliberately don't resolve shadowing or re-assignment — if a tool author
+    does `os = something_else`, the scan may produce false positives. That's
+    acceptable: declared vars are already validated against the allowlist, and
+    false-positive detection just adds a harmless declaration.
+    """
+    try:
+        tree = ast.parse(impl_code)
+    except SyntaxError as exc:
+        raise ToolCreationError(
+            f"impl_code has a Python syntax error: {exc.msg} (line {exc.lineno})"
+        ) from exc
+
+    environ_aliases: set[str] = set()
+    getenv_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "os":
+            for alias in node.names:
+                bound = alias.asname or alias.name
+                if alias.name == "environ":
+                    environ_aliases.add(bound)
+                elif alias.name == "getenv":
+                    getenv_aliases.add(bound)
+
+    literals: set[str] = set()
+    dynamic_lines: list[int] = []
+
+    def _record_key(node: ast.AST, lineno: int) -> None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            literals.add(node.value)
+        else:
+            dynamic_lines.append(lineno)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and _is_environ_ref(node.value, environ_aliases):
+            _record_key(node.slice, node.lineno)
+            continue
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "get"
+                and _is_environ_ref(func.value, environ_aliases)
+                and node.args
+            ):
+                _record_key(node.args[0], node.lineno)
+                continue
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "getenv"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "os"
+                and node.args
+            ):
+                _record_key(node.args[0], node.lineno)
+                continue
+            if (
+                isinstance(func, ast.Name)
+                and func.id in getenv_aliases
+                and node.args
+            ):
+                _record_key(node.args[0], node.lineno)
+
+    return EnvVarScan(
+        literals=frozenset(literals),
+        has_dynamic_access=bool(dynamic_lines),
+        dynamic_access_lines=tuple(sorted(set(dynamic_lines))),
+    )
+
+
+def _is_environ_ref(node: ast.AST, environ_aliases: set[str]) -> bool:
+    """True if `node` evaluates to `os.environ` (either via attribute or alias)."""
+    if isinstance(node, ast.Attribute) and node.attr == "environ":
+        return isinstance(node.value, ast.Name) and node.value.id == "os"
+    if isinstance(node, ast.Name):
+        return node.id in environ_aliases
+    return False
+
+
+def reconcile_env_vars(
+    *,
+    detected: EnvVarScan,
+    declared: list[str],
+) -> None:
+    """Enforce the contract between impl source and declared env vars.
+
+    Rules:
+      - Dynamic accesses (non-literal keys) are rejected — the sandbox can't
+        satisfy them and they'd fail at runtime with a less clear message.
+      - Every literal the impl reads must appear in `declared`. Missing
+        declarations are rejected so the spec stays the single source of truth
+        for "what secrets does this tool touch."
+
+    Declared-but-unused entries are allowed (a helper library might read them
+    internally). They surface as `unused_declarations` in the creation response
+    but don't block registration.
+    """
+    if detected.has_dynamic_access:
+        raise ToolCreationError(
+            "impl_code reads os.environ / os.getenv with a non-literal key "
+            f"(line(s) {', '.join(str(n) for n in detected.dynamic_access_lines)}). "
+            "The sandbox only exposes declared env vars, so dynamic lookups can "
+            "never resolve. Replace the dynamic access with a literal string "
+            "(e.g. os.environ['OPENAI_API_KEY']) and list it in required_env_vars."
+        )
+    declared_set = set(declared)
+    undeclared = sorted(detected.literals - declared_set)
+    if undeclared:
+        raise ToolCreationError(
+            f"impl_code reads env var(s) {undeclared} that are not listed in "
+            f"implementation.required_env_vars. Add them to required_env_vars "
+            f"(every entry must be on the Kiln provider allowlist) so the "
+            f"sandbox knows to inject them."
+        )
 
 
 def validate_impl_defines_function(impl_code: str, function_name: str) -> None:

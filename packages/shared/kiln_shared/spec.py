@@ -69,6 +69,7 @@ class KilnToolSpec:
     author: str = ""
     tags: list[str] = field(default_factory=list)
     category: str = "general"
+    required_env_vars: list[str] = field(default_factory=list)
 
 
 # ── The Tool (spec + implementation) ─────────────────────────────────────────

@@ -184,6 +184,7 @@ def _tool_to_dict(tool) -> dict:
         "author":      s.author,
         "category":    s.category,
         "tags":        s.tags,
+        "required_env_vars": list(getattr(s, "required_env_vars", None) or []),
         "params": [
             {
                 "name":        p.name,
@@ -819,7 +820,20 @@ async def execute_tool(
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
 
     args = dict(body.args)
-    env_vars = dict(body.env_vars)
+    # Sandbox contract: expose ONLY the env vars the tool declared in its spec.
+    # Anything else the caller sent — including vars the caller "happened to
+    # know" the user had set — is dropped. Missing declared vars are omitted
+    # entirely (not set to "") so os.getenv returns None and os.environ[...]
+    # raises KeyError, matching standard Python semantics.
+    declared = frozenset(getattr(tool.spec, "required_env_vars", None) or ())
+    incoming = dict(body.env_vars)
+    env_vars = {k: v for k, v in incoming.items() if k in declared and v}
+    dropped = sorted(set(incoming) - set(env_vars))
+    if dropped:
+        logger.info(
+            "execute %s: dropped undeclared/empty env vars %s (declared=%s)",
+            tool_id, dropped, sorted(declared),
+        )
 
     started_at = time.perf_counter()
     success = False

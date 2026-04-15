@@ -70,7 +70,13 @@ def _build_mcp_tool_schema(tool_spec: dict) -> dict:
 async def _execute_tool(tool_id: str, args: dict, *, user_id: str | None = None) -> dict:
     env_vars: dict[str, str] = {}
     if user_id:
-        env_vars = await fetch_user_env_vars(user_id)
+        saved = await fetch_user_env_vars(user_id)
+        # Only forward the env vars this tool explicitly declared — everything
+        # else stays on the MCP server and never touches the registry's wire.
+        # The registry re-enforces the same intersection; this is the outer
+        # layer of defense in depth.
+        declared = _declared_env_vars(tool_id)
+        env_vars = {k: saved[k] for k in declared if k in saved and saved[k]}
 
     body: dict[str, Any] = {"args": args}
     if env_vars:
@@ -88,6 +94,19 @@ async def _execute_tool(tool_id: str, args: dict, *, user_id: str | None = None)
         )
         resp.raise_for_status()
         return resp.json()
+
+
+def _declared_env_vars(tool_id: str) -> frozenset[str]:
+    """Read declared env vars from the tool spec cached in `_registered_tools`.
+
+    The cache is populated by `sync_tools` (GET /tools). Returns an empty set
+    for tools registered before this field existed, which matches the fallback
+    behavior in the registry's spec loader.
+    """
+    spec = _registered_tools.get(tool_id)
+    if spec is None:
+        return frozenset()
+    return frozenset(spec.get("required_env_vars") or ())
 
 
 async def _execute_tool_safe(tool_id: str, args: dict) -> str:
