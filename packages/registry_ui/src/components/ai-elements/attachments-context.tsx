@@ -36,13 +36,28 @@ export function useAttachment(id: string | undefined): Attachment | undefined {
  *
  * Shapes the LLM produces (we've seen all of these in the wild):
  *   <<image:att_abc>>             — the original token (best case)
- *   kiln-att://att_abc            — bare URL form
+ *   kiln-att://att_abc            — legacy custom-scheme URL
  *   ![alt](kiln-att://att_abc)    — wrapped in markdown image syntax
  *   ![[Kiln-att://att_abc]](att_abc) — doubly-wrapped with capitalisation
  *   [text](att_abc)               — markdown link with bare id, no scheme
  *   `att_abc`                     — plain id mention
  *
- * All collapse to `![](kiln-att://att_abc)` for our `img` renderer.
+ * All collapse to `![](https://kiln.invalid/att/att_abc)` for our `img` renderer.
+ *
+ * Why https://kiln.invalid/att/<id> and not kiln-att://<id>?
+ *   Streamdown pipes markdown through rehype-sanitize before our `img`
+ *   override gets to render. The default sanitize schema only allows
+ *   `http/https/data:` URLs as `<img src>` — anything else (including
+ *   our former `kiln-att:` custom scheme) is silently stripped. Then
+ *   rehype-harden sees an empty src and replaces the tag with the
+ *   placeholder text "[Image blocked: No description]". The renderer
+ *   override never runs.
+ *
+ *   Using `https://kiln.invalid/att/<id>` survives both passes (it's a
+ *   real https URL, sanitize accepts it; harden's wildcard accepts it).
+ *   `.invalid` is RFC-6761 reserved and guaranteed never to resolve, so
+ *   even if our `img` override regresses, the browser won't fire a real
+ *   network request to a real host.
  *
  * Implementation: we tokenise *first* (replacing every match with a sentinel
  * so subsequent rules can't re-match the inserted text), then expand the
@@ -53,23 +68,26 @@ export function useAttachment(id: string | undefined): Attachment | undefined {
  * characters so the boundary regex is unambiguous. We also strip any
  * tightly-wrapped junk (backticks, markdown link shells) before expanding. */
 const S = "\u0001"
+export const ATT_URL_PREFIX = "https://kiln.invalid/att/"
 
 export function rewriteAttachmentMarkers(text: string): string {
   let out = text
 
   const tag = (id: string) => `${S}${id.toLowerCase()}${S}`
 
-  // 1. Markdown image / link forms whose URL contains `att_xxx`
+  // 1. Markdown image / link forms whose URL contains `att_xxx`,
+  //    including the legacy `kiln-att://` scheme and the new
+  //    `https://kiln.invalid/att/` URL we now produce.
   out = out.replace(
-    /!?\[[^\]\n]*\]\(\s*(?:kiln-att:\/\/)?(att_[a-zA-Z0-9_]+)\s*\)/gi,
+    /!?\[[^\]\n]*\]\(\s*(?:kiln-att:\/\/|https?:\/\/kiln\.invalid\/att\/)?(att_[a-zA-Z0-9_]+)\s*\)/gi,
     (_m, id: string) => tag(id),
   )
 
   // 2. The original `<<image:att_xxx>>` token
   out = out.replace(/<<image:(att_[a-zA-Z0-9_]+)>>/gi, (_m, id: string) => tag(id))
 
-  // 3. Bare `kiln-att://att_xxx` URLs left over
-  out = out.replace(/kiln-att:\/\/(att_[a-zA-Z0-9_]+)/gi, (_m, id: string) => tag(id))
+  // 3. Bare attachment URLs left over (legacy or new scheme)
+  out = out.replace(/(?:kiln-att:\/\/|https?:\/\/kiln\.invalid\/att\/)(att_[a-zA-Z0-9_]+)/gi, (_m, id: string) => tag(id))
 
   // 4. Bare `att_xxx` id mentioned in prose — but skip ids already wrapped
   // in our sentinel (or we'd double-tag).
@@ -97,12 +115,12 @@ export function rewriteAttachmentMarkers(text: string): string {
 
   // 6. Expand sentinels into canonical markdown images
   out = out.replace(new RegExp(`${S}(att_[a-zA-Z0-9_]+)${S}`, "g"), (_m, id: string) =>
-    `![](kiln-att://${id})`,
+    `![](${ATT_URL_PREFIX}${id})`,
   )
 
   // 7. Collapse duplicate consecutive image refs for the same id
   out = out.replace(
-    /(!\[\]\(kiln-att:\/\/(att_[a-zA-Z0-9_]+)\))(?:\s*\1)+/g,
+    new RegExp(`(!\\[\\]\\(${ATT_URL_PREFIX.replace(/[.\\]/g, "\\$&")}(att_[a-zA-Z0-9_]+)\\))(?:\\s*\\1)+`, "g"),
     "$1",
   )
 

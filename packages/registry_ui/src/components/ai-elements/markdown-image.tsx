@@ -13,11 +13,20 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
-import { useAttachment } from "./attachments-context"
+import { ATT_URL_PREFIX, useAttachment } from "./attachments-context"
 
 type ImgProps = React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
 
-const ATT_PREFIX = "kiln-att://"
+// Two prefixes: the new sanitize-friendly URL produced by the rewriter, plus
+// the legacy custom scheme so old persisted messages keep rendering.
+const LEGACY_PREFIX = "kiln-att://"
+
+function extractAttachmentId(src: unknown): string | undefined {
+  if (typeof src !== "string") return undefined
+  if (src.startsWith(ATT_URL_PREFIX)) return src.slice(ATT_URL_PREFIX.length)
+  if (src.startsWith(LEGACY_PREFIX)) return src.slice(LEGACY_PREFIX.length)
+  return undefined
+}
 
 function formatBytes(n?: number): string {
   if (!n || n < 1024) return n ? `${n} B` : ""
@@ -27,14 +36,14 @@ function formatBytes(n?: number): string {
 
 export const MarkdownImage = memo(function MarkdownImage(props: ImgProps) {
   const { src, alt, className, node: _node, ...rest } = props
-  const id = typeof src === "string" && src.startsWith(ATT_PREFIX) ? src.slice(ATT_PREFIX.length) : undefined
+  const id = extractAttachmentId(src)
   const attachment = useAttachment(id)
 
   // External image (not an attachment marker) — render with the same wrapper
   // styling but skip the attachment metadata footer.
   if (!attachment) {
-    if (typeof src === "string" && src.startsWith(ATT_PREFIX)) {
-      return <MissingAttachment id={id ?? ""} />
+    if (id !== undefined) {
+      return <MissingAttachment id={id} />
     }
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -57,7 +66,14 @@ function AttachmentImage({
   attachment: { id: string; mime: string; data_url: string; bytes?: number; meta?: Record<string, string | number | boolean>; tool?: string }
   alt?: string
 }) {
-  const [loaded, setLoaded] = useState(false)
+  // For data URLs (the common case for tool-generated images) the browser
+  // can complete decoding before React attaches `onLoad`, so the event
+  // never fires and the image stays at opacity 0 — making the click target
+  // invisible and giving the impression that "click to zoom" is broken.
+  // Default `loaded=true` for `data:` URLs and rely on `onLoad`/`onError`
+  // only for remote sources.
+  const isDataUrl = attachment.data_url.startsWith("data:")
+  const [loaded, setLoaded] = useState(isDataUrl)
   const [errored, setErrored] = useState(false)
   const [zoomed, setZoomed] = useState(false)
 
@@ -121,13 +137,13 @@ function AttachmentImage({
               <span className="text-[12px]">Image failed to load.</span>
             </div>
           ) : (
-            <motion.button
+            // Plain <button>, no opacity/scale animation: any animation that
+            // gates visibility on `loaded` also gates clickability for users
+            // who try to zoom the moment the image renders.
+            <button
               type="button"
               onClick={() => setZoomed(true)}
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: loaded ? 1 : 0, scale: loaded ? 1 : 0.98 }}
-              transition={{ duration: 0.5, ease: [0.21, 0.47, 0.32, 0.98] }}
-              className="relative block w-full"
+              className="relative block w-full cursor-zoom-in"
               aria-label="Open image"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -143,7 +159,7 @@ function AttachmentImage({
                 <Expand className="size-3" />
                 Click to zoom
               </span>
-            </motion.button>
+            </button>
           )}
 
           {/* Footer toolbar */}
@@ -197,14 +213,22 @@ function AttachmentImage({
               Download
             </button>
           </DialogHeader>
-          <div className="flex max-h-[78vh] items-center justify-center bg-black/40 p-4">
+          {/* Click anywhere on the image (or the surrounding pad) to close —
+              standard lightbox behavior. The Base UI Dialog backdrop closes
+              too, but users naturally click the image itself. */}
+          <button
+            type="button"
+            onClick={() => setZoomed(false)}
+            aria-label="Close image"
+            className="flex max-h-[78vh] w-full cursor-zoom-out items-center justify-center bg-black/40 p-4"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={attachment.data_url}
               alt={alt ?? caption}
               className="max-h-[74vh] max-w-full object-contain"
             />
-          </div>
+          </button>
         </DialogContent>
       </Dialog>
     </>

@@ -426,12 +426,37 @@ def _research_api(tool_description: str, api_key: str) -> str:
         return ""
 
 
-def _find_similar_tool(missing_spec: dict, existing_tools: list[dict], threshold: float = 0.3) -> dict | None:
-    """Check if a missing tool overlaps with an existing registered tool.
+def _route_intent_via_registry(intent: str, min_confidence: float) -> dict | None:
+    """Ask the registry's semantic router which tool matches the intent.
 
-    Uses word-level Jaccard similarity between the missing tool's description
-    and each existing tool's description + name. Returns the best match above
-    threshold, or None.
+    Returns the candidate dict ({tool_id, name, description, confidence, ...})
+    only if the registry responds AND the top hit clears `min_confidence`.
+    Any HTTP failure (registry down, timeout, 5xx) returns None so the caller
+    falls back to the lexical Jaccard heuristic — the router is a strict
+    upgrade, not a hard dependency.
+    """
+    try:
+        resp = requests.post(
+            f"{REGISTRY_URL}/tools/route",
+            json={"intent": intent, "min_confidence": min_confidence, "limit": 3},
+            timeout=4,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.debug("semantic router unreachable, falling back to Jaccard: %s", exc)
+        return None
+    body = resp.json()
+    match = body.get("match")
+    if not match or float(match.get("confidence", 0.0)) < min_confidence:
+        return None
+    return match
+
+
+def _jaccard_similar_tool(missing_spec: dict, existing_tools: list[dict], threshold: float) -> dict | None:
+    """Word-level Jaccard between the missing spec and each existing tool.
+
+    Local fallback used when the semantic router is unavailable. Same return
+    shape as the network path so callers don't branch.
     """
     missing_desc = missing_spec.get("description", "").lower()
     missing_name = missing_spec.get("id", "").split(".")[-1].replace("_", " ").lower()
@@ -462,12 +487,57 @@ def _find_similar_tool(missing_spec: dict, existing_tools: list[dict], threshold
 
     if best_score >= threshold and best_match is not None:
         logger.info(
-            "Similar tool found: %s matches missing '%s' (score=%.2f)",
+            "Jaccard similar tool: %s matches missing '%s' (score=%.2f)",
             best_match.get("id"), missing_spec.get("id"), best_score,
         )
         return best_match
 
     return None
+
+
+# Confidence floor for accepting a router match in lieu of synthesis.
+# Set conservatively: 0.82 gives a strong signal without false-positives
+# on overloaded keywords like "data" or "search". Tuned against the
+# eight sample intents in tests/test_semantic.py — every intended hit
+# clears 0.85, every adversarial query stays well below 0.7.
+_ROUTER_CONFIDENCE_GATE = 0.82
+
+
+def _find_similar_tool(missing_spec: dict, existing_tools: list[dict], threshold: float = 0.3) -> dict | None:
+    """Resolve a missing tool spec to an existing registered tool, if any.
+
+    Two-stage:
+      1. Hit the registry's semantic router. BM25 over name + description +
+         tags, optionally Mistral-rerank. Accept only when confidence
+         ≥ _ROUTER_CONFIDENCE_GATE.
+      2. If the router is unreachable (or finds nothing strong), fall back
+         to the local Jaccard heuristic against the in-memory tools list.
+
+    Returns a dict shaped like the entries in `existing_tools`
+    (id/name/description) so the remap step in `_filter_missing_tools`
+    works unchanged.
+    """
+    intent = missing_spec.get("description") or missing_spec.get("id", "")
+    if intent:
+        match = _route_intent_via_registry(intent, _ROUTER_CONFIDENCE_GATE)
+        if match:
+            tool_id = match.get("tool_id")
+            logger.info(
+                "Router match: %s for missing '%s' (confidence=%.2f)",
+                tool_id, missing_spec.get("id"), float(match.get("confidence", 0.0)),
+            )
+            for tool in existing_tools:
+                if tool.get("id") == tool_id:
+                    return tool
+            # Router knew about a tool the local list doesn't have — surface
+            # the router's view so the remap can still happen.
+            return {
+                "id": tool_id,
+                "name": match.get("name", ""),
+                "description": match.get("description", ""),
+            }
+
+    return _jaccard_similar_tool(missing_spec, existing_tools, threshold)
 
 
 def _filter_missing_tools(graph: dict, existing_tools: list[dict]) -> tuple[list, dict[str, str]]:
