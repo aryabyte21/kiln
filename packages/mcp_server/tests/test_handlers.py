@@ -286,3 +286,68 @@ def test_make_tool_handler_rejects_invalid_param_name() -> None:
     }
     with pytest.raises(ValueError, match="Invalid param name"):
         tool_module._make_tool_handler("com.evil", spec)
+
+
+def test_make_tool_handler_sanitizes_description() -> None:
+    """Triple-quotes in description must not break the exec'd docstring."""
+    spec = {
+        "name": "safe_tool",
+        "description": 'has """ triple quotes""" inside',
+        "params": [],
+    }
+    handler = tool_module._make_tool_handler("com.safe", spec)
+    assert callable(handler)
+    assert '"""' not in (handler.__doc__ or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_safe_injects_user_id_from_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that when an auth context is present, user_id flows to _execute_tool."""
+    from types import SimpleNamespace
+
+    fake_token = SimpleNamespace(user_id="user_ctx_test")
+
+    def _fake_get_token() -> SimpleNamespace:
+        return fake_token
+
+    monkeypatch.setattr(tool_module, "get_access_token", _fake_get_token)
+
+    captured = {}
+
+    async def _fake_execute(tool_id: str, args: dict, *, user_id: str | None = None) -> dict:
+        captured["tool_id"] = tool_id
+        captured["user_id"] = user_id
+        return {"success": True, "result": "ok"}
+
+    monkeypatch.setattr(tool_module, "_execute_tool", _fake_execute)
+
+    await tool_module._execute_tool_safe("com.test", {"x": 1})
+
+    assert captured["tool_id"] == "com.test"
+    assert captured["user_id"] == "user_ctx_test"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_safe_no_user_id_when_no_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no auth context is present, user_id stays None."""
+
+    def _no_token() -> None:
+        return None
+
+    monkeypatch.setattr(tool_module, "get_access_token", _no_token)
+
+    captured = {}
+
+    async def _fake_execute(tool_id: str, args: dict, *, user_id: str | None = None) -> dict:
+        captured["user_id"] = user_id
+        return {"success": True, "result": "ok"}
+
+    monkeypatch.setattr(tool_module, "_execute_tool", _fake_execute)
+
+    await tool_module._execute_tool_safe("com.test", {})
+
+    assert captured["user_id"] is None

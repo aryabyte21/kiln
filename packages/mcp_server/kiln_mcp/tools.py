@@ -18,6 +18,7 @@ import os
 from typing import Any
 
 import httpx
+from mcp.server.auth.middleware.auth_context import get_access_token
 
 from kiln_mcp.user_env import fetch_user_env_vars
 from kiln_shared.httpx_client import async_client
@@ -89,7 +90,19 @@ async def _execute_tool(tool_id: str, args: dict, *, user_id: str | None = None)
         return resp.json()
 
 
-async def _execute_tool_safe(tool_id: str, args: dict, *, user_id: str | None = None) -> str:
+async def _execute_tool_safe(tool_id: str, args: dict) -> str:
+    """Execute a tool and return a JSON string; never raises.
+
+    Extracts the authenticated user_id from the current request context
+    (set by FastMCP's AuthContextMiddleware). If no auth is configured
+    or no token is present, user_id is None and env var injection is
+    skipped.
+    """
+    user_id: str | None = None
+    token = get_access_token()
+    if token is not None:
+        user_id = getattr(token, "user_id", None)
+
     if tool_id in _stale_tool_ids:
         return json.dumps({
             "error": f"Tool {tool_id} has been removed from the registry. Call kiln_refresh_tools.",
@@ -118,7 +131,7 @@ async def _execute_tool_safe(tool_id: str, args: dict, *, user_id: str | None = 
 
 def _make_tool_handler(tool_id: str, tool_spec: dict):
     name = tool_spec["name"]
-    description = tool_spec.get("description", "")
+    description = tool_spec.get("description", "").replace('"""', "'''")
     params = tool_spec.get("params", [])
 
     if not name.isidentifier():

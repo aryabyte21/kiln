@@ -329,3 +329,30 @@ def test_verify_state_rejects_malformed_input() -> None:
 
     assert verify_state("not-valid-at-all") is None
     assert verify_state("no.dot.separator.count") is None
+
+
+@pytest.mark.asyncio
+async def test_exchange_refresh_invalidates_old_access_token(provider: KilnOAuthProvider) -> None:
+    """Old access token must be revoked when refresh token is rotated."""
+    info = _make_client_info()
+    await provider.register_client(info)
+
+    auth_code = KilnAuthorizationCode(
+        code="code-rot",
+        scopes=["kiln:tools"],
+        expires_at=time.time() + 600,
+        client_id="test-client",
+        code_challenge="ch",
+        redirect_uri=AnyUrl("http://localhost:3000/callback"),
+        redirect_uri_provided_explicitly=True,
+        user_id="user",
+    )
+    provider._store.save_auth_code("code-rot", auth_code.model_dump(mode="json"), ttl=600)
+    token_resp = await provider.exchange_authorization_code(info, auth_code)
+
+    refresh = await provider.load_refresh_token(info, token_resp.refresh_token)
+    assert refresh is not None
+
+    await provider.exchange_refresh_token(info, refresh, ["kiln:tools"])
+
+    assert await provider.load_access_token(token_resp.access_token) is None

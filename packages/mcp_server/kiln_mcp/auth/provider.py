@@ -191,6 +191,8 @@ class KilnOAuthProvider:
         scopes: list[str],
     ) -> OAuthToken:
         self._store.delete_refresh_token(refresh_token.token)
+        if refresh_token.paired_access_token:
+            self._store.delete_access_token(refresh_token.paired_access_token)
 
         now = int(time.time())
         new_access = secrets.token_urlsafe(32)
