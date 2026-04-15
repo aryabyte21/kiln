@@ -8,7 +8,7 @@
 #     -t kiln-registry-api .
 
 # ── Stage 1: Install dependencies ──────────────────────────────────────────
-FROM python:3.13-slim AS builder
+FROM python:3.12-slim AS builder
 
 RUN pip install --no-cache-dir uv
 
@@ -17,7 +17,9 @@ WORKDIR /app
 # Copy dependency files first (cache layer)
 COPY pyproject.toml uv.lock ./
 COPY packages/shared/pyproject.toml packages/shared/pyproject.toml
+COPY packages/shared/README.md packages/shared/LICENSE packages/shared/
 COPY packages/registry_api/pyproject.toml packages/registry_api/pyproject.toml
+COPY packages/registry_api/README.md packages/registry_api/LICENSE packages/registry_api/
 COPY packages/chat_backend/pyproject.toml packages/chat_backend/pyproject.toml
 COPY packages/synthesis_service/pyproject.toml packages/synthesis_service/pyproject.toml
 COPY packages/tool_executor/pyproject.toml packages/tool_executor/pyproject.toml
@@ -45,7 +47,7 @@ RUN mkdir -p packages/shared/kiln_shared \
 RUN uv sync --no-dev --frozen 2>/dev/null || uv sync --no-dev
 
 # ── Stage 2: Production image ──────────────────────────────────────────────
-FROM python:3.13-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ARG SERVICE=registry_api
 ARG MODULE=kiln_registry.main:app
