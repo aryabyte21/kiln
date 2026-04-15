@@ -813,8 +813,10 @@ function RotatingWord({
 
   return (
     <span className="relative inline-block">
-      {/* invisible spacer keeps the line height + width stable */}
-      <span aria-hidden="true" className={cn("invisible whitespace-nowrap", textClassName)}>
+      <span
+        aria-hidden="true"
+        className={cn("invisible whitespace-nowrap pr-[0.12em]", textClassName)}
+      >
         {longest}
       </span>
       <span className="absolute inset-0 flex items-center justify-center">
@@ -825,7 +827,7 @@ function RotatingWord({
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             exit={{ opacity: 0, y: "-0.35em", filter: "blur(10px)" }}
             transition={{ duration: 0.55, ease: [0.21, 0.47, 0.32, 0.98] }}
-            className={cn("inline-block whitespace-nowrap", textClassName)}
+            className={cn("inline-block whitespace-nowrap pr-[0.12em]", textClassName)}
             style={{ backgroundSize: "200% 100%", animation: "gradientSlide 6s ease-in-out infinite" }}
           >
             {words[index]}
