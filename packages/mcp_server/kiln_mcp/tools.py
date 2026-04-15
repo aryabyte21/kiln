@@ -183,10 +183,10 @@ async def _fetch_tools() -> list[dict]:
         return []
 
 
-async def sync_tools(mcp_server) -> int:
+async def sync_tools(mcp_server) -> tuple[int, int]:
     tools = await _fetch_tools()
     if not tools:
-        return 0
+        return 0, 0
 
     async with _get_lock():
         current_ids = set(_registered_tools.keys())
@@ -196,9 +196,7 @@ async def sync_tools(mcp_server) -> int:
         for tool in tools:
             tid = tool["id"]
             tname = tool["name"]
-
-            if tid in _stale_tool_ids:
-                _stale_tool_ids.discard(tid)
+            _stale_tool_ids.discard(tid)
 
             if tid in current_ids:
                 continue
@@ -222,19 +220,22 @@ async def sync_tools(mcp_server) -> int:
             added += 1
             logger.info("Registered MCP tool: %s (%s)", tname, tid)
 
-        newly_stale = current_ids - new_ids
-        for rid in newly_stale:
-            _stale_tool_ids.add(rid)
+        removed = 0
+        for rid in current_ids - new_ids:
             stale_spec = _registered_tools.pop(rid, None)
-            if stale_spec is not None:
-                _registered_names.pop(stale_spec.get("name", ""), None)
-        if newly_stale:
-            logger.warning(
-                "Tools removed from registry (now stale in MCP): %s",
-                sorted(newly_stale),
-            )
+            if stale_spec is None:
+                continue
+            stale_name = stale_spec.get("name", "")
+            _registered_names.pop(stale_name, None)
+            _stale_tool_ids.add(rid)
+            if stale_name:
+                with contextlib.suppress(Exception):
+                    mcp_server.remove_tool(stale_name)
+            removed += 1
+        if removed:
+            logger.warning("Unregistered %d tools removed upstream", removed)
 
-        return added
+        return added, removed
 
 
 def get_registered_tool_count() -> int:

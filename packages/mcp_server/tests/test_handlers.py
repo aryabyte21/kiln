@@ -155,16 +155,20 @@ def test_make_tool_handler_signature_matches_params() -> None:
 
 
 class _FakeMCP:
-    """Minimal stand-in for FastMCP.tool() -- records registrations."""
+    """Minimal stand-in for FastMCP.tool() / remove_tool()."""
 
     def __init__(self) -> None:
         self.registered: list[tuple[str, str]] = []
+        self.removed: list[str] = []
 
     def tool(self, name: str, description: str = ""):
         def decorator(fn):
             self.registered.append((name, description))
             return fn
         return decorator
+
+    def remove_tool(self, name: str) -> None:
+        self.removed.append(name)
 
 
 @pytest.fixture(autouse=True)
@@ -182,9 +186,10 @@ async def test_sync_tools_adds_new_tools(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch)
 
     mcp = _FakeMCP()
-    added = await tool_module.sync_tools(mcp)
+    added, removed = await tool_module.sync_tools(mcp)
 
     assert added == 1
+    assert removed == 0
     assert ("a", "") in mcp.registered
 
 
@@ -207,9 +212,10 @@ async def test_sync_tools_rejects_name_collision(
     await tool_module.sync_tools(mcp)
 
     monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_v2)
-    added = await tool_module.sync_tools(mcp)
+    added, removed = await tool_module.sync_tools(mcp)
 
     assert added == 0
+    assert removed == 0
     assert "com.a.v1" in tool_module._registered_tools
     assert "com.a.v2" not in tool_module._registered_tools
 
@@ -233,11 +239,13 @@ async def test_sync_tools_marks_removed_tools_stale(
     assert "com.a" in tool_module._registered_tools
 
     monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_empty)
-    await tool_module.sync_tools(mcp)
+    added, removed = await tool_module.sync_tools(mcp)
 
+    assert removed == 1
     assert "com.a" in tool_module._stale_tool_ids
     assert "com.a" not in tool_module._registered_tools
     assert "a" not in tool_module._registered_names
+    assert "a" in mcp.removed, "stale tools must be unregistered from the MCP server"
 
 
 @pytest.mark.asyncio
@@ -263,7 +271,7 @@ async def test_sync_tools_reregisters_previously_stale_tool(
     assert "com.a" in tool_module._stale_tool_ids
 
     monkeypatch.setattr(tool_module, "_fetch_tools", _fake_fetch_with_a)
-    added = await tool_module.sync_tools(mcp)
+    added, _removed = await tool_module.sync_tools(mcp)
 
     assert added == 1
     assert "com.a" not in tool_module._stale_tool_ids
