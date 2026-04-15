@@ -19,6 +19,15 @@ set -euo pipefail
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO_ROOT"
 
+# Reject *any* extra args too — a stray word after `--test` (typo, shell
+# glob, copy-paste accident) must never be ignored silently, because the
+# next step of this script publishes to production PyPI.
+if [[ $# -gt 1 ]]; then
+  echo "ERROR: Too many arguments. Got $#: $*" >&2
+  echo "Usage: $0 [--test]" >&2
+  exit 2
+fi
+
 PUBLISH_URL=""
 case "${1:-}" in
   "")

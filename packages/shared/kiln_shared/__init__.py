@@ -20,28 +20,23 @@ __all__ = [
     "kiln_tool",
 ]
 
-# Optional server-only helpers. These live behind a targeted guard: we
-# catch ImportError *only* when the root cause is a missing server-extra
-# dependency (fastapi / httpx / jwt). Any other ImportError — a typo in
-# auth.py, a bad export, a circular import — must bubble up so it's
-# visible instead of silently dropping the KilnUser / require_auth
-# re-exports.
-def _load_auth_extras() -> list[str]:
-    from importlib import util as _iu
+# Optional server-only helpers. Use EAFP: try the real import, and only
+# swallow ImportError when its root cause is one of the known server-extra
+# dependencies missing. Any other ImportError — a typo in auth.py, a bad
+# re-export, a circular import, or even a corrupted install of fastapi
+# itself (which raises ImportError with a different `name`) — must bubble
+# up rather than silently dropping KilnUser / require_auth.
+_SERVER_DEPS = {"fastapi", "httpx", "jwt", "starlette", "pydantic_settings"}
 
-    _server_deps = ("fastapi", "httpx", "jwt")
-    _missing = [dep for dep in _server_deps if _iu.find_spec(dep) is None]
-    if _missing:
-        # SDK-only install — server extras intentionally absent.
-        return []
-
-    from .auth import KilnUser, require_auth, require_jwt_auth
-
-    globals()["KilnUser"] = KilnUser
-    globals()["require_auth"] = require_auth
-    globals()["require_jwt_auth"] = require_jwt_auth
-    return ["KilnUser", "require_auth", "require_jwt_auth"]
-
-
-__all__.extend(_load_auth_extras())
-del _load_auth_extras
+try:
+    from .auth import KilnUser as KilnUser
+    from .auth import require_auth as require_auth
+    from .auth import require_jwt_auth as require_jwt_auth
+except ImportError as exc:
+    # `exc.name` is the top-level module Python couldn't find. If it's one
+    # of the server-extra deps, this is an SDK-only install — stay quiet.
+    # Otherwise re-raise so the real bug surfaces.
+    if exc.name not in _SERVER_DEPS:
+        raise
+else:
+    __all__.extend(["KilnUser", "require_auth", "require_jwt_auth"])

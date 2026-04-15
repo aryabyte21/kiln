@@ -17,17 +17,21 @@ jobs:
     steps:
       - name: Fail clearly if GCP deployment isn't configured
         # Validate the SAME names the real auth/push steps use below:
-        # `vars.GCP_PROJECT` for the project id + `secrets.WIF_PROVIDER`
-        # for the Workload Identity Federation provider. If those are out
-        # of sync with what's actually referenced at deploy time this
-        # check becomes useless.
+        # `vars.GCP_PROJECT` for the project id, `secrets.WIF_PROVIDER`
+        # for the Workload Identity Federation provider, and
+        # `secrets.WIF_SERVICE_ACCOUNT` for the impersonated GCP service
+        # account. Any one of these missing will fail the `auth` step
+        # downstream with an opaque error, so we'd rather fail here with a
+        # clear message listing exactly what to set.
         env:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
           WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+          WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
         run: |
           missing=""
           [[ -z "$GCP_PROJECT" ]] && missing="$missing vars.GCP_PROJECT"
           [[ -z "$WIF_PROVIDER" ]] && missing="$missing secrets.WIF_PROVIDER"
+          [[ -z "$WIF_SERVICE_ACCOUNT" ]] && missing="$missing secrets.WIF_SERVICE_ACCOUNT"
           if [[ -n "$missing" ]]; then
             echo "::error::GCP deployment is not configured. Missing:$missing"
             echo "::error::Set them at Settings → Secrets and variables → Actions,"
