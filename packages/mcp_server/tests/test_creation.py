@@ -190,6 +190,26 @@ def test_build_spec_yaml_accepts_python_and_json_schema_types() -> None:
     assert parsed["interface"]["outputs"][0]["type"] == "object"
 
 
+def test_build_spec_yaml_rejects_required_as_non_boolean() -> None:
+    """Strings like 'false' are truthy in Python — coercing them with bool()
+    would silently flip an "optional" param into "required". Reject instead.
+    """
+    for bad_value in ["false", "true", 0, 1, "no", None]:
+        with pytest.raises(ToolCreationError, match="required must be a boolean"):
+            build_spec_yaml(
+                tool_id="com.kiln.tools.sample",
+                name="sample",
+                description="a sufficiently descriptive sentence",
+                params=[{"name": "q", "type": "str", "required": bad_value}],
+                returns=None,
+                dependencies=None,
+                version="1.0.0",
+                author="t",
+                tags=None,
+                category="general",
+            )
+
+
 def test_build_spec_yaml_rejects_param_with_non_identifier_name() -> None:
     with pytest.raises(ToolCreationError, match="python identifier"):
         build_spec_yaml(

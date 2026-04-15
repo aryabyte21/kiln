@@ -60,11 +60,18 @@ def _validate_params(params: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         ptype = _canonical_type(raw.get("type", "string"), field=f"param {name}")
 
+        required = raw.get("required", True)
+        if not isinstance(required, bool):
+            raise ToolCreationError(
+                f"param {name}: required must be a boolean, got {type(required).__name__} "
+                f"({required!r}) — strings like 'false' are rejected on purpose"
+            )
+
         entry: dict[str, Any] = {
             "name": name,
             "type": ptype,
             "description": str(raw.get("description", "")),
-            "required": bool(raw.get("required", True)),
+            "required": required,
         }
         if raw.get("default") is not None:
             entry["default"] = raw["default"]
