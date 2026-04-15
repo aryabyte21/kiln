@@ -279,7 +279,7 @@ function buildHistory(messages: UIMessage[]): string[] {
 
 const API_KEY_SIGNUP_URLS: Record<string, { url: string; label: string }> = {
   NEWS_API_KEY: { url: "https://newsapi.org/register", label: "Get free key from NewsAPI.org" },
-  SERPER_API_KEY: { url: "https://serper.dev/api-key", label: "Get free key from Serper.dev" },
+  SERPER_API_KEY: { url: "https://serper.dev/signup", label: "Get free key from Serper.dev" },
   ALPHA_VANTAGE_API_KEY: { url: "https://www.alphavantage.co/support/#api-key", label: "Get free key from Alpha Vantage" },
   GOOGLE_MAPS_API_KEY: { url: "https://console.cloud.google.com/apis/credentials", label: "Get key from Google Cloud Console" },
   SENDGRID_API_KEY: { url: "https://app.sendgrid.com/settings/api_keys", label: "Get key from SendGrid" },
