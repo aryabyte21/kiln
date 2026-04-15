@@ -102,9 +102,9 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: TypeScript
-        run: npx tsc --noEmit
+        run: pnpm exec tsc --noEmit
       - name: ESLint
-        run: npx eslint --max-warnings=0 src
+        run: pnpm run lint
 
   # ── Docker images build (doesn't push — just proves they build) ────────
   docker-build:
