@@ -37,6 +37,10 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message"
 import {
+  AttachmentsProvider,
+  rewriteAttachmentMarkers,
+} from "@/components/ai-elements/attachments-context"
+import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
@@ -54,6 +58,18 @@ const CHAT_BACKEND =
 
 const CONFIG_PREFIX = "__KILN_CONFIG__"
 const TRACE_RE = /^__KILN_TRACE__([\s\S]+?)__END__/
+const ATTACHMENTS_RE = /^__KILN_ATTACHMENTS__([\s\S]+?)__END__/
+
+export interface Attachment {
+  id: string
+  kind: "image"
+  mime: string
+  data_url: string
+  bytes?: number
+  node_id?: string
+  tool?: string
+  meta?: Record<string, string | number | boolean>
+}
 
 const EXAMPLE_QUERIES = [
   { icon: Search, text: "Find tools for web scraping" },
@@ -82,6 +98,7 @@ interface ParsedAssistantMessage {
   body: string
   configRunId: string | null
   configMissingEnvs: Array<{ var_name: string; description: string; tool_id?: string }>
+  attachments: Record<string, Attachment>
 }
 
 interface ExecutionState {
@@ -116,29 +133,45 @@ function parseAssistantMessage(text: string): ParsedAssistantMessage {
         body: "",
         configRunId: payload.run_id ?? null,
         configMissingEnvs: payload.missing_envs ?? [],
+        attachments: {},
       }
     } catch {
       // fall through
     }
   }
 
-  const match = text.match(TRACE_RE)
-  if (match) {
-    let trace: TraceEvent[] = []
+  let remaining = text
+  let trace: TraceEvent[] | null = null
+  let attachments: Record<string, Attachment> = {}
+
+  const traceMatch = remaining.match(TRACE_RE)
+  if (traceMatch) {
     try {
-      trace = JSON.parse(match[1])
+      trace = JSON.parse(traceMatch[1])
     } catch {
       trace = []
     }
-    return {
-      trace,
-      body: text.slice(match[0].length),
-      configRunId: null,
-      configMissingEnvs: [],
-    }
+    remaining = remaining.slice(traceMatch[0].length)
   }
 
-  return { trace: null, body: text, configRunId: null, configMissingEnvs: [] }
+  const attMatch = remaining.match(ATTACHMENTS_RE)
+  if (attMatch) {
+    try {
+      const parsed = JSON.parse(attMatch[1]) as Attachment[]
+      attachments = Object.fromEntries(parsed.map((a) => [a.id, a]))
+    } catch {
+      attachments = {}
+    }
+    remaining = remaining.slice(attMatch[0].length)
+  }
+
+  return {
+    trace,
+    body: remaining,
+    configRunId: null,
+    configMissingEnvs: [],
+    attachments,
+  }
 }
 
 function buildFallbackPlan(
@@ -568,6 +601,7 @@ function KilnChat() {
       abortRef.current = controller
 
       const trace: TraceEvent[] = []
+      const attachments: Record<string, Attachment> = {}
       let finished = false
 
       const finalize = (answer: string) => {
@@ -577,7 +611,12 @@ function KilnChat() {
           trace.length > 0
             ? `__KILN_TRACE__${JSON.stringify(trace)}__END__`
             : ""
-        appendAssistantMessage(tracePrefix + answer)
+        const attList = Object.values(attachments)
+        const attPrefix =
+          attList.length > 0
+            ? `__KILN_ATTACHMENTS__${JSON.stringify(attList)}__END__`
+            : ""
+        appendAssistantMessage(tracePrefix + attPrefix + answer)
         setStreamState(null)
         setIsLoading(false)
       }
@@ -723,6 +762,23 @@ function KilnChat() {
                   }),
                 )
                 break
+              case "attachment": {
+                const id = String(event.id ?? "")
+                const dataUrl = String(event.data_url ?? "")
+                if (id && dataUrl) {
+                  attachments[id] = {
+                    id,
+                    kind: (event.kind as "image") ?? "image",
+                    mime: typeof event.mime === "string" ? event.mime : "image/png",
+                    data_url: dataUrl,
+                    bytes: typeof event.bytes === "number" ? event.bytes : undefined,
+                    node_id: typeof event.node_id === "string" ? event.node_id : undefined,
+                    tool: typeof event.tool === "string" ? event.tool : undefined,
+                    meta: (event.meta as Attachment["meta"]) ?? {},
+                  }
+                }
+                break
+              }
               case "tool_result": {
                 const resultPreview = previewResult(event.result)
                 applyEvent(
@@ -1078,7 +1134,9 @@ function KilnChat() {
                         )}
                         {parsed.body && (
                           <MessageContent>
-                            <MessageResponse>{parsed.body}</MessageResponse>
+                            <AttachmentsProvider value={parsed.attachments}>
+                              <MessageResponse>{rewriteAttachmentMarkers(parsed.body)}</MessageResponse>
+                            </AttachmentsProvider>
                           </MessageContent>
                         )}
                       </div>

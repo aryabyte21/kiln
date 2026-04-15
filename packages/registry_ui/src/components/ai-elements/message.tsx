@@ -23,6 +23,7 @@ import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
 import { MarkdownLink } from "./markdown-link";
+import { MarkdownImage } from "./markdown-image";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -316,7 +317,7 @@ export const MessageResponse = memo(
       )}
       {...props}
       linkSafety={{ enabled: false }}
-      components={{ a: MarkdownLink as never, ...(components ?? {}) }}
+      components={{ a: MarkdownLink as never, img: MarkdownImage as never, ...(components ?? {}) }}
     />
   ),
   (prevProps, nextProps) => prevProps.children === nextProps.children
