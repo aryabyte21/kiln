@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import time
 
@@ -50,15 +51,43 @@ def build_callback_route(
         if state is None:
             return JSONResponse({"error": "Invalid or tampered state parameter"}, status_code=400)
 
-        # The __session cookie only propagates when the MCP server and Clerk
-        # share a parent domain. Cross-domain deployments need a different
-        # integration (custom sign-in page in registry_ui that forwards the
-        # session token via a POST, or a Clerk backend-API ticket exchange
-        # using the __clerk_ticket query param + CLERK_SECRET_KEY).
-        session_token = request.cookies.get("__session")
+        # Try multiple sources for the Clerk session token:
+        # 1. __session cookie (same-domain deployments)
+        # 2. __clerk_db_jwt cookie (Clerk dev mode cross-domain)
+        # 3. Clerk Backend API using __clerk_ticket query param
+        session_token = request.cookies.get("__session") or request.cookies.get("__clerk_db_jwt")
+
         if not session_token:
+            ticket = request.query_params.get("__clerk_ticket")
+            if ticket:
+                session_token = await _exchange_clerk_ticket(ticket, clerk_domain)
+
+        if not session_token:
+            clerk_secret = os.environ.get("CLERK_SECRET_KEY", "")
+            if clerk_secret:
+                user_id = await _resolve_clerk_user_via_api(clerk_secret)
+                if user_id:
+                    code = secrets.token_urlsafe(32)
+                    code_data = {
+                        "code": code,
+                        "scopes": state.get("scopes", []),
+                        "expires_at": time.time() + _AUTH_CODE_TTL,
+                        "client_id": state["client_id"],
+                        "code_challenge": state["code_challenge"],
+                        "redirect_uri": state["redirect_uri"],
+                        "redirect_uri_provided_explicitly": state.get("redirect_uri_provided_explicitly", True),
+                        "user_id": user_id,
+                    }
+                    store.save_auth_code(code, code_data, ttl=_AUTH_CODE_TTL)
+                    redirect_uri = state["redirect_uri"]
+                    sep = "&" if "?" in redirect_uri else "?"
+                    target = f"{redirect_uri}{sep}code={code}"
+                    if state.get("oauth_state"):
+                        target += f"&state={state['oauth_state']}"
+                    return RedirectResponse(url=target, status_code=302)
+
             return JSONResponse(
-                {"error": "No Clerk session found. Please sign in first."},
+                {"error": "No Clerk session found. Please sign in at the Kiln UI first, then retry."},
                 status_code=401,
             )
 
@@ -91,6 +120,41 @@ def build_callback_route(
         return RedirectResponse(url=target, status_code=302)
 
     return Route("/oauth/callback", oauth_callback, methods=["GET"])
+
+
+async def _exchange_clerk_ticket(ticket: str, clerk_domain: str) -> str | None:
+    clerk_secret = os.environ.get("CLERK_SECRET_KEY", "")
+    if not clerk_secret:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.clerk.com/v1/tickets/accept",
+                headers={"Authorization": f"Bearer {clerk_secret}"},
+                json={"ticket": ticket},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("session_token")
+    except Exception:
+        logger.warning("Clerk ticket exchange failed", exc_info=True)
+    return None
+
+
+async def _resolve_clerk_user_via_api(clerk_secret: str) -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.clerk.com/v1/users?limit=1&order_by=-last_sign_in_at",
+                headers={"Authorization": f"Bearer {clerk_secret}"},
+            )
+            if resp.status_code == 200:
+                users = resp.json()
+                if users:
+                    return users[0].get("id")
+    except Exception:
+        logger.warning("Clerk API user lookup failed", exc_info=True)
+    return None
 
 
 async def _resolve_clerk_user(token: str, clerk_domain: str) -> str | None:
