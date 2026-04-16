@@ -260,7 +260,8 @@ kiln/
 │       ├── specs/           # Design specs for major features
 │       └── plans/           # Implementation plans
 ├── infra/
-│   └── terraform/           # GCP infrastructure (GKE + Cloud SQL)
+│   ├── terraform/           # GCP infrastructure (GKE, VPC, IAM, storage)
+│   └── tanka/               # Kubernetes manifests (Jsonnet)
 ├── docker-compose.yml       # Dev stack definition
 ├── docker/                  # Service Dockerfiles
 ├── dev.sh                   # Convenience launcher
@@ -282,7 +283,7 @@ kiln/
 | Frontend | Next.js 16, React 19, TypeScript 5.9, Tailwind 4, shadcn/ui, TanStack Query, Vercel AI SDK |
 | MCP | Anthropic MCP SDK 1.26+, streamable HTTP transport |
 | Infra (local) | Docker Compose, PostgreSQL 17, Redis 7 |
-| Infra (cloud) | Terraform, GKE Autopilot, Cloud SQL, Artifact Registry, GitHub Actions CI/CD |
+| Infra (cloud) | Terraform, GKE Standard, Artifact Registry, Tanka/Jsonnet, Prometheus, Grafana, GitHub Actions CI/CD |
 | Tooling | uv (Python), pnpm + Nx (monorepo), ruff, mypy, ESLint |
 
 ---
@@ -298,10 +299,49 @@ kiln/
 
 ---
 
+## Live Deployment
+
+Kiln is deployed on **GKE Standard** in Singapore (`asia-southeast1-a`).
+
+| Service | URL |
+|---------|-----|
+| Registry UI | http://kiln.34.36.172.184.nip.io |
+| Registry API | http://api.34.36.172.184.nip.io |
+| Chat Backend | http://chat.34.36.172.184.nip.io |
+| MCP Server | http://mcp.34.36.172.184.nip.io |
+| Grafana | http://grafana.34.36.172.184.nip.io |
+
+### Grafana
+
+- **URL**: http://grafana.34.36.172.184.nip.io
+- **Username**: `admin`
+- **Password**: `kiln-admin`
+- **Dashboards**: Pre-configured Prometheus datasource. Metrics include `kiln_http_requests_total` (request count by service/method/path/status) and `kiln_http_request_duration_seconds` (latency histogram).
+
+### MCP Client Connection
+
+Point any MCP client (Claude Desktop, Cursor, VS Code Copilot) at:
+```
+http://mcp.34.36.172.184.nip.io/mcp
+```
+
+### Infrastructure
+
+- **Cluster**: 1x e2-standard-2 (2 vCPU, 8 GB) on-demand + 0-3x e2-small spot burst pool
+- **Data**: In-cluster PostgreSQL 17 (10Gi PVC) + Redis 7 (ephemeral)
+- **Observability**: Self-hosted Prometheus + Grafana
+- **CI/CD**: Push to `main` triggers automated test, build, and deploy via GitHub Actions + Workload Identity Federation
+- **IaC**: Terraform (GCP infra) + Tanka/Jsonnet (Kubernetes manifests)
+- **Cost**: ~$70/month on $380 student credits (~5 months runway)
+
+See `docs/infrastructure-report.md` for full deployment documentation.
+
+---
+
 ## Project Status
 
-Kiln is a **CS5224 Cloud Computing** project at NUS (AY2025/26 Semester 2). The architecture targets deployment on GCP: GKE Autopilot for compute, Cloud SQL for persistence, Artifact Registry for images, with CI/CD via GitHub Actions. See `docs/` for design specs and implementation plans.
+Kiln is a **CS5224 Cloud Computing** project at NUS (AY2025/26 Semester 2). See `docs/Final-Report.md` for the submission report and `docs/infrastructure-report.md` for deployment architecture.
 
 ## License
 
-TBD.
+Apache 2.0
