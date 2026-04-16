@@ -124,8 +124,8 @@ jobs:
           file: docker/Dockerfile.nextjs.prod
           build-args: |
             NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-            NEXT_PUBLIC_REGISTRY_URL=http://api.${{ secrets.INGRESS_IP }}.nip.io
-            NEXT_PUBLIC_CHAT_BACKEND=http://chat.${{ secrets.INGRESS_IP }}.nip.io
+            NEXT_PUBLIC_REGISTRY_URL=https://api.${{ secrets.INGRESS_IP }}.nip.io
+            NEXT_PUBLIC_CHAT_BACKEND=https://chat.${{ secrets.INGRESS_IP }}.nip.io
           tags: |
             ${{ env.GAR_REGISTRY }}/registry-ui:${{ env.IMAGE_TAG }}
             ${{ env.GAR_REGISTRY }}/registry-ui:latest
@@ -152,8 +152,12 @@ jobs:
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
 
       - name: Get GKE credentials
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
         env:
           CLUSTER: ${{ env.GKE_CLUSTER }}
           ZONE: ${{ env.GKE_ZONE }}
