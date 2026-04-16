@@ -51,11 +51,11 @@ def build_callback_route(
         if state is None:
             return JSONResponse({"error": "Invalid or tampered state parameter"}, status_code=400)
 
-        # Try multiple sources for the Clerk session token:
-        # 1. __session cookie (same-domain deployments)
-        # 2. __clerk_db_jwt cookie (Clerk dev mode cross-domain)
-        # 3. Clerk Backend API using __clerk_ticket query param
-        session_token = request.cookies.get("__session") or request.cookies.get("__clerk_db_jwt")
+        session_token = (
+            request.query_params.get("__clerk_session_token")
+            or request.cookies.get("__session")
+            or request.cookies.get("__clerk_db_jwt")
+        )
 
         if not session_token:
             ticket = request.query_params.get("__clerk_ticket")

@@ -47,6 +47,7 @@ local monitoring = import 'monitoring.libsonnet';
       KILN_MCP_ISSUER_URL: 'https://mcp.%s.sslip.io' % $._config.ingress_ip,
       KILN_MCP_HOST: '0.0.0.0',
       KILN_MCP_ALLOW_HTTP_ISSUER: 'true',
+      KILN_UI_URL: 'https://kiln.%s.sslip.io' % $._config.ingress_ip,
       TOOL_EXECUTOR_URL: 'http://tool-executor:%(tool_executor)d' % $._config.ports,
       GCS_BUCKET: $._config.gcs_bucket,
       CORS_ORIGINS: 'http://kiln.%s.sslip.io,https://kiln.%s.sslip.io' % [$._config.ingress_ip, $._config.ingress_ip],

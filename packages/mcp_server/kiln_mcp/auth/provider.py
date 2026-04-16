@@ -112,6 +112,12 @@ class KilnOAuthProvider:
         encoded_state = f"{payload_b64}.{signature}"
 
         callback_url = f"{self._issuer_url}/oauth/callback"
+        ui_base = os.environ.get("KILN_UI_URL", "").rstrip("/")
+        if ui_base:
+            return (
+                f"{ui_base}/mcp-auth?"
+                + urlencode({"callback": f"{callback_url}?state={encoded_state}"})
+            )
         return (
             f"https://{self._clerk_domain}/sign-in?"
             + urlencode({"redirect_url": f"{callback_url}?state={encoded_state}"})
