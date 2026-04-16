@@ -283,7 +283,7 @@ kiln/
 | Frontend | Next.js 16, React 19, TypeScript 5.9, Tailwind 4, shadcn/ui, TanStack Query, Vercel AI SDK |
 | MCP | Anthropic MCP SDK 1.26+, streamable HTTP transport |
 | Infra (local) | Docker Compose, PostgreSQL 17, Redis 7 |
-| Infra (cloud) | Terraform, GKE Standard, Artifact Registry, Tanka/Jsonnet, Prometheus, Grafana, GitHub Actions CI/CD |
+| Infra (cloud) | Terraform, GKE Standard, nginx-ingress, cert-manager (Let's Encrypt), Tanka/Jsonnet, Prometheus, Grafana, GitHub Actions CI/CD |
 | Tooling | uv (Python), pnpm + Nx (monorepo), ruff, mypy, ESLint |
 
 ---
@@ -305,15 +305,15 @@ Kiln is deployed on **GKE Standard** in Singapore (`asia-southeast1-a`).
 
 | Service | URL |
 |---------|-----|
-| Registry UI | http://kiln.34.36.172.184.nip.io |
-| Registry API | http://api.34.36.172.184.nip.io |
-| Chat Backend | http://chat.34.36.172.184.nip.io |
-| MCP Server | http://mcp.34.36.172.184.nip.io |
-| Grafana | http://grafana.34.36.172.184.nip.io |
+| Registry UI | https://kiln.35.197.159.116.sslip.io |
+| Registry API | https://api.35.197.159.116.sslip.io |
+| Chat Backend | https://chat.35.197.159.116.sslip.io |
+| MCP Server | https://mcp.35.197.159.116.sslip.io |
+| Grafana | https://grafana.35.197.159.116.sslip.io |
 
 ### Grafana
 
-- **URL**: http://grafana.34.36.172.184.nip.io
+- **URL**: https://grafana.35.197.159.116.sslip.io
 - **Username**: `admin`
 - **Password**: `kiln-admin`
 - **Dashboards**: Pre-configured Prometheus datasource. Metrics include `kiln_http_requests_total` (request count by service/method/path/status) and `kiln_http_request_duration_seconds` (latency histogram).
@@ -322,7 +322,7 @@ Kiln is deployed on **GKE Standard** in Singapore (`asia-southeast1-a`).
 
 Point any MCP client (Claude Desktop, Cursor, VS Code Copilot) at:
 ```
-http://mcp.34.36.172.184.nip.io/mcp
+https://mcp.35.197.159.116.sslip.io/mcp
 ```
 
 ### Infrastructure
