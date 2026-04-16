@@ -42,7 +42,7 @@ ENV NODE_ENV=production \
 RUN addgroup -g 1001 -S kiln && adduser -S kiln -u 1001 -G kiln
 
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=kiln:kiln /app/.next/standalone ./
+COPY --from=builder --chown=kiln:kiln /app/.next/standalone/app/ ./
 COPY --from=builder --chown=kiln:kiln /app/.next/static ./.next/static
 
 USER kiln
