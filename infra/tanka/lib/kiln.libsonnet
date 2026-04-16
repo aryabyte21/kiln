@@ -44,12 +44,12 @@ local monitoring = import 'monitoring.libsonnet';
       SYNTHESIS_URL: 'http://synthesis-service:%(synthesis_service)d' % $._config.ports,
       KILN_CALLBACK_URL: 'http://registry-api:%(registry_api)d/synthesis/callback' % $._config.ports,
       KILN_SYNTHESIS_CALLBACK_URL: 'http://registry-api:%(registry_api)d/synthesis/callback' % $._config.ports,
-      KILN_MCP_ISSUER_URL: 'http://mcp.%s.nip.io' % $._config.ingress_ip,
+      KILN_MCP_ISSUER_URL: 'https://mcp.%s.sslip.io' % $._config.ingress_ip,
       KILN_MCP_HOST: '0.0.0.0',
       KILN_MCP_ALLOW_HTTP_ISSUER: 'true',
       TOOL_EXECUTOR_URL: 'http://tool-executor:%(tool_executor)d' % $._config.ports,
       GCS_BUCKET: $._config.gcs_bucket,
-      CORS_ORIGINS: 'http://kiln.%s.nip.io,https://kiln.%s.nip.io' % [$._config.ingress_ip, $._config.ingress_ip],
+      CORS_ORIGINS: 'http://kiln.%s.sslip.io,https://kiln.%s.sslip.io' % [$._config.ingress_ip, $._config.ingress_ip],
     })
     + k.core.v1.configMap.metadata.withNamespace($._config.namespace),
 
@@ -220,10 +220,22 @@ local monitoring = import 'monitoring.libsonnet';
     + k.networking.v1.ingress.metadata.withAnnotations({
       'kubernetes.io/ingress.class': 'gce',
       'kubernetes.io/ingress.global-static-ip-name': $._config.ingress_ip_name,
+      'cert-manager.io/cluster-issuer': 'letsencrypt-prod',
+      'kubernetes.io/ingress.allow-http': 'true',
     })
+    + k.networking.v1.ingress.spec.withTls([{
+      hosts: [
+        'kiln.%s.sslip.io' % $._config.ingress_ip,
+        'api.%s.sslip.io' % $._config.ingress_ip,
+        'chat.%s.sslip.io' % $._config.ingress_ip,
+        'mcp.%s.sslip.io' % $._config.ingress_ip,
+        'grafana.%s.sslip.io' % $._config.ingress_ip,
+      ],
+      secretName: 'kiln-tls',
+    }])
     + k.networking.v1.ingress.spec.withRules([
       {
-        host: 'kiln.%s.nip.io' % $._config.ingress_ip,
+        host: 'kiln.%s.sslip.io' % $._config.ingress_ip,
         http: { paths: [{
           path: '/',
           pathType: 'Prefix',
@@ -231,7 +243,7 @@ local monitoring = import 'monitoring.libsonnet';
         }] },
       },
       {
-        host: 'api.%s.nip.io' % $._config.ingress_ip,
+        host: 'api.%s.sslip.io' % $._config.ingress_ip,
         http: { paths: [{
           path: '/',
           pathType: 'Prefix',
@@ -239,7 +251,7 @@ local monitoring = import 'monitoring.libsonnet';
         }] },
       },
       {
-        host: 'chat.%s.nip.io' % $._config.ingress_ip,
+        host: 'chat.%s.sslip.io' % $._config.ingress_ip,
         http: { paths: [{
           path: '/',
           pathType: 'Prefix',
@@ -247,7 +259,7 @@ local monitoring = import 'monitoring.libsonnet';
         }] },
       },
       {
-        host: 'mcp.%s.nip.io' % $._config.ingress_ip,
+        host: 'mcp.%s.sslip.io' % $._config.ingress_ip,
         http: { paths: [{
           path: '/',
           pathType: 'Prefix',
@@ -255,7 +267,7 @@ local monitoring = import 'monitoring.libsonnet';
         }] },
       },
       {
-        host: 'grafana.%s.nip.io' % $._config.ingress_ip,
+        host: 'grafana.%s.sslip.io' % $._config.ingress_ip,
         http: { paths: [{
           path: '/',
           pathType: 'Prefix',
