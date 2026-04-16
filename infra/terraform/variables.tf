@@ -26,3 +26,9 @@ variable "billing_account_id" {
   type        = string
   default     = ""
 }
+
+variable "github_repository" {
+  description = "GitHub repository (owner/name) for Workload Identity Federation"
+  type        = string
+  default     = "aryabyte21/kiln"
+}
