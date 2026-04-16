@@ -85,7 +85,7 @@ local volumeMount = k.core.v1.volumeMount;
 
   kube_state_metrics_deployment:
     local ksmContainer =
-      container.new('kube-state-metrics', 'ghcr.io/kube-state-metrics/kube-state-metrics:v2.12.0')
+      container.new('kube-state-metrics', 'registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.12.0')
       + container.withPorts([
         k.core.v1.containerPort.new(8080),
         k.core.v1.containerPort.new(8081),

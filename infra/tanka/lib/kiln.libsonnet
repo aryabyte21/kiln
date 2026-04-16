@@ -44,7 +44,7 @@ local monitoring = import 'monitoring.libsonnet';
       SYNTHESIS_URL: 'http://synthesis-service:%(synthesis_service)d' % $._config.ports,
       KILN_CALLBACK_URL: 'http://registry-api:%(registry_api)d/synthesis/callback' % $._config.ports,
       KILN_SYNTHESIS_CALLBACK_URL: 'http://registry-api:%(registry_api)d/synthesis/callback' % $._config.ports,
-      KILN_MCP_ISSUER_URL: 'http://mcp-server:%(mcp_server)d' % $._config.ports,
+      KILN_MCP_ISSUER_URL: 'https://mcp.%s.nip.io' % $._config.ingress_ip,
       TOOL_EXECUTOR_URL: 'http://tool-executor:%(tool_executor)d' % $._config.ports,
       GCS_BUCKET: $._config.gcs_bucket,
       CORS_ORIGINS: 'https://kiln.%s.nip.io' % $._config.ingress_ip,
