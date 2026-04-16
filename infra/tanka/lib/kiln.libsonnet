@@ -118,7 +118,7 @@ local monitoring = import 'monitoring.libsonnet';
     },
 
     service:
-      service.new(name, { app: name }, [{ port: port, targetPort: port }])
+      service.new(name, { name: name }, [{ port: port, targetPort: port }])
       + service.metadata.withNamespace($._config.namespace)
       + service.metadata.withAnnotationsMixin({
         'cloud.google.com/backend-config': '{"default": "%s"}' % name,
