@@ -1,21 +1,3 @@
-###############################################################################
-# Kiln — GCP Infrastructure (Terraform)
-#
-# Provisions:
-#   - GKE Autopilot cluster
-#   - Cloud SQL PostgreSQL (2 instances: registry + chat)
-#   - GCS bucket for tool artifacts
-#   - Artifact Registry for Docker images
-#   - VPC with private networking
-#   - IAM service accounts
-#
-# Usage:
-#   cd infra/terraform
-#   terraform init
-#   terraform plan -var="project_id=kiln-cs5224" -var="db_password_registry=..." -var="db_password_chat=..."
-#   terraform apply
-###############################################################################
-
 terraform {
   required_version = ">= 1.5"
   required_providers {
@@ -35,23 +17,24 @@ locals {
   name_prefix = "kiln-${var.environment}"
 }
 
-# ── APIs ────────────────────────────────────────────────────────────────────
+# ── APIs ───────────────────────────────────────────────────────────────────────
 
 resource "google_project_service" "apis" {
   for_each = toset([
-    "container.googleapis.com",      # GKE
-    "sqladmin.googleapis.com",       # Cloud SQL
+    "container.googleapis.com",
     "artifactregistry.googleapis.com",
     "compute.googleapis.com",
-    "servicenetworking.googleapis.com",
+    "iam.googleapis.com",
+    "billingbudgets.googleapis.com",
     "secretmanager.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
   ])
 
   service            = each.value
   disable_on_destroy = false
 }
 
-# ── VPC ─────────────────────────────────────────────────────────────────────
+# ── VPC ────────────────────────────────────────────────────────────────────────
 
 resource "google_compute_network" "vpc" {
   name                    = "${local.name_prefix}-vpc"
@@ -77,134 +60,126 @@ resource "google_compute_subnetwork" "subnet" {
   }
 }
 
-# Private IP for Cloud SQL
-resource "google_compute_global_address" "private_ip" {
-  name          = "${local.name_prefix}-private-ip"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 16
-  network       = google_compute_network.vpc.id
+resource "google_compute_global_address" "ingress_ip" {
+  name = "${local.name_prefix}-ingress-ip"
+
+  depends_on = [google_project_service.apis]
 }
 
-resource "google_service_networking_connection" "private_vpc" {
-  network                 = google_compute_network.vpc.id
-  service                 = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [google_compute_global_address.private_ip.name]
-}
-
-# ── GKE Autopilot ──────────────────────────────────────────────────────────
+# ── GKE Standard Zonal Cluster ─────────────────────────────────────────────────
 
 resource "google_container_cluster" "kiln" {
   name     = "${local.name_prefix}-gke"
-  location = var.region
-
-  # Autopilot — no node pools to manage
-  enable_autopilot = true
+  location = var.zone
 
   network    = google_compute_network.vpc.id
   subnetwork = google_compute_subnetwork.subnet.id
+
+  release_channel {
+    channel = "REGULAR"
+  }
 
   ip_allocation_policy {
     cluster_secondary_range_name  = "pods"
     services_secondary_range_name = "services"
   }
 
-  # Private cluster — nodes don't get public IPs
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = false # Allow kubectl from outside
+    enable_private_endpoint = false
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
 
-  deletion_protection = false
-
-  depends_on = [
-    google_project_service.apis,
-    google_service_networking_connection.private_vpc,
-  ]
-}
-
-# ── Cloud SQL — Registry DB ────────────────────────────────────────────────
-
-resource "google_sql_database_instance" "registry" {
-  name             = "${local.name_prefix}-registry-db"
-  database_version = "POSTGRES_17"
-  region           = var.region
-
-  settings {
-    tier              = "db-f1-micro" # Shared-core, ~$8/mo
-    availability_type = "ZONAL"
-    disk_size         = 10
-
-    ip_configuration {
-      ipv4_enabled                                  = false
-      private_network                               = google_compute_network.vpc.id
-      enable_private_path_for_google_cloud_services = true
-    }
-
-    backup_configuration {
-      enabled                        = true
-      point_in_time_recovery_enabled = true
+  master_authorized_networks_config {
+    cidr_blocks {
+      cidr_block   = "0.0.0.0/0"
+      display_name = "all"
     }
   }
 
+  workload_identity_config {
+    workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
   deletion_protection = false
 
-  depends_on = [google_service_networking_connection.private_vpc]
+  depends_on = [google_project_service.apis]
 }
 
-resource "google_sql_database" "registry" {
-  name     = "kiln_registry"
-  instance = google_sql_database_instance.registry.name
-}
+resource "google_container_node_pool" "main" {
+  name     = "main-pool"
+  cluster  = google_container_cluster.kiln.id
+  location = var.zone
 
-resource "google_sql_user" "registry" {
-  name     = "kiln"
-  instance = google_sql_database_instance.registry.name
-  password = var.db_password_registry
-}
+  node_count = 1
 
-# ── Cloud SQL — Chat DB ────────────────────────────────────────────────────
+  node_config {
+    machine_type = "e2-standard-2"
+    disk_size_gb = 50
+    disk_type    = "pd-balanced"
 
-resource "google_sql_database_instance" "chat" {
-  name             = "${local.name_prefix}-chat-db"
-  database_version = "POSTGRES_17"
-  region           = var.region
+    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
 
-  settings {
-    tier              = "db-f1-micro"
-    availability_type = "ZONAL"
-    disk_size         = 10
-
-    ip_configuration {
-      ipv4_enabled                                  = false
-      private_network                               = google_compute_network.vpc.id
-      enable_private_path_for_google_cloud_services = true
-    }
-
-    backup_configuration {
-      enabled                        = true
-      point_in_time_recovery_enabled = true
+    workload_metadata_config {
+      mode = "GKE_METADATA"
     }
   }
 
-  deletion_protection = false
-
-  depends_on = [google_service_networking_connection.private_vpc]
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
 }
 
-resource "google_sql_database" "chat" {
-  name     = "kiln_chat"
-  instance = google_sql_database_instance.chat.name
+resource "google_container_node_pool" "burst" {
+  name     = "burst-pool"
+  cluster  = google_container_cluster.kiln.id
+  location = var.zone
+
+  autoscaling {
+    min_node_count = 0
+    max_node_count = 3
+  }
+
+  node_config {
+    machine_type = "e2-small"
+    disk_size_gb = 30
+    disk_type    = "pd-standard"
+    spot         = true
+
+    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+
+    taint {
+      key    = "pool"
+      value  = "burst"
+      effect = "NO_SCHEDULE"
+    }
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
 }
 
-resource "google_sql_user" "chat" {
-  name     = "kiln"
-  instance = google_sql_database_instance.chat.name
-  password = var.db_password_chat
+# ── Artifact Registry ──────────────────────────────────────────────────────────
+
+resource "google_artifact_registry_repository" "kiln" {
+  repository_id = "kiln"
+  location      = var.region
+  format        = "DOCKER"
+
+  depends_on = [google_project_service.apis]
 }
 
-# ── GCS — Tool Artifacts ───────────────────────────────────────────────────
+# ── GCS Buckets ────────────────────────────────────────────────────────────────
 
 resource "google_storage_bucket" "tools" {
   name          = "${var.project_id}-kiln-tools"
@@ -227,48 +202,109 @@ resource "google_storage_bucket" "tools" {
   }
 }
 
-# ── Artifact Registry ──────────────────────────────────────────────────────
-
-resource "google_artifact_registry_repository" "kiln" {
-  repository_id = "kiln"
+resource "google_storage_bucket" "pg_backups" {
+  name          = "${var.project_id}-kiln-pg-backups"
   location      = var.region
-  format        = "DOCKER"
-  description   = "Kiln microservice Docker images"
+  force_destroy = false
 
-  depends_on = [google_project_service.apis]
+  uniform_bucket_level_access = true
+
+  lifecycle_rule {
+    condition {
+      age = 14
+    }
+    action {
+      type = "Delete"
+    }
+  }
 }
 
-# ── IAM — Workload Identity for GKE pods ───────────────────────────────────
+# ── IAM — Workload Identity ───────────────────────────────────────────────────
 
 resource "google_service_account" "kiln_workload" {
   account_id   = "${local.name_prefix}-workload"
   display_name = "Kiln GKE Workload Identity"
 }
 
-# Allow GKE pods to act as this service account
 resource "google_service_account_iam_member" "workload_identity" {
   service_account_id = google_service_account.kiln_workload.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[kiln/kiln-sa]"
 }
 
-# Grant Cloud SQL Client access
-resource "google_project_iam_member" "sql_client" {
-  project = var.project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.kiln_workload.email}"
-}
-
-# Grant GCS access for tool artifacts
 resource "google_storage_bucket_iam_member" "tools_admin" {
   bucket = google_storage_bucket.tools.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.kiln_workload.email}"
 }
 
-# Grant Artifact Registry reader (for pulling images)
-resource "google_project_iam_member" "ar_reader" {
+resource "google_storage_bucket_iam_member" "pg_backups_writer" {
+  bucket = google_storage_bucket.pg_backups.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.kiln_workload.email}"
+}
+
+resource "google_project_iam_member" "workload_ar_reader" {
   project = var.project_id
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.kiln_workload.email}"
+}
+
+# ── IAM — CI/CD Service Account ───────────────────────────────────────────────
+
+resource "google_service_account" "github_ci" {
+  account_id   = "github-ci"
+  display_name = "GitHub Actions CI/CD"
+}
+
+resource "google_project_iam_member" "ci_ar_writer" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${google_service_account.github_ci.email}"
+}
+
+resource "google_project_iam_member" "ci_gke_developer" {
+  project = var.project_id
+  role    = "roles/container.developer"
+  member  = "serviceAccount:${google_service_account.github_ci.email}"
+}
+
+# ── Budget Alerts ──────────────────────────────────────────────────────────────
+
+resource "google_billing_budget" "kiln" {
+  count = var.billing_account_id != "" ? 1 : 0
+
+  billing_account = var.billing_account_id
+  display_name    = "${local.name_prefix}-budget"
+
+  budget_filter {
+    projects = ["projects/${var.project_id}"]
+  }
+
+  amount {
+    specified_amount {
+      currency_code = "USD"
+      units         = "300"
+    }
+  }
+
+  threshold_rules {
+    threshold_percent = 0.1667
+    spend_basis       = "CURRENT_SPEND"
+  }
+
+  threshold_rules {
+    threshold_percent = 0.5
+    spend_basis       = "CURRENT_SPEND"
+  }
+
+  threshold_rules {
+    threshold_percent = 0.8333
+    spend_basis       = "CURRENT_SPEND"
+  }
+
+  threshold_rules {
+    threshold_percent = 1.0
+    spend_basis       = "CURRENT_SPEND"
+  }
 }

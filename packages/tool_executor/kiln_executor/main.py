@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from kiln_shared.auth import verify_internal_secret
+from kiln_shared.metrics import mount_metrics
 
 from .safety import validate_source
 from .sandbox import ExecutionResult, run_in_sandbox
@@ -54,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+mount_metrics(app, "tool_executor")
 
 
 @asynccontextmanager

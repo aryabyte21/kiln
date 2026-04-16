@@ -37,6 +37,7 @@ from kiln_shared.auth import KilnUser, require_auth
 from kiln_shared.cors import install_cors
 from kiln_shared.env import required_url as _required_url
 from kiln_shared.httpx_client import async_client
+from kiln_shared.metrics import mount_metrics
 from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
 from kiln_shared.request_id import KilnRequestIDMiddleware
 
@@ -77,6 +78,8 @@ app.add_middleware(KilnRequestIDMiddleware)
 
 # CORS: strict allowlist + fail-loud in production if CORS_ORIGINS is unset.
 install_cors(app)
+
+mount_metrics(app, "chat_backend")
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):

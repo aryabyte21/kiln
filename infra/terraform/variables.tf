@@ -1,48 +1,28 @@
 variable "project_id" {
-  description = "GCP project ID"
+  description = "GCP project ID (e.g. kiln-cs5224)"
   type        = string
 }
 
 variable "region" {
-  description = "GCP region for resources"
+  description = "GCP region for regional resources"
   type        = string
-  default     = "asia-southeast1" # Singapore — closest to NUS
+  default     = "asia-southeast1"
+}
+
+variable "zone" {
+  description = "GCP zone for the GKE zonal cluster"
+  type        = string
+  default     = "asia-southeast1-a"
 }
 
 variable "environment" {
-  description = "Deployment environment (dev, staging, prod)"
+  description = "Deployment environment suffix (dev, staging, prod)"
   type        = string
   default     = "dev"
 }
 
-variable "db_password_registry" {
-  description = "Password for the Kiln registry PostgreSQL database"
+variable "billing_account_id" {
+  description = "GCP billing account ID for budget alerts. Run: gcloud billing accounts list. Leave empty to skip budget creation."
   type        = string
-  sensitive   = true
-}
-
-variable "db_password_chat" {
-  description = "Password for the Kiln chat PostgreSQL database"
-  type        = string
-  sensitive   = true
-}
-
-variable "clerk_domain" {
-  description = "Clerk auth domain"
-  type        = string
-  default     = ""
-}
-
-variable "clerk_secret_key" {
-  description = "Clerk secret key"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "mistral_api_key" {
-  description = "Mistral API key for synthesis and planning"
-  type        = string
-  sensitive   = true
   default     = ""
 }
