@@ -36,11 +36,11 @@ RUN mkdir -p /app/logs /tmp/opencode_workspace
 COPY packages/synthesis_service/kiln_synthesis/ /app/kiln_synthesis/
 COPY packages/shared/kiln_shared/ /app/kiln_shared/
 
-# Default env vars for Docker context
+# KILN_SYNTHESIS_CALLBACK_URL must be injected by the deployer (k8s Deployment env,
+# docker-compose, etc). Settings.callback_url enforces this when KILN_ENV!=dev.
 ENV KILN_SYNTHESIS_LOG_DIR=/app/logs \
     KILN_SYNTHESIS_WORKSPACE_DIR=/tmp/opencode_workspace \
-    PYTHONPATH=/app \
-    KILN_CALLBACK_URL=http://host.docker.internal:8766/synthesis/callback
+    PYTHONPATH=/app
 
 EXPOSE 8002
 

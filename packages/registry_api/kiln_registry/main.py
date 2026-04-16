@@ -48,6 +48,7 @@ from slowapi.errors import RateLimitExceeded
 from kiln_shared.auth import KilnUser, invalidate_api_key_cache, require_auth, require_jwt_auth, verify_internal_secret
 from kiln_shared.config import get_config
 from kiln_shared.cors import install_cors
+from kiln_shared.env import required_url as _required_url
 from kiln_shared.httpx_client import async_client
 from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
 from kiln_shared.request_id import KilnRequestIDMiddleware
@@ -98,7 +99,6 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REGISTRY_DIR         = Path(__file__).parent.parent.parent.parent / "registry" / "tools"
-KILN_CALLBACK_URL    = os.environ.get("KILN_CALLBACK_URL", "http://host.docker.internal:8766/synthesis/callback")
 
 app = FastAPI(
     title="KilnRegistryAPI",
@@ -756,7 +756,7 @@ async def register_tool(
     )
 
 
-TOOL_EXECUTOR_URL = os.environ.get("TOOL_EXECUTOR_URL", "http://localhost:8767")
+TOOL_EXECUTOR_URL = _required_url("TOOL_EXECUTOR_URL", "http://localhost:8767")
 
 
 def _read_tool_source(tool_id: str) -> tuple[str, str, list[str]] | None:

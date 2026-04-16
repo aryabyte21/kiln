@@ -31,14 +31,15 @@ from kiln_mcp.auth.clerk_callback import build_callback_route
 from kiln_mcp.auth.provider import KilnOAuthProvider
 from kiln_mcp.auth.store import InMemoryOAuthStore
 from kiln_mcp.user_env import fetch_user_env_vars
+from kiln_shared.env import required_url as _required_url
 from kiln_shared.httpx_client import async_client
 from kiln_shared.request_id import KilnRequestIDMiddleware
 
 logger = logging.getLogger(__name__)
 
-REGISTRY_URL = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
+REGISTRY_URL = _required_url("KILN_REGISTRY_URL", "http://localhost:8766")
 POLL_INTERVAL = int(os.environ.get("KILN_MCP_POLL_INTERVAL", "30"))
-ISSUER_URL = os.environ.get("KILN_MCP_ISSUER_URL", "http://localhost:8768")
+ISSUER_URL = _required_url("KILN_MCP_ISSUER_URL", "http://localhost:8768")
 CLERK_DOMAIN = os.environ.get("CLERK_DOMAIN", "").strip()
 
 _oauth_store = InMemoryOAuthStore()

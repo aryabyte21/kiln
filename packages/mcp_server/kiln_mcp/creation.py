@@ -10,12 +10,13 @@ from typing import Any
 import httpx
 import yaml
 
+from kiln_shared.env import required_url
 from kiln_shared.env_allowlist import DisallowedEnvVarError, validate_env_var_name
 from kiln_shared.httpx_client import async_client
 
 logger = logging.getLogger(__name__)
 
-REGISTRY_URL = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
+REGISTRY_URL = required_url("KILN_REGISTRY_URL", "http://localhost:8766")
 
 TOOL_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,}$")
 PY_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")

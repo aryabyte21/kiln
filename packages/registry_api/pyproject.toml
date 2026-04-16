@@ -75,6 +75,9 @@ Documentation = "https://github.com/aryabyte21/kiln#readme"
 Repository    = "https://github.com/aryabyte21/kiln"
 Issues        = "https://github.com/aryabyte21/kiln/issues"
 
+[project.scripts]
+kiln-registry = "kiln_registry.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

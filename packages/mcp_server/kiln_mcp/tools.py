@@ -21,11 +21,12 @@ import httpx
 from mcp.server.auth.middleware.auth_context import get_access_token
 
 from kiln_mcp.user_env import fetch_user_env_vars
+from kiln_shared.env import required_url
 from kiln_shared.httpx_client import async_client
 
 logger = logging.getLogger(__name__)
 
-REGISTRY_URL = os.environ.get("KILN_REGISTRY_URL", "http://localhost:8766")
+REGISTRY_URL = required_url("KILN_REGISTRY_URL", "http://localhost:8766")
 
 _registered_tools: dict[str, dict] = {}
 _registered_names: dict[str, str] = {}
