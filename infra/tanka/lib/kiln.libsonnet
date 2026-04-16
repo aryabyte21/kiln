@@ -99,9 +99,30 @@ local monitoring = import 'monitoring.libsonnet';
       )
       + deployment.spec.template.spec.withServiceAccountName('kiln-sa'),
 
+    backend_config: {
+      apiVersion: 'cloud.google.com/v1',
+      kind: 'BackendConfig',
+      metadata: {
+        name: name,
+        namespace: $._config.namespace,
+      },
+      spec: {
+        healthCheck: {
+          checkIntervalSec: 15,
+          timeoutSec: 5,
+          port: port,
+          type: 'HTTP',
+          requestPath: std.get(args, 'health_path', '/livez'),
+        },
+      },
+    },
+
     service:
       service.new(name, { app: name }, [{ port: port, targetPort: port }])
-      + service.metadata.withNamespace($._config.namespace),
+      + service.metadata.withNamespace($._config.namespace)
+      + service.metadata.withAnnotationsMixin({
+        'cloud.google.com/backend-config': '{"default": "%s"}' % name,
+      }),
   },
 
   registry_api: kilnService('registry-api', $._config.ports.registry_api, 'registry-api', {

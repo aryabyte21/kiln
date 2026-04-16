@@ -85,7 +85,7 @@ local volumeMount = k.core.v1.volumeMount;
 
   kube_state_metrics_deployment:
     local ksmContainer =
-      container.new('kube-state-metrics', 'registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.12.0')
+      container.new('kube-state-metrics', 'ghcr.io/kube-state-metrics/kube-state-metrics:v2.12.0')
       + container.withPorts([
         k.core.v1.containerPort.new(8080),
         k.core.v1.containerPort.new(8081),
@@ -153,7 +153,28 @@ local volumeMount = k.core.v1.volumeMount;
       volume.withName('dashboards') + volume.emptyDir.withMedium(''),
     ]),
 
+  grafana_backend_config: {
+    apiVersion: 'cloud.google.com/v1',
+    kind: 'BackendConfig',
+    metadata: {
+      name: 'grafana',
+      namespace: $._config.namespace,
+    },
+    spec: {
+      healthCheck: {
+        checkIntervalSec: 15,
+        timeoutSec: 5,
+        port: 3001,
+        type: 'HTTP',
+        requestPath: '/api/health',
+      },
+    },
+  },
+
   grafana_service:
     service.new('grafana', { app: 'grafana' }, [{ port: 3001, targetPort: 3001 }])
-    + service.metadata.withNamespace($._config.namespace),
+    + service.metadata.withNamespace($._config.namespace)
+    + service.metadata.withAnnotationsMixin({
+      'cloud.google.com/backend-config': '{"default": "grafana"}',
+    }),
 }
