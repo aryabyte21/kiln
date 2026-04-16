@@ -48,7 +48,7 @@ local monitoring = import 'monitoring.libsonnet';
       KILN_MCP_HOST: '0.0.0.0',
       TOOL_EXECUTOR_URL: 'http://tool-executor:%(tool_executor)d' % $._config.ports,
       GCS_BUCKET: $._config.gcs_bucket,
-      CORS_ORIGINS: 'https://kiln.%s.nip.io' % $._config.ingress_ip,
+      CORS_ORIGINS: 'http://kiln.%s.nip.io,https://kiln.%s.nip.io' % [$._config.ingress_ip, $._config.ingress_ip],
     })
     + k.core.v1.configMap.metadata.withNamespace($._config.namespace),
 
