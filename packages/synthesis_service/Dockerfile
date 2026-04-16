@@ -22,6 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install the shared package with its own runtime dependencies.
 COPY packages/shared/pyproject.toml /tmp/kiln-shared/pyproject.toml
+COPY packages/shared/README.md /tmp/kiln-shared/README.md
+COPY packages/shared/LICENSE /tmp/kiln-shared/LICENSE
 COPY packages/shared/kiln_shared/ /tmp/kiln-shared/kiln_shared/
 RUN pip install --no-cache-dir /tmp/kiln-shared
 

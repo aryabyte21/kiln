@@ -106,6 +106,7 @@ async def _verify_jwt(token: str) -> KilnUser:
             algorithms=["RS256"],
             issuer=f"https://{config.clerk_domain}",
             options={"verify_aud": False},
+            leeway=30,  # tolerate up to 30s clock skew (common on Docker Desktop for Windows)
         )
 
         user_id = payload.get("sub")

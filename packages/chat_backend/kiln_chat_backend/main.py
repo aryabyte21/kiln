@@ -456,6 +456,16 @@ def _route_intent_via_registry(intent: str, min_confidence: float) -> dict | Non
     match = body.get("match")
     if not match or float(match.get("confidence", 0.0)) < min_confidence:
         return None
+    # Also require a minimum absolute BM25 score to avoid false positives.
+    # BM25 confidence is normalized relative to the top hit (so top always = 1.0),
+    # making the confidence gate alone useless. The raw score is corpus-independent.
+    # Calibrated against the current 14-tool registry:
+    #   - True matches (same purpose, e.g. "get stock price for ticker" → stock_quote): ≥19
+    #   - Related domain but different tool (e.g. "trending stocks" → stock_quote): ~9-12
+    # Threshold 13.0 blocks domain false positives while passing true matches.
+    _MIN_ABSOLUTE_SCORE = 13.0
+    if float(match.get("score", 0.0)) < _MIN_ABSOLUTE_SCORE:
+        return None
     return match
 
 
@@ -530,8 +540,8 @@ def _find_similar_tool(missing_spec: dict, existing_tools: list[dict], threshold
         if match:
             tool_id = match.get("tool_id")
             logger.info(
-                "Router match: %s for missing '%s' (confidence=%.2f)",
-                tool_id, missing_spec.get("id"), float(match.get("confidence", 0.0)),
+                "Router match: %s for missing '%s' (confidence=%.2f, score=%.4f)",
+                tool_id, missing_spec.get("id"), float(match.get("confidence", 0.0)), float(match.get("score", 0.0)),
             )
             for tool in existing_tools:
                 if tool.get("id") == tool_id:

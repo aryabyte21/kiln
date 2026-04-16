@@ -1,0 +1,9 @@
+packages:
+  - "packages/registry_ui"
+
+onlyBuiltDependencies:
+  - "@clerk/shared"
+  - msw
+  - nx
+  - sharp
+  - unrs-resolver
