@@ -78,12 +78,14 @@ def _install_deps(spec_path: Path) -> None:
         if not deps:
             return
         logger.info("Installing declared dependencies: %s", deps)
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", *deps],
             capture_output=True,
             text=True,
             timeout=120,
         )
+        if result.returncode != 0:
+            logger.warning("Dependency install failed (deps=%s): %s", deps, result.stderr.strip()[-300:])
     except Exception as exc:
         logger.warning("Failed to install dependencies: %s", exc)
 
