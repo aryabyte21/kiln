@@ -122,6 +122,10 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.nextjs.prod
+          build-args: |
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_REGISTRY_URL=http://api.${{ secrets.INGRESS_IP }}.nip.io
+            NEXT_PUBLIC_CHAT_BACKEND=http://chat.${{ secrets.INGRESS_IP }}.nip.io
           tags: |
             ${{ env.GAR_REGISTRY }}/registry-ui:${{ env.IMAGE_TAG }}
             ${{ env.GAR_REGISTRY }}/registry-ui:latest
