@@ -191,7 +191,26 @@ local monitoring = import 'monitoring.libsonnet';
     cpu_request: '50m', memory_request: '128Mi',
     cpu_limit: '500m', memory_limit: '256Mi',
     prometheus_scrape: false,
-  }),
+    health_path: '/',
+  }) {
+    deployment+: {
+      spec+: {
+        template+: {
+          spec+: {
+            containers: [
+              super.containers[0]
+              + k.core.v1.container.withImagePullPolicy('Always')
+              + k.core.v1.container.withEnvMixin([
+                k.core.v1.envVar.new('HOSTNAME', '0.0.0.0'),
+              ])
+              + k.core.v1.container.livenessProbe.httpGet.withPath('/')
+              + k.core.v1.container.readinessProbe.httpGet.withPath('/'),
+            ],
+          },
+        },
+      },
+    },
+  },
 
   ingress:
     k.networking.v1.ingress.new('kiln-ingress')
