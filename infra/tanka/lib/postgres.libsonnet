@@ -16,7 +16,7 @@ local k = import 'k.libsonnet';
       k.core.v1.envVar.fromSecretRef('POSTGRES_PASSWORD', 'kiln-secrets', 'PG_PASSWORD'),
       k.core.v1.envVar.new('PGDATA', '/var/lib/postgresql/data/pgdata'),
     ])
-    + container.resources.withRequests({ cpu: '250m', memory: '256Mi' })
+    + container.resources.withRequests({ cpu: '100m', memory: '256Mi' })
     + container.resources.withLimits({ cpu: '500m', memory: '512Mi' })
     + container.livenessProbe.exec.withCommand(['pg_isready', '-U', 'kiln'])
     + container.livenessProbe.withInitialDelaySeconds(15)

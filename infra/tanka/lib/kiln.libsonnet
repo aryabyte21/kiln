@@ -103,7 +103,7 @@ local monitoring = import 'monitoring.libsonnet';
   },
 
   registry_api: kilnService('registry-api', $._config.ports.registry_api, 'registry-api', {
-    cpu_request: '250m', memory_request: '256Mi',
+    cpu_request: '100m', memory_request: '256Mi',
     cpu_limit: '1000m', memory_limit: '512Mi',
   }) {
     deployment+:
@@ -113,12 +113,15 @@ local monitoring = import 'monitoring.libsonnet';
         + k.core.v1.container.withEnvFrom([
           k.core.v1.envFromSource.configMapRef.withName('kiln-config'),
           k.core.v1.envFromSource.secretRef.withName('kiln-secrets'),
+        ])
+        + k.core.v1.container.withEnvMixin([
+          k.core.v1.envVar.new('DATABASE_URL', 'postgresql://kiln:$(PG_PASSWORD)@postgres:5432/kiln_registry'),
         ]),
       ]),
   },
 
   chat_backend: kilnService('chat-backend', $._config.ports.chat_backend, 'chat-backend', {
-    cpu_request: '250m', memory_request: '256Mi',
+    cpu_request: '100m', memory_request: '256Mi',
     cpu_limit: '1000m', memory_limit: '512Mi',
   }) {
     deployment+: {
@@ -134,22 +137,47 @@ local monitoring = import 'monitoring.libsonnet';
   },
 
   tool_executor: kilnService('tool-executor', $._config.ports.tool_executor, 'tool-executor', {
-    cpu_request: '250m', memory_request: '256Mi',
+    cpu_request: '50m', memory_request: '256Mi',
     cpu_limit: '1000m', memory_limit: '512Mi',
   }),
 
   mcp_server: kilnService('mcp-server', $._config.ports.mcp_server, 'mcp-server', {
-    cpu_request: '125m', memory_request: '128Mi',
-    cpu_limit: '500m', memory_limit: '256Mi',
-  }),
+    cpu_request: '50m', memory_request: '128Mi',
+    cpu_limit: '250m', memory_limit: '256Mi',
+  }) {
+    deployment+:
+      k.apps.v1.deployment.spec.template.spec.withContainers([
+        k.core.v1.container.new('mcp-server', '%s/%s:%s' % [$._config.image_registry, 'mcp-server', $._config.image_tag])
+        + k.core.v1.container.withCommand(['python', '-m', 'kiln_mcp.main', 'streamable-http'])
+        + k.core.v1.container.withPorts([k.core.v1.containerPort.new($._config.ports.mcp_server)])
+        + k.core.v1.container.withEnvFrom([
+          k.core.v1.envFromSource.configMapRef.withName('kiln-config'),
+          k.core.v1.envFromSource.secretRef.withName('kiln-secrets'),
+        ])
+        + k.core.v1.container.withEnvMixin([
+          k.core.v1.envVar.fromFieldPath('POD_NAME', 'metadata.name'),
+          k.core.v1.envVar.new('DATABASE_URL', 'postgresql://kiln:$(PG_PASSWORD)@postgres:5432/kiln_registry'),
+        ])
+        + k.core.v1.container.resources.withRequests({ cpu: '50m', memory: '128Mi' })
+        + k.core.v1.container.resources.withLimits({ cpu: '250m', memory: '256Mi' })
+        + k.core.v1.container.livenessProbe.httpGet.withPath('/livez')
+        + k.core.v1.container.livenessProbe.httpGet.withPort($._config.ports.mcp_server)
+        + k.core.v1.container.livenessProbe.withInitialDelaySeconds(10)
+        + k.core.v1.container.livenessProbe.withPeriodSeconds(15)
+        + k.core.v1.container.readinessProbe.httpGet.withPath('/readyz')
+        + k.core.v1.container.readinessProbe.httpGet.withPort($._config.ports.mcp_server)
+        + k.core.v1.container.readinessProbe.withInitialDelaySeconds(5)
+        + k.core.v1.container.readinessProbe.withPeriodSeconds(5),
+      ]),
+  },
 
   synthesis_service: kilnService('synthesis-service', $._config.ports.synthesis_service, 'synthesis-service', {
-    cpu_request: '500m', memory_request: '512Mi',
+    cpu_request: '100m', memory_request: '512Mi',
     cpu_limit: '2000m', memory_limit: '1Gi',
   }),
 
   registry_ui: kilnService('registry-ui', $._config.ports.registry_ui, 'registry-ui', {
-    cpu_request: '125m', memory_request: '128Mi',
+    cpu_request: '50m', memory_request: '128Mi',
     cpu_limit: '500m', memory_limit: '256Mi',
     prometheus_scrape: false,
   }),

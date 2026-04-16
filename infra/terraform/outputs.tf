@@ -42,3 +42,7 @@ output "nip_io_domain" {
 output "gke_get_credentials" {
   value = "gcloud container clusters get-credentials ${google_container_cluster.kiln.name} --zone ${var.zone} --project ${var.project_id}"
 }
+
+output "wif_provider" {
+  value = google_iam_workload_identity_pool_provider.github.name
+}

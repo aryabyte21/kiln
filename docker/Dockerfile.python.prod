@@ -55,7 +55,8 @@ ARG PORT=8766
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=${PORT}
+    PORT=${PORT} \
+    MODULE=${MODULE}
 
 # Install runtime deps (curl for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \

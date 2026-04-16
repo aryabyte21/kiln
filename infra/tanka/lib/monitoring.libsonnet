@@ -73,6 +73,8 @@ local volumeMount = k.core.v1.volumeMount;
     + statefulSet.metadata.withNamespace($._config.namespace)
     + statefulSet.spec.withServiceName('prometheus')
     + statefulSet.spec.template.spec.withServiceAccountName('kiln-sa')
+    + statefulSet.spec.template.spec.securityContext.withFsGroup(65534)
+    + statefulSet.spec.template.spec.securityContext.withRunAsUser(65534)
     + statefulSet.spec.template.spec.withVolumesMixin([
       volume.fromConfigMap('config', 'prometheus-config'),
     ]),
