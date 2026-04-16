@@ -220,8 +220,6 @@ local monitoring = import 'monitoring.libsonnet';
     + k.networking.v1.ingress.metadata.withAnnotations({
       'kubernetes.io/ingress.class': 'gce',
       'kubernetes.io/ingress.global-static-ip-name': $._config.ingress_ip_name,
-      'ingress.gcp.kubernetes.io/pre-shared-cert': 'kiln-self-signed',
-      'kubernetes.io/ingress.allow-http': 'false',
     })
     + k.networking.v1.ingress.spec.withRules([
       {
