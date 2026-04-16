@@ -23,7 +23,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", _get_database_url())
+# Alembic parses this value through ConfigParser, which treats `%` as a
+# formatter token. Escape any `%` (e.g. percent-encoded chars in URL creds)
+# so DATABASE_URLs like `postgresql://u:p%40ss@host/db` don't blow up.
+config.set_main_option("sqlalchemy.url", _get_database_url().replace("%", "%%"))
 
 target_metadata = Base.metadata
 

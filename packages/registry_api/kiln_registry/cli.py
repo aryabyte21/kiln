@@ -6,27 +6,48 @@ can run migrations without invoking Alembic directly::
     kiln-registry migrate              # upgrade head
     kiln-registry migrate --revision X # upgrade to specific revision
     kiln-registry migrate --downgrade  # downgrade one step
+
+Alembic is an optional dependency (it ships with the ``[server]`` extra). The
+CLI lazy-imports it inside ``migrate`` so the entrypoint still works — e.g.
+for ``--help`` — on a base install without Alembic.
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
-
-from alembic import command
-from alembic.config import Config
+from importlib import resources
 
 
-def _alembic_config() -> Config:
-    ini_path = Path(__file__).parent.parent / "alembic.ini"
-    if not ini_path.exists():
-        raise FileNotFoundError(f"alembic.ini not found at {ini_path}")
-    cfg = Config(str(ini_path))
-    cfg.set_main_option("script_location", str(ini_path.parent / "kiln_registry" / "migrations"))
+def _alembic_config():
+    """Build an Alembic Config in-memory from the packaged migrations dir.
+
+    We deliberately avoid depending on the repo-root ``alembic.ini`` because
+    that file is not shipped inside the wheel; deployed containers only have
+    the ``kiln_registry`` package on the path.
+    """
+    try:
+        from alembic.config import Config
+    except ImportError as e:
+        raise RuntimeError(
+            "alembic is required to run migrations. "
+            "Install with: pip install 'kiln-registry-api[server]'"
+        ) from e
+
+    migrations_dir = resources.files("kiln_registry").joinpath("migrations")
+    cfg = Config()
+    cfg.set_main_option("script_location", str(migrations_dir))
     return cfg
 
 
 def migrate(args: argparse.Namespace) -> int:
+    try:
+        from alembic import command
+    except ImportError as e:
+        raise RuntimeError(
+            "alembic is required to run migrations. "
+            "Install with: pip install 'kiln-registry-api[server]'"
+        ) from e
+
     cfg = _alembic_config()
     if args.downgrade:
         command.downgrade(cfg, args.revision or "-1")

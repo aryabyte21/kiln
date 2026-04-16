@@ -51,7 +51,7 @@ def get_settings() -> Settings:
     global _settings  # noqa: PLW0603
     if _settings is None:
         s = Settings()
-        if not s.callback_url:
-            s.callback_url = _default_callback_url()
+        stripped = s.callback_url.strip() if s.callback_url else ""
+        s.callback_url = stripped or _default_callback_url()
         _settings = s
     return _settings
