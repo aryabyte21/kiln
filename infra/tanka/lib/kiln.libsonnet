@@ -1,6 +1,8 @@
 local k = import 'k.libsonnet';
 local postgres = import 'postgres.libsonnet';
 local redis = import 'redis.libsonnet';
+local netpol = import 'networkpolicies.libsonnet';
+local monitoring = import 'monitoring.libsonnet';
 
 {
   _config:: {
@@ -186,5 +188,13 @@ local redis = import 'redis.libsonnet';
           backend: { service: { name: 'mcp-server', port: { number: $._config.ports.mcp_server } } },
         }] },
       },
+      {
+        host: 'grafana.%s.nip.io' % $._config.ingress_ip,
+        http: { paths: [{
+          path: '/',
+          pathType: 'Prefix',
+          backend: { service: { name: 'grafana', port: { number: 3001 } } },
+        }] },
+      },
     ]),
-} + postgres + redis
+} + postgres + redis + netpol + monitoring
