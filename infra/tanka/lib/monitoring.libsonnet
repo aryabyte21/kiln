@@ -80,7 +80,7 @@ local volumeMount = k.core.v1.volumeMount;
     ]),
 
   prometheus_service:
-    service.new('prometheus', { app: 'prometheus' }, [{ port: 9090, targetPort: 9090 }])
+    service.new('prometheus', { name: 'prometheus' }, [{ port: 9090, targetPort: 9090 }])
     + service.metadata.withNamespace($._config.namespace),
 
   kube_state_metrics_deployment:
@@ -98,7 +98,7 @@ local volumeMount = k.core.v1.volumeMount;
     + deployment.spec.template.spec.withServiceAccountName('kiln-sa'),
 
   kube_state_metrics_service:
-    service.new('kube-state-metrics', { app: 'kube-state-metrics' }, [{ port: 8080, targetPort: 8080 }])
+    service.new('kube-state-metrics', { name: 'kube-state-metrics' }, [{ port: 8080, targetPort: 8080 }])
     + service.metadata.withNamespace($._config.namespace),
 
   grafana_datasources_configmap:
@@ -172,7 +172,7 @@ local volumeMount = k.core.v1.volumeMount;
   },
 
   grafana_service:
-    service.new('grafana', { app: 'grafana' }, [{ port: 3001, targetPort: 3001 }])
+    service.new('grafana', { name: 'grafana' }, [{ port: 3001, targetPort: 3001 }])
     + service.metadata.withNamespace($._config.namespace)
     + service.metadata.withAnnotationsMixin({
       'cloud.google.com/backend-config': '{"default": "grafana"}',
