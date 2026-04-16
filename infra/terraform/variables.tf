@@ -1,23 +1,28 @@
 variable "project_id" {
-  type = string
+  description = "GCP project ID (e.g. kiln-cs5224)"
+  type        = string
 }
 
 variable "region" {
-  type    = string
-  default = "asia-southeast1"
+  description = "GCP region for regional resources"
+  type        = string
+  default     = "asia-southeast1"
 }
 
 variable "zone" {
-  type    = string
-  default = "asia-southeast1-a"
+  description = "GCP zone for the GKE zonal cluster"
+  type        = string
+  default     = "asia-southeast1-a"
 }
 
 variable "environment" {
-  type    = string
-  default = "dev"
+  description = "Deployment environment suffix (dev, staging, prod)"
+  type        = string
+  default     = "dev"
 }
 
 variable "billing_account_id" {
-  type    = string
-  default = ""
+  description = "GCP billing account ID for budget alerts. Run: gcloud billing accounts list. Leave empty to skip budget creation."
+  type        = string
+  default     = ""
 }

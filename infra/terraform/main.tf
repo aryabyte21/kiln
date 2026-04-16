@@ -162,6 +162,11 @@ resource "google_container_node_pool" "burst" {
       mode = "GKE_METADATA"
     }
   }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
 }
 
 # ── Artifact Registry ──────────────────────────────────────────────────────────
@@ -200,7 +205,7 @@ resource "google_storage_bucket" "tools" {
 resource "google_storage_bucket" "pg_backups" {
   name          = "${var.project_id}-kiln-pg-backups"
   location      = var.region
-  force_destroy = true
+  force_destroy = false
 
   uniform_bucket_level_access = true
 
@@ -233,9 +238,9 @@ resource "google_storage_bucket_iam_member" "tools_admin" {
   member = "serviceAccount:${google_service_account.kiln_workload.email}"
 }
 
-resource "google_storage_bucket_iam_member" "pg_backups_admin" {
+resource "google_storage_bucket_iam_member" "pg_backups_writer" {
   bucket = google_storage_bucket.pg_backups.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.kiln_workload.email}"
 }
 
