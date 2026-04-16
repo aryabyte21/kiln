@@ -218,19 +218,12 @@ local monitoring = import 'monitoring.libsonnet';
     k.networking.v1.ingress.new('kiln-ingress')
     + k.networking.v1.ingress.metadata.withNamespace($._config.namespace)
     + k.networking.v1.ingress.metadata.withAnnotations({
-      'kubernetes.io/ingress.class': 'gce',
-      'kubernetes.io/ingress.global-static-ip-name': $._config.ingress_ip_name,
+      'kubernetes.io/ingress.class': 'nginx',
       'cert-manager.io/cluster-issuer': 'letsencrypt-prod',
       'kubernetes.io/ingress.allow-http': 'true',
     })
     + k.networking.v1.ingress.spec.withTls([{
-      hosts: [
-        'kiln.%s.sslip.io' % $._config.ingress_ip,
-        'api.%s.sslip.io' % $._config.ingress_ip,
-        'chat.%s.sslip.io' % $._config.ingress_ip,
-        'mcp.%s.sslip.io' % $._config.ingress_ip,
-        'grafana.%s.sslip.io' % $._config.ingress_ip,
-      ],
+      hosts: ['kiln.%s.sslip.io' % $._config.ingress_ip],
       secretName: 'kiln-tls',
     }])
     + k.networking.v1.ingress.spec.withRules([
