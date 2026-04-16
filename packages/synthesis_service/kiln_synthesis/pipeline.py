@@ -70,8 +70,31 @@ def _validate_spec(spec_path: Path) -> str | None:
     return None
 
 
+def _install_deps(spec_path: Path) -> None:
+    """Install dependencies declared in spec.yaml into the current environment."""
+    try:
+        raw = yaml.safe_load(spec_path.read_text())
+        deps = raw.get("implementation", {}).get("dependencies", [])
+        if not deps:
+            return
+        logger.info("Installing declared dependencies: %s", deps)
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", *deps],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        logger.warning("Failed to install dependencies: %s", exc)
+
+
 def _validate_impl(impl_path: Path, tool_name: str) -> str | None:
     """Run import test and basic functional test. Returns error string or None."""
+    # Install declared dependencies so the import test can succeed
+    spec_path = impl_path.parent / "spec.yaml"
+    if spec_path.exists():
+        _install_deps(spec_path)
+
     # Step 1: Import test
     import_cmd = [
         sys.executable, "-c",
