@@ -103,8 +103,8 @@ local monitoring = import 'monitoring.libsonnet';
   },
 
   registry_api: kilnService('registry-api', $._config.ports.registry_api, 'registry-api', {
-    cpu_request: '250m', memory_request: '256Mi',
-    cpu_limit: '1000m', memory_limit: '512Mi',
+    cpu_request: '100m', memory_request: '192Mi',
+    cpu_limit: '500m', memory_limit: '512Mi',
   }) {
     deployment+:
       k.apps.v1.deployment.spec.template.spec.withInitContainers([
@@ -118,8 +118,8 @@ local monitoring = import 'monitoring.libsonnet';
   },
 
   chat_backend: kilnService('chat-backend', $._config.ports.chat_backend, 'chat-backend', {
-    cpu_request: '250m', memory_request: '256Mi',
-    cpu_limit: '1000m', memory_limit: '512Mi',
+    cpu_request: '100m', memory_request: '192Mi',
+    cpu_limit: '500m', memory_limit: '512Mi',
   }) {
     deployment+: {
       spec+: {
@@ -134,23 +134,23 @@ local monitoring = import 'monitoring.libsonnet';
   },
 
   tool_executor: kilnService('tool-executor', $._config.ports.tool_executor, 'tool-executor', {
-    cpu_request: '250m', memory_request: '256Mi',
-    cpu_limit: '1000m', memory_limit: '512Mi',
+    cpu_request: '50m', memory_request: '128Mi',
+    cpu_limit: '500m', memory_limit: '512Mi',
   }),
 
   mcp_server: kilnService('mcp-server', $._config.ports.mcp_server, 'mcp-server', {
-    cpu_request: '125m', memory_request: '128Mi',
-    cpu_limit: '500m', memory_limit: '256Mi',
+    cpu_request: '50m', memory_request: '128Mi',
+    cpu_limit: '250m', memory_limit: '256Mi',
   }),
 
   synthesis_service: kilnService('synthesis-service', $._config.ports.synthesis_service, 'synthesis-service', {
-    cpu_request: '500m', memory_request: '512Mi',
-    cpu_limit: '2000m', memory_limit: '1Gi',
+    cpu_request: '100m', memory_request: '192Mi',
+    cpu_limit: '1000m', memory_limit: '1Gi',
   }),
 
   registry_ui: kilnService('registry-ui', $._config.ports.registry_ui, 'registry-ui', {
-    cpu_request: '125m', memory_request: '128Mi',
-    cpu_limit: '500m', memory_limit: '256Mi',
+    cpu_request: '50m', memory_request: '128Mi',
+    cpu_limit: '250m', memory_limit: '256Mi',
     prometheus_scrape: false,
   }),
 
