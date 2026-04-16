@@ -21,7 +21,7 @@ local volumeMount = k.core.v1.volumeMount;
             kubernetes_sd_configs:
               - role: pod
                 namespaces:
-                  names: ['kiln']
+                  names: ['%s']
             relabel_configs:
               - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
                 action: keep
@@ -38,7 +38,7 @@ local volumeMount = k.core.v1.volumeMount;
           - job_name: 'kube-state-metrics'
             static_configs:
               - targets: ['kube-state-metrics:8080']
-      |||,
+      ||| % $._config.namespace,
     })
     + configMap.metadata.withNamespace($._config.namespace),
 

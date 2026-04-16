@@ -105,7 +105,13 @@ class ExecuteResponse(BaseModel):
 
 
 @app.get("/health", summary="Service health")
+@app.get("/livez", summary="Liveness probe", include_in_schema=False)
 def health():
+    return {"status": "ok", "service": "kiln-tool-executor"}
+
+
+@app.get("/readyz", summary="Readiness probe")
+def readyz():
     return {"status": "ok", "service": "kiln-tool-executor"}
 
 

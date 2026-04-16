@@ -178,6 +178,7 @@ jobs:
           TK_GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
           TK_WORKLOAD_SA: ${{ secrets.WORKLOAD_SA }}
           TK_INGRESS_IP: ${{ secrets.INGRESS_IP }}
+          TK_INGRESS_IP_NAME: ${{ secrets.INGRESS_IP_NAME }}
           TK_PG_BACKUP_BUCKET: ${{ secrets.PG_BACKUP_BUCKET }}
         run: |
           tk apply environments/default \
@@ -186,6 +187,7 @@ jobs:
             --ext-str GCS_BUCKET="$TK_GCS_BUCKET" \
             --ext-str WORKLOAD_SA="$TK_WORKLOAD_SA" \
             --ext-str INGRESS_IP="$TK_INGRESS_IP" \
+            --ext-str INGRESS_IP_NAME="$TK_INGRESS_IP_NAME" \
             --ext-str PG_BACKUP_BUCKET="$TK_PG_BACKUP_BUCKET" \
             --dangerous-auto-approve
 

@@ -139,6 +139,8 @@ resource "google_container_node_pool" "burst" {
   cluster  = google_container_cluster.kiln.id
   location = var.zone
 
+  initial_node_count = 0
+
   autoscaling {
     min_node_count = 0
     max_node_count = 3

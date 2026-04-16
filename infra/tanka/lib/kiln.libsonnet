@@ -12,6 +12,7 @@ local monitoring = import 'monitoring.libsonnet';
     gcs_bucket: error 'must set _config.gcs_bucket',
     workload_sa: error 'must set _config.workload_sa',
     ingress_ip: error 'must set _config.ingress_ip',
+    ingress_ip_name: error 'must set _config.ingress_ip_name',
     pg_backup_bucket: error 'must set _config.pg_backup_bucket',
 
     ports: {
@@ -36,7 +37,6 @@ local monitoring = import 'monitoring.libsonnet';
   configmap:
     k.core.v1.configMap.new('kiln-config', {
       KILN_ENV: 'prod',
-      DATABASE_URL: 'postgresql://kiln:$(PG_PASSWORD)@postgres:5432/kiln_registry',
       REDIS_URL: 'redis://redis:6379/0',
       KILN_REGISTRY_URL: 'http://registry-api:%(registry_api)d' % $._config.ports,
       REGISTRY_URL: 'http://registry-api:%(registry_api)d' % $._config.ports,
@@ -66,6 +66,7 @@ local monitoring = import 'monitoring.libsonnet';
         ])
         + container.withEnvMixin([
           k.core.v1.envVar.fromFieldPath('POD_NAME', 'metadata.name'),
+          k.core.v1.envVar.new('DATABASE_URL', 'postgresql://kiln:$(PG_PASSWORD)@postgres:5432/kiln_registry'),
         ])
         + container.resources.withRequests({
           cpu: std.get(args, 'cpu_request', '250m'),
@@ -85,11 +86,15 @@ local monitoring = import 'monitoring.libsonnet';
         + container.readinessProbe.withPeriodSeconds(5),
       ])
       + deployment.metadata.withNamespace($._config.namespace)
-      + deployment.spec.template.metadata.withAnnotationsMixin({
-        'prometheus.io/scrape': 'true',
-        'prometheus.io/port': '%d' % port,
-        'prometheus.io/path': '/metrics',
-      })
+      + (
+        if std.get(args, 'prometheus_scrape', true) then
+          deployment.spec.template.metadata.withAnnotationsMixin({
+            'prometheus.io/scrape': 'true',
+            'prometheus.io/port': '%d' % port,
+            'prometheus.io/path': '/metrics',
+          })
+        else {}
+      )
       + deployment.spec.template.spec.withServiceAccountName('kiln-sa'),
 
     service:
@@ -146,6 +151,7 @@ local monitoring = import 'monitoring.libsonnet';
   registry_ui: kilnService('registry-ui', $._config.ports.registry_ui, 'registry-ui', {
     cpu_request: '125m', memory_request: '128Mi',
     cpu_limit: '500m', memory_limit: '256Mi',
+    prometheus_scrape: false,
   }),
 
   ingress:
@@ -153,7 +159,7 @@ local monitoring = import 'monitoring.libsonnet';
     + k.networking.v1.ingress.metadata.withNamespace($._config.namespace)
     + k.networking.v1.ingress.metadata.withAnnotations({
       'kubernetes.io/ingress.class': 'gce',
-      'kubernetes.io/ingress.global-static-ip-name': 'kiln-dev-ingress-ip',
+      'kubernetes.io/ingress.global-static-ip-name': $._config.ingress_ip_name,
     })
     + k.networking.v1.ingress.spec.withRules([
       {
