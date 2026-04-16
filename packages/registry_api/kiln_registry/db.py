@@ -138,8 +138,30 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         await session.close()
 
 
+def _auto_create_enabled() -> bool:
+    """Whether ``init_db`` may auto-create tables.
+
+    Defaults to true for SQLite (local dev + tests) and false for everything
+    else (prod Postgres expects migrations via ``kiln-registry migrate``).
+    Override with ``KILN_DB_AUTO_CREATE=true|false``.
+    """
+    override = os.environ.get("KILN_DB_AUTO_CREATE", "").lower()
+    if override in {"true", "1", "yes"}:
+        return True
+    if override in {"false", "0", "no"}:
+        return False
+    return _get_database_url().startswith("sqlite")
+
+
 async def init_db() -> None:
-    """Create tables if they don't exist. Call on startup."""
+    """Ensure the schema exists.
+
+    On SQLite or when ``KILN_DB_AUTO_CREATE=true``, creates tables directly.
+    Otherwise this is a no-op — migrations are expected to have been applied
+    by a k8s Job / init-container running ``kiln-registry migrate``.
+    """
+    if not _auto_create_enabled():
+        return
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -14,28 +14,31 @@ Env var mapping (prefix: KILN_SYNTHESIS_):
 Provider API keys (e.g. OPENAI_API_KEY) are read by OpenCode from its own config.
 """
 
-from __future__ import annotations
+import os
 
 from pydantic_settings import BaseSettings
 
 
+def _default_callback_url() -> str:
+    if os.environ.get("KILN_ENV", "dev").lower() == "dev":
+        return "http://host.docker.internal:8766/synthesis/callback"
+    raise RuntimeError(
+        "KILN_SYNTHESIS_CALLBACK_URL must be set when KILN_ENV != 'dev' "
+        "(expected something like http://registry-api.kiln.svc.cluster.local:8766/synthesis/callback)"
+    )
+
+
 class Settings(BaseSettings):
-    # OpenCode model identifier (provider/model format)
     opencode_model: str = "mistral/codestral-latest"
 
-    # Timeout in seconds for the entire OpenCode process (cost/runaway guard)
     opencode_timeout: int = 600
 
-    # Kiln registry callback URL for tool registration after synthesis
-    callback_url: str = "http://host.docker.internal:8766/synthesis/callback"
+    callback_url: str = ""
 
-    # Service-to-service auth secret (sent as X-Internal-Secret header on callbacks)
     internal_secret: str = ""
 
-    # Workspace base directory for OpenCode CLI
     workspace_dir: str = "/tmp/opencode_workspace"
 
-    # Log directory — mount this volume for external access
     log_dir: str = "/app/logs"
 
     model_config = {"env_prefix": "KILN_SYNTHESIS_"}
@@ -47,5 +50,8 @@ _settings: Settings | None = None
 def get_settings() -> Settings:
     global _settings  # noqa: PLW0603
     if _settings is None:
-        _settings = Settings()
+        s = Settings()
+        stripped = s.callback_url.strip() if s.callback_url else ""
+        s.callback_url = stripped or _default_callback_url()
+        _settings = s
     return _settings

@@ -35,6 +35,7 @@ from slowapi.errors import RateLimitExceeded
 
 from kiln_shared.auth import KilnUser, require_auth
 from kiln_shared.cors import install_cors
+from kiln_shared.env import required_url as _required_url
 from kiln_shared.httpx_client import async_client
 from kiln_shared.rate_limit import get_limiter, kiln_rate_limit_exceeded_handler
 from kiln_shared.request_id import KilnRequestIDMiddleware
@@ -49,9 +50,9 @@ load_dotenv()
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REGISTRY_DIR          = Path(__file__).parent.parent.parent.parent / "registry" / "tools"
-REGISTRY_URL          = os.environ.get("REGISTRY_URL", "http://localhost:8766")
-SYNTHESIS_URL         = os.environ.get("SYNTHESIS_URL", "http://localhost:8002")
-KILN_CALLBACK_URL     = os.environ.get("KILN_CALLBACK_URL", "http://host.docker.internal:8766/synthesis/callback")
+REGISTRY_URL          = _required_url("REGISTRY_URL", "http://localhost:8766")
+SYNTHESIS_URL         = _required_url("SYNTHESIS_URL", "http://localhost:8002")
+KILN_CALLBACK_URL     = _required_url("KILN_CALLBACK_URL", "http://host.docker.internal:8766/synthesis/callback")
 
 app = FastAPI(
     title="KilnChatBackend",
@@ -80,8 +81,11 @@ install_cors(app)
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     from kiln_shared.logging_config import setup_logging
+
+    from .leader_lock import leader_lock_context
     setup_logging()
-    yield
+    async with leader_lock_context():
+        yield
 
 
 app.router.lifespan_context = _lifespan
