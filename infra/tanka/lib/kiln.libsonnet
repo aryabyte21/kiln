@@ -44,8 +44,9 @@ local monitoring = import 'monitoring.libsonnet';
       SYNTHESIS_URL: 'http://synthesis-service:%(synthesis_service)d' % $._config.ports,
       KILN_CALLBACK_URL: 'http://registry-api:%(registry_api)d/synthesis/callback' % $._config.ports,
       KILN_SYNTHESIS_CALLBACK_URL: 'http://registry-api:%(registry_api)d/synthesis/callback' % $._config.ports,
-      KILN_MCP_ISSUER_URL: 'https://mcp.%s.nip.io' % $._config.ingress_ip,
+      KILN_MCP_ISSUER_URL: 'http://mcp.%s.nip.io' % $._config.ingress_ip,
       KILN_MCP_HOST: '0.0.0.0',
+      KILN_MCP_ALLOW_HTTP_ISSUER: 'true',
       TOOL_EXECUTOR_URL: 'http://tool-executor:%(tool_executor)d' % $._config.ports,
       GCS_BUCKET: $._config.gcs_bucket,
       CORS_ORIGINS: 'http://kiln.%s.nip.io,https://kiln.%s.nip.io' % [$._config.ingress_ip, $._config.ingress_ip],
@@ -219,8 +220,6 @@ local monitoring = import 'monitoring.libsonnet';
     + k.networking.v1.ingress.metadata.withAnnotations({
       'kubernetes.io/ingress.class': 'gce',
       'kubernetes.io/ingress.global-static-ip-name': $._config.ingress_ip_name,
-      'ingress.gcp.kubernetes.io/pre-shared-cert': 'kiln-self-signed',
-      'kubernetes.io/ingress.allow-http': 'true',
     })
     + k.networking.v1.ingress.spec.withRules([
       {

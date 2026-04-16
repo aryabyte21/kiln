@@ -14,6 +14,26 @@ import logging
 import os
 from typing import Any
 
+# Patch MCP SDK to allow HTTP issuer URLs in non-TLS deployments (nip.io + GCE LB).
+# The SDK requires HTTPS for issuer URLs except localhost. We override this for
+# deployments behind a load balancer that terminates TLS externally.
+import mcp.server.auth.routes as _mcp_auth_routes  # noqa: E402
+
+_original_validate = _mcp_auth_routes.validate_issuer_url
+
+
+def _patched_validate_issuer_url(issuer_url) -> None:
+    try:
+        _original_validate(issuer_url)
+    except ValueError:
+        if os.environ.get("KILN_MCP_ALLOW_HTTP_ISSUER", "").lower() in {"true", "1"}:
+            logging.getLogger(__name__).warning("Allowing HTTP issuer URL: %s", issuer_url)
+            return
+        raise
+
+
+_mcp_auth_routes.validate_issuer_url = _patched_validate_issuer_url
+
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import Context, FastMCP
