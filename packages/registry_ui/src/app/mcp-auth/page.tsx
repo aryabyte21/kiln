@@ -1,16 +1,23 @@
 "use client";
 
-import { useAuth, SignIn } from "@clerk/nextjs";
-import { useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, Suspense } from "react";
 
 function McpAuthInner() {
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn, isLoaded, getToken } = useAuth();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const callback = searchParams.get("callback");
 
   useEffect(() => {
-    if (!isSignedIn || !callback) return;
+    if (!isLoaded || !callback) return;
+
+    if (!isSignedIn) {
+      const returnUrl = `/mcp-auth?callback=${encodeURIComponent(callback)}`;
+      router.push(`/sign-in?redirect_url=${encodeURIComponent(returnUrl)}`);
+      return;
+    }
 
     getToken().then((token) => {
       if (token) {
@@ -18,23 +25,15 @@ function McpAuthInner() {
         window.location.href = `${callback}${sep}__clerk_session_token=${token}`;
       }
     });
-  }, [isSignedIn, callback, getToken]);
+  }, [isLoaded, isSignedIn, callback, getToken, router]);
 
   if (!callback) {
     return <div className="flex items-center justify-center min-h-screen text-white">Missing callback parameter.</div>;
   }
 
-  if (!isSignedIn) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <SignIn afterSignInUrl={`/mcp-auth?callback=${encodeURIComponent(callback)}`} />
-      </div>
-    );
-  }
-
   return (
     <div className="flex items-center justify-center min-h-screen text-white">
-      Authenticating with MCP server...
+      {isSignedIn ? "Authenticating with MCP server..." : "Redirecting to sign in..."}
     </div>
   );
 }
