@@ -46,7 +46,6 @@ services:
       - DATABASE_URL=postgresql://kiln:kiln_dev@postgres:5432/kiln_registry
       - REDIS_URL=redis://redis:6379
       - TOOL_EXECUTOR_URL=http://tool_executor:8767
-      - KILN_DB_AUTO_CREATE=true
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766/livez')"]
       interval: 5s
@@ -65,7 +64,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.python
-    command: uv run uvicorn kiln_chat_backend.main:app --host 0.0.0.0 --port 8765 --reload --reload-dir /app/packages/shared/kiln_shared --reload-dir /app/packages/chat_backend/kiln_chat_backend --reload-dir /app/packages/registry_api/kiln_registry
+    command: uv run uvicorn kiln_chat_backend.main:app --host 0.0.0.0 --port 8765 --reload
     ports:
       - "8765:8765"
     volumes:

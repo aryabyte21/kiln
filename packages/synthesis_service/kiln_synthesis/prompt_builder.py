@@ -72,7 +72,6 @@ _IMPL_RULES = """\
 - Return a dict whose keys match the `expected_output_contains` keys in the test fixtures
 - On API/network error, return `{"error": "<concrete reason>"}` — NEVER raise exceptions to the caller
 - Only import stdlib modules + dependencies declared in spec.implementation.dependencies
-- If you use any third-party library (e.g. `requests`), you MUST list it in spec.yaml under `implementation.dependencies` (e.g. `dependencies: [requests]`). The validation step installs these before running the import test.
 - Keep the implementation concise and production-quality
 
 ### NO DUMMY DATA — this is the most important rule
