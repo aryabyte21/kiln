@@ -5,7 +5,7 @@
     "name": "environments/default"
   },
   "spec": {
-    "apiServer": "",
+    "contextNames": ["gke_peaceful-basis-329822_asia-southeast1-a_kiln-dev-gke"],
     "namespace": "kiln",
     "resourceDefaults": {},
     "expectVersions": {}

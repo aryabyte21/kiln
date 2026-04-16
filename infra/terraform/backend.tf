@@ -1,6 +1,6 @@
 terraform {
   backend "gcs" {
-    bucket = "kiln-cs5224-tfstate"
+    bucket = "peaceful-basis-329822-tfstate"
     prefix = "env/dev"
   }
 }
