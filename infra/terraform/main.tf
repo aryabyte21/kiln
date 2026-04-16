@@ -26,6 +26,8 @@ resource "google_project_service" "apis" {
     "compute.googleapis.com",
     "iam.googleapis.com",
     "billingbudgets.googleapis.com",
+    "secretmanager.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
   ])
 
   service            = each.value
@@ -117,13 +119,18 @@ resource "google_container_node_pool" "main" {
   node_config {
     machine_type = "e2-standard-2"
     disk_size_gb = 50
-    disk_type    = "pd-standard"
+    disk_type    = "pd-balanced"
 
     oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
 
     workload_metadata_config {
       mode = "GKE_METADATA"
     }
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
   }
 }
 
@@ -139,7 +146,7 @@ resource "google_container_node_pool" "burst" {
 
   node_config {
     machine_type = "e2-small"
-    disk_size_gb = 20
+    disk_size_gb = 30
     disk_type    = "pd-standard"
     spot         = true
 
