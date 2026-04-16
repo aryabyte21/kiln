@@ -7,27 +7,38 @@ output "gke_cluster_endpoint" {
   sensitive = true
 }
 
-output "registry_db_connection" {
-  value = google_sql_database_instance.registry.connection_name
+output "gke_cluster_zone" {
+  value = var.zone
 }
 
-output "chat_db_connection" {
-  value = google_sql_database_instance.chat.connection_name
+output "artifact_registry_url" {
+  value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.kiln.repository_id}"
 }
 
-output "gcs_bucket" {
+output "gcs_tools_bucket" {
   value = google_storage_bucket.tools.name
 }
 
-output "artifact_registry" {
-  value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.kiln.repository_id}"
+output "gcs_pg_backups_bucket" {
+  value = google_storage_bucket.pg_backups.name
 }
 
 output "workload_sa_email" {
   value = google_service_account.kiln_workload.email
 }
 
-# Helper: how to connect kubectl
+output "ci_sa_email" {
+  value = google_service_account.github_ci.email
+}
+
+output "ingress_static_ip" {
+  value = google_compute_global_address.ingress_ip.address
+}
+
+output "nip_io_domain" {
+  value = "kiln.${google_compute_global_address.ingress_ip.address}.nip.io"
+}
+
 output "gke_get_credentials" {
-  value = "gcloud container clusters get-credentials ${google_container_cluster.kiln.name} --region ${var.region} --project ${var.project_id}"
+  value = "gcloud container clusters get-credentials ${google_container_cluster.kiln.name} --zone ${var.zone} --project ${var.project_id}"
 }

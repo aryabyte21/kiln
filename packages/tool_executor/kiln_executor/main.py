@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from kiln_shared.auth import verify_internal_secret
+from kiln_shared.metrics import mount_metrics
 
 from .safety import validate_source
 from .sandbox import ExecutionResult, run_in_sandbox
@@ -54,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+mount_metrics(app, "tool_executor")
 
 
 @asynccontextmanager
@@ -102,7 +105,13 @@ class ExecuteResponse(BaseModel):
 
 
 @app.get("/health", summary="Service health")
+@app.get("/livez", summary="Liveness probe", include_in_schema=False)
 def health():
+    return {"status": "ok", "service": "kiln-tool-executor"}
+
+
+@app.get("/readyz", summary="Readiness probe")
+def readyz():
     return {"status": "ok", "service": "kiln-tool-executor"}
 
 

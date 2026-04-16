@@ -1,46 +1,31 @@
 name: CD — Build, Push, Deploy to GKE
 
-# Manual trigger only. Automatic runs on every merge are disabled until a
-# GCP project is wired up (requires `GCP_PROJECT` variable + a Workload
-# Identity provider secret). Running on push to main without these
-# configured is a guaranteed failure — wasteful, noisy, and it buries real
-# CI failures under a sea of red.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 env:
   GCP_REGION: asia-southeast1
+  GKE_ZONE: asia-southeast1-a
+  GKE_CLUSTER: kiln-dev-gke
 
 jobs:
-  preflight:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail clearly if GCP deployment isn't configured
-        # Validate the SAME names the real auth/push steps use below:
-        # `vars.GCP_PROJECT` for the project id, `secrets.WIF_PROVIDER`
-        # for the Workload Identity Federation provider, and
-        # `secrets.WIF_SERVICE_ACCOUNT` for the impersonated GCP service
-        # account. Any one of these missing will fail the `auth` step
-        # downstream with an opaque error, so we'd rather fail here with a
-        # clear message listing exactly what to set.
-        env:
-          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
-          WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
-          WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-        run: |
-          missing=""
-          [[ -z "$GCP_PROJECT" ]] && missing="$missing vars.GCP_PROJECT"
-          [[ -z "$WIF_PROVIDER" ]] && missing="$missing secrets.WIF_PROVIDER"
-          [[ -z "$WIF_SERVICE_ACCOUNT" ]] && missing="$missing secrets.WIF_SERVICE_ACCOUNT"
-          if [[ -n "$missing" ]]; then
-            echo "::error::GCP deployment is not configured. Missing:$missing"
-            echo "::error::Set them at Settings → Secrets and variables → Actions,"
-            echo "::error::or remove .github/workflows/deploy.yml if you don't deploy to GCP."
-            exit 1
-          fi
+      - uses: actions/checkout@v4
 
-  build-push:
-    needs: preflight
+      - uses: astral-sh/setup-uv@v4
+
+      - run: uv sync --all-extras
+
+      - run: uv run ruff check packages/
+
+      - run: uv run pytest -q
+
+  build-python:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -82,11 +67,14 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+      - name: Configure Docker for Artifact Registry
+        env:
+          REGION: ${{ env.GCP_REGION }}
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build and push image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -102,14 +90,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
+  build-ui:
+    needs: test
     runs-on: ubuntu-latest
-    needs: [build-push]
     permissions:
       contents: read
       id-token: write
     env:
-      GKE_CLUSTER: kiln-dev-gke
       GAR_REGISTRY: asia-southeast1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/kiln
       IMAGE_TAG: ${{ github.sha }}
     steps:
@@ -121,10 +108,53 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/get-gke-credentials@v2
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        env:
+          REGION: ${{ env.GCP_REGION }}
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
-          cluster_name: kiln-dev-gke
-          location: ${{ env.GCP_REGION }}
+          context: .
+          file: docker/Dockerfile.nextjs.prod
+          tags: |
+            ${{ env.GAR_REGISTRY }}/registry-ui:${{ env.IMAGE_TAG }}
+            ${{ env.GAR_REGISTRY }}/registry-ui:latest
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: [build-python, build-ui]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GAR_REGISTRY: asia-southeast1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/kiln
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GKE credentials
+        env:
+          CLUSTER: ${{ env.GKE_CLUSTER }}
+          ZONE: ${{ env.GKE_ZONE }}
+          PROJECT: ${{ vars.GCP_PROJECT }}
+        run: gcloud container clusters get-credentials "$CLUSTER" --zone "$ZONE" --project "$PROJECT"
 
       - name: Install Tanka + Jsonnet Bundler
         run: |
@@ -137,21 +167,34 @@ jobs:
         working-directory: infra/tanka
         run: jb install
 
+      - name: Verify secrets exist
+        run: kubectl get secret kiln-secrets -n kiln
+
       - name: Deploy with Tanka
         working-directory: infra/tanka
         env:
           TK_IMAGE_REGISTRY: ${{ env.GAR_REGISTRY }}
           TK_IMAGE_TAG: ${{ env.IMAGE_TAG }}
-          TK_REGISTRY_DB: ${{ secrets.REGISTRY_DB_CONNECTION }}
-          TK_CHAT_DB: ${{ secrets.CHAT_DB_CONNECTION }}
           TK_GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
           TK_WORKLOAD_SA: ${{ secrets.WORKLOAD_SA }}
+          TK_INGRESS_IP: ${{ secrets.INGRESS_IP }}
+          TK_INGRESS_IP_NAME: ${{ secrets.INGRESS_IP_NAME }}
+          TK_PG_BACKUP_BUCKET: ${{ secrets.PG_BACKUP_BUCKET }}
         run: |
           tk apply environments/default \
             --ext-str IMAGE_REGISTRY="$TK_IMAGE_REGISTRY" \
             --ext-str IMAGE_TAG="$TK_IMAGE_TAG" \
-            --ext-str REGISTRY_DB_CONNECTION="$TK_REGISTRY_DB" \
-            --ext-str CHAT_DB_CONNECTION="$TK_CHAT_DB" \
             --ext-str GCS_BUCKET="$TK_GCS_BUCKET" \
             --ext-str WORKLOAD_SA="$TK_WORKLOAD_SA" \
+            --ext-str INGRESS_IP="$TK_INGRESS_IP" \
+            --ext-str INGRESS_IP_NAME="$TK_INGRESS_IP_NAME" \
+            --ext-str PG_BACKUP_BUCKET="$TK_PG_BACKUP_BUCKET" \
             --dangerous-auto-approve
+
+      - name: Verify rollouts
+        run: |
+          kubectl rollout status deployment/registry-api -n kiln --timeout=120s
+          kubectl rollout status deployment/chat-backend -n kiln --timeout=120s
+          kubectl rollout status deployment/mcp-server -n kiln --timeout=120s
+          kubectl rollout status deployment/synthesis-service -n kiln --timeout=120s
+          kubectl rollout status deployment/registry-ui -n kiln --timeout=120s
