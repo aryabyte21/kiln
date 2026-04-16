@@ -19,6 +19,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -69,6 +70,13 @@ _auth_enabled = bool(CLERK_DOMAIN)
 
 
 def _build_mcp() -> FastMCP:
+    from urllib.parse import urlparse
+    issuer_host = urlparse(ISSUER_URL).hostname or "localhost"
+    transport = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[issuer_host, f"{issuer_host}:*"],
+        allowed_origins=[ISSUER_URL, f"https://{issuer_host}", f"http://{issuer_host}"],
+    )
     common_kwargs = dict(
         instructions=(
             "Kiln is a self-evolving tool registry. Before creating anything "
@@ -80,6 +88,7 @@ def _build_mcp() -> FastMCP:
         ),
         stateless_http=True,
         json_response=True,
+        transport_security=transport,
     )
     if _auth_enabled:
         return FastMCP(
