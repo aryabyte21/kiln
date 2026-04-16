@@ -20,9 +20,11 @@ local k = import 'k.libsonnet';
 
   redis_deployment:
     deployment.new('redis', replicas=1, containers=[redisContainer])
-    + deployment.metadata.withNamespace($._config.namespace),
+    + deployment.metadata.withNamespace($._config.namespace)
+    + deployment.spec.template.metadata.withLabels({ app: 'redis' })
+    + deployment.spec.selector.withMatchLabels({ app: 'redis' }),
 
   redis_service:
-    service.new('redis', { name: 'redis' }, [{ port: 6379, targetPort: 6379 }])
+    service.new('redis', { app: 'redis' }, [{ port: 6379, targetPort: 6379 }])
     + service.metadata.withNamespace($._config.namespace),
 }

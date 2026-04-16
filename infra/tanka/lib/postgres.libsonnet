@@ -35,10 +35,12 @@ local k = import 'k.libsonnet';
   postgres_statefulset:
     statefulSet.new('postgres', replicas=1, containers=[pgContainer], volumeClaims=[pgPvc])
     + statefulSet.metadata.withNamespace($._config.namespace)
-    + statefulSet.spec.withServiceName('postgres'),
+    + statefulSet.spec.withServiceName('postgres')
+    + statefulSet.spec.template.metadata.withLabels({ app: 'postgres' })
+    + statefulSet.spec.selector.withMatchLabels({ app: 'postgres' }),
 
   postgres_service:
-    service.new('postgres', { name: 'postgres' }, [{ port: 5432, targetPort: 5432 }])
+    service.new('postgres', { app: 'postgres' }, [{ port: 5432, targetPort: 5432 }])
     + service.metadata.withNamespace($._config.namespace)
     + service.spec.withClusterIP('None'),
 }

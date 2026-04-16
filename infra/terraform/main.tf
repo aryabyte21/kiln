@@ -253,7 +253,7 @@ resource "google_project_iam_member" "workload_ar_reader" {
 # ── IAM — CI/CD Service Account ───────────────────────────────────────────────
 
 resource "google_service_account" "github_ci" {
-  account_id   = "github-ci"
+  account_id   = "${local.name_prefix}-github-ci"
   display_name = "GitHub Actions CI/CD"
 }
 

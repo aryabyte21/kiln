@@ -133,11 +133,12 @@ local volumeMount = k.core.v1.volumeMount;
       + container.withPorts([k.core.v1.containerPort.new(3001)])
       + container.withEnvMixin([
         k.core.v1.envVar.new('GF_SERVER_HTTP_PORT', '3001'),
-        k.core.v1.envVar.new('GF_SECURITY_ADMIN_PASSWORD', 'kiln-admin'),
+        k.core.v1.envVar.fromSecretRef('GF_SECURITY_ADMIN_PASSWORD', 'kiln-secrets', 'GRAFANA_PASSWORD'),
       ])
       + container.withVolumeMountsMixin([
         volumeMount.new('datasources', '/etc/grafana/provisioning/datasources'),
         volumeMount.new('dashboards-provider', '/etc/grafana/provisioning/dashboards'),
+        volumeMount.new('dashboards', '/var/lib/grafana/dashboards'),
       ])
       + container.resources.withRequests({ cpu: '50m', memory: '128Mi' })
       + container.resources.withLimits({ cpu: '250m', memory: '256Mi' });
@@ -147,6 +148,7 @@ local volumeMount = k.core.v1.volumeMount;
     + deployment.spec.template.spec.withVolumesMixin([
       volume.fromConfigMap('datasources', 'grafana-datasources'),
       volume.fromConfigMap('dashboards-provider', 'grafana-dashboards-provider'),
+      volume.withName('dashboards') + volume.emptyDir.withMedium(''),
     ]),
 
   grafana_service:
