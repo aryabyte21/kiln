@@ -342,6 +342,17 @@ See `docs/infrastructure-report.md` for full deployment documentation.
 
 Kiln is a **CS5224 Cloud Computing** project at NUS (AY2025/26 Semester 2). See `docs/Final-Report.md` for the submission report and `docs/infrastructure-report.md` for deployment architecture.
 
+## AI Declaration
+
+AI tools were used to accelerate development and enforce code quality:
+
+- **Code Review**: Gemini Code Assist, GitHub Copilot, and Cubic reviewed every PR, catching issues like non-atomic Redis locks, Kubernetes selector mismatches, and env var expansion bugs before they reached production.
+- **Documentation**: AI assisted in drafting infrastructure reports and deployment plans, which were reviewed and corrected by the team.
+
+All architectural decisions, deployment debugging, and cost tradeoffs were made by the team.
+
+---
+
 ## License
 
 Apache 2.0
