@@ -216,7 +216,7 @@ function Hero({ toolCount }: { toolCount: number }) {
           </Show>
           <Show when={"signed-out"}>
             <Magnetic>
-              <SignUpButton>
+              <SignUpButton mode="modal" forceRedirectUrl="/chat" signInForceRedirectUrl="/chat">
                 <Button
                   size="lg"
                   className="group h-12 gap-2 rounded-2xl bg-primary px-6 text-[14px] font-semibold text-primary-foreground shadow-[0_18px_40px_-12px_hsl(26_92%_58%_/_0.55)] transition-all hover:bg-primary/95 hover:shadow-[0_24px_48px_-10px_hsl(26_92%_58%_/_0.6)]"
@@ -703,7 +703,7 @@ function FinalCta() {
           </Show>
           <Show when={"signed-out"}>
             <Magnetic>
-              <SignUpButton>
+              <SignUpButton mode="modal" forceRedirectUrl="/chat" signInForceRedirectUrl="/chat">
                 <Button
                   size="lg"
                   className="h-12 gap-2 rounded-2xl bg-primary px-7 text-[14px] font-semibold text-primary-foreground shadow-[0_18px_44px_-12px_hsl(26_92%_58%_/_0.55)] transition-all hover:bg-primary/95"
