@@ -70,11 +70,54 @@ def _validate_spec(spec_path: Path) -> str | None:
     return None
 
 
+def _prepare_venv(workspace: Path, deps: list[str]) -> Path:
+    """Create an isolated venv in the workspace and install deps into it.
+
+    Returns the path to the venv's Python executable. Using a per-job venv
+    prevents version conflicts between concurrent synthesis jobs and avoids
+    polluting the container's global environment.
+    """
+    venv_dir = workspace / ".venv"
+    venv_python = venv_dir / "bin" / "python"
+
+    # Create venv if it doesn't exist yet
+    if not venv_python.exists():
+        result = subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_dir)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            logger.warning("venv creation failed, falling back to global env: %s", result.stderr.strip())
+            return Path(sys.executable)
+
+    if deps:
+        logger.info("Installing declared dependencies into job venv: %s", deps)
+        result = subprocess.run(
+            [str(venv_python), "-m", "pip", "install", "--quiet", *deps],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            logger.warning("Dependency install failed (deps=%s): %s", deps, result.stderr.strip()[-300:])
+
+    return venv_python
+
+
 def _validate_impl(impl_path: Path, tool_name: str) -> str | None:
     """Run import test and basic functional test. Returns error string or None."""
+    # Install declared dependencies into an isolated per-job venv
+    spec_path = impl_path.parent / "spec.yaml"
+    python_exe = sys.executable
+    if spec_path.exists():
+        try:
+            raw = yaml.safe_load(spec_path.read_text())
+            deps = raw.get("implementation", {}).get("dependencies", [])
+            python_exe = str(_prepare_venv(impl_path.parent, deps))
+        except Exception as exc:
+            logger.warning("Failed to prepare venv: %s", exc)
+
     # Step 1: Import test
     import_cmd = [
-        sys.executable, "-c",
+        python_exe, "-c",
         f"from impl import {tool_name}; print('Import OK')",
     ]
     try:
@@ -93,7 +136,7 @@ def _validate_impl(impl_path: Path, tool_name: str) -> str | None:
 
     # Step 2: Check the function is callable and returns a dict
     func_test_cmd = [
-        sys.executable, "-c",
+        python_exe, "-c",
         f"from impl import {tool_name}; r = {tool_name}(); "
         f"assert isinstance(r, dict), f'Expected dict, got {{type(r).__name__}}'; "
         f"print('Functional OK')",
