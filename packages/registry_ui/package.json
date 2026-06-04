@@ -14,7 +14,7 @@
   "dependencies": {
     "@ai-sdk/react": "^3.0.143",
     "@base-ui/react": "^1.3.0",
-    "@clerk/clerk-react": "^5.61.4",
+    "@clerk/clerk-react": "^5.61.8",
     "@clerk/nextjs": "^7.0.7",
     "@clerk/themes": "^2.4.57",
     "@fontsource-variable/geist": "^5.2.8",
@@ -44,7 +44,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.13.2",
+    "react-router-dom": "^7.16.0",
     "shadcn": "^4.1.1",
     "shiki": "^4.0.2",
     "streamdown": "^2.5.0",
